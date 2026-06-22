@@ -42,6 +42,22 @@ class AuditoriaRepository {
     const data = this.db.prepare(query).all(...queryParams);
     return { data, pagination: { page, limit, total, totalPages: Math.ceil(total / limit) } };
   }
+
+  // Cantidad de acciones por usuario en un período: para el Informe de Empalme, da una idea de
+  // quién operó el sistema mientras estuvo a cargo, sin tener que revisar el detalle fila por fila.
+  getResumenPorUsuario(fechaDesde = '', fechaHasta = '') {
+    let query = `
+      SELECT COALESCE(u.nombre_completo, 'Usuario eliminado') as nombre_completo, COUNT(*) as cantidad
+      FROM auditoria a
+      LEFT JOIN usuarios u ON u.id = a.usuario_id
+      WHERE 1=1
+    `;
+    const params = [];
+    if (fechaDesde) { query += ' AND date(a.fecha_accion) >= ?'; params.push(fechaDesde); }
+    if (fechaHasta) { query += ' AND date(a.fecha_accion) <= ?'; params.push(fechaHasta); }
+    query += ' GROUP BY a.usuario_id ORDER BY cantidad DESC';
+    return this.db.prepare(query).all(...params);
+  }
 }
 
 module.exports = AuditoriaRepository;

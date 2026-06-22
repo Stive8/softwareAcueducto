@@ -14,7 +14,26 @@ class ExcelExportService {
     workbook.creator = 'Sistema Administrativo Acueducto Veredal';
     workbook.created = new Date();
 
-    if (reporte.tipo === 'resumen') {
+    if (reporte.tipo === 'compuesto') {
+      // Una hoja por cada parte del informe (cartera, balance, resultados, flujo, auditoría),
+      // con el título de la parte como nombre de hoja (Excel exige nombres únicos y cortos).
+      const nombresUsados = new Set();
+      reporte.partes.forEach(parte => {
+        let nombre = parte.titulo.substring(0, 31);
+        let sufijo = 2;
+        while (nombresUsados.has(nombre)) {
+          nombre = `${parte.titulo.substring(0, 28)} ${sufijo}`;
+          sufijo++;
+        }
+        nombresUsados.add(nombre);
+
+        if (parte.tipo === 'resumen') {
+          this.construirHojaResumen(workbook, { ...parte, titulo: nombre });
+        } else {
+          this.construirHojaTabla(workbook, { ...parte, titulo: nombre });
+        }
+      });
+    } else if (reporte.tipo === 'resumen') {
       this.construirHojaResumen(workbook, reporte);
     } else {
       this.construirHojaTabla(workbook, reporte);
@@ -82,12 +101,12 @@ class ExcelExportService {
 
       seccion.items.forEach(item => {
         const row = sheet.addRow([item.label, item.valor]);
-        row.getCell(2).numFmt = '$ #,##0';
+        if (item.tipo !== 'numero') row.getCell(2).numFmt = '$ #,##0';
       });
 
       const totalRow = sheet.addRow([`Total ${seccion.titulo}`, seccion.total]);
       totalRow.font = { bold: true };
-      totalRow.getCell(2).numFmt = '$ #,##0';
+      if (seccion.tipoValor !== 'numero') totalRow.getCell(2).numFmt = '$ #,##0';
 
       sheet.addRow([]);
     });

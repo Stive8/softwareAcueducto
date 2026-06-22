@@ -10,6 +10,8 @@ const Dashboard = {
         <p>Resumen general del sistema</p>
       </div>
       
+      <div id="alertasContainer"></div>
+
       <div class="stats-grid" id="stats-grid">
         <div class="stat-card">
           <div class="stat-card-header">
@@ -35,6 +37,7 @@ const Dashboard = {
       const response = await window.api.dashboard.getStats();
       
       if (response.success) {
+        this.renderAlertas(response.data);
         this.renderStats(response.data);
       } else {
         console.error('Error al cargar estadísticas:', response.error);
@@ -42,6 +45,27 @@ const Dashboard = {
     } catch (error) {
       console.error('Error:', error);
     }
+  },
+
+  renderAlertas(stats) {
+    const container = document.getElementById('alertasContainer');
+    const sinTarifa = stats.categoriasSinTarifa || [];
+
+    if (sinTarifa.length === 0) {
+      container.innerHTML = '';
+      return;
+    }
+
+    container.innerHTML = `
+      <div style="padding: 14px 18px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 6px; margin-bottom: 24px;">
+        <p style="margin: 0; font-size: 0.9rem; color: #92400e;">
+          <strong>⚠️ Categorías sin tarifa configurada:</strong>
+          ${sinTarifa.map(c => c.nombre).join(', ')}.
+          No se podrán registrar pagos de sostenimiento para cuentas de estas categorías hasta que les asigne una tarifa
+          (Categorías → Ver Historial de Tarifas → Nueva Tarifa).
+        </p>
+      </div>
+    `;
   },
 
   renderStats(stats) {

@@ -1,5 +1,10 @@
 const ReporteRepository = require('../repositories/ReporteRepository');
 const CajaRepository = require('../repositories/CajaRepository');
+const AuditoriaRepository = require('../repositories/AuditoriaRepository');
+
+function formatValorResumen(item) {
+  return item.tipo === 'numero' ? String(item.valor) : `$${formatNumber(item.valor)}`;
+}
 
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -32,6 +37,7 @@ class ReporteService {
   constructor(dbService) {
     this.repository = new ReporteRepository(dbService);
     this.cajaRepository = new CajaRepository(dbService);
+    this.auditoriaRepository = new AuditoriaRepository(dbService);
   }
 
   // Devuelve un objeto estructurado { tipo: 'tabla'|'resumen', titulo, columnas, filas, secciones }
@@ -66,6 +72,8 @@ class ReporteService {
         return this.reporteFlujoCaja(params);
       case 'libro_diario':
         return this.reporteLibroDiario(params);
+      case 'informe_empalme':
+        return this.reporteInformeEmpalme(params);
       default:
         throw new Error('Tipo de reporte no reconocido');
     }
@@ -381,11 +389,83 @@ class ReporteService {
     };
   }
 
+  // Informe de Empalme: pensado para la rotación de junta directiva (tesorero entrante/saliente).
+  // Reúne en un solo documento lo que normalmente habría que armar a mano juntando varios
+  // reportes: estado de la cartera, balance, resultados del período, flujo de caja y quién operó
+  // el sistema mientras estuvo a cargo. No es un reporte nuevo de cero: reutiliza los existentes.
+  reporteInformeEmpalme({ fechaDesde = '', fechaHasta = '' } = {}) {
+    const cartera = this.procesarEstadoCuentas();
+    const alDia = cartera.filter(c => c.meses_mora === 0).length;
+    const enMora = cartera.filter(c => c.meses_mora > 0).length;
+    const conSaldoFavor = this.repository.getCuentasConSaldoAFavor().length;
+
+    const balance = this.reporteBalanceGeneral();
+    const resultados = this.reporteEstadoResultados({ fechaDesde, fechaHasta });
+    const flujo = this.reporteFlujoCaja({ fechaDesde, fechaHasta });
+    const actividadUsuarios = this.auditoriaRepository.getResumenPorUsuario(fechaDesde, fechaHasta);
+
+    return {
+      tipo: 'compuesto',
+      titulo: 'Informe de Empalme',
+      periodo: { fechaDesde, fechaHasta },
+      partes: [
+        {
+          titulo: 'Resumen de Cartera (estado actual)',
+          tipo: 'resumen',
+          secciones: [{
+            titulo: 'Cuentas',
+            tipoValor: 'numero',
+            items: [
+              { label: 'Total de cuentas activas', valor: cartera.length, tipo: 'numero' },
+              { label: 'Al día', valor: alDia, tipo: 'numero' },
+              { label: 'En mora', valor: enMora, tipo: 'numero' },
+              { label: 'Con saldo a favor', valor: conSaldoFavor, tipo: 'numero' }
+            ],
+            total: cartera.length
+          }]
+        },
+        {
+          titulo: 'Balance General (al cierre)',
+          tipo: 'resumen',
+          secciones: balance.secciones
+        },
+        {
+          titulo: `Estado de Resultados del Período (${fechaDesde || 'inicio'} a ${fechaHasta || 'hoy'})`,
+          tipo: 'resumen',
+          secciones: resultados.secciones
+        },
+        {
+          titulo: 'Flujo de Caja del Período',
+          tipo: 'resumen',
+          secciones: flujo.secciones
+        },
+        {
+          titulo: 'Actividad de Usuarios en el Período',
+          tipo: 'resumen',
+          secciones: [{
+            titulo: 'Acciones registradas en auditoría',
+            tipoValor: 'numero',
+            items: actividadUsuarios.map(u => ({ label: u.nombre_completo, valor: u.cantidad, tipo: 'numero' })),
+            total: actividadUsuarios.reduce((s, u) => s + u.cantidad, 0)
+          }]
+        }
+      ]
+    };
+  }
+
   // --- Generación de HTML imprimible (para exportar a PDF) ---
 
   generarHTML(tipoReporte, params = {}) {
     const reporte = this.getReporte(tipoReporte, params);
-    const cuerpo = reporte.tipo === 'resumen' ? this.renderResumenHTML(reporte) : this.renderTablaHTML(reporte);
+    let cuerpo;
+    if (reporte.tipo === 'compuesto') {
+      cuerpo = reporte.partes.map(parte => `
+        <h2 style="color:#1e40af; font-size:16px; margin: 24px 0 8px 0; border-bottom: 2px solid #1e40af; padding-bottom: 6px;">${escapeHtml(parte.titulo)}</h2>
+        ${parte.tipo === 'resumen' ? this.renderResumenHTML(parte) : this.renderTablaHTML(parte)}
+      `).join('');
+    } else {
+      cuerpo = reporte.tipo === 'resumen' ? this.renderResumenHTML(reporte) : this.renderTablaHTML(reporte);
+    }
 
     return `
 <!DOCTYPE html>
@@ -462,9 +542,9 @@ class ReporteService {
       <div class="resumen-section">
         <h3>${escapeHtml(seccion.titulo)}</h3>
         ${seccion.items.map(item => `
-          <div class="resumen-row"><span>${escapeHtml(item.label)}</span><span>$${formatNumber(item.valor)}</span></div>
+          <div class="resumen-row"><span>${escapeHtml(item.label)}</span><span>${formatValorResumen(item)}</span></div>
         `).join('')}
-        <div class="resumen-total"><span>Total ${escapeHtml(seccion.titulo)}</span><span>$${formatNumber(seccion.total)}</span></div>
+        <div class="resumen-total"><span>Total ${escapeHtml(seccion.titulo)}</span><span>${formatValorResumen({ valor: seccion.total, tipo: seccion.tipoValor })}</span></div>
       </div>
     `).join('');
   }
