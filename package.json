@@ -1,0 +1,64 @@
+{
+  "name": "acueducto-admin",
+  "version": "1.0.0",
+  "description": "Sistema Administrativo para Acueductos Veredales",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "rebuild": "electron-rebuild -f -w better-sqlite3",
+    "icon": "node scripts/generate-icon.js",
+    "dist": "npm run rebuild && electron-builder --win"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@electron/rebuild": "^4.x",
+    "electron": "^38.0.0",
+    "electron-builder": "^26.15.3"
+  },
+  "dependencies": {
+    "better-sqlite3": "^12.11.1",
+    "chart.js": "^4.4.1",
+    "exceljs": "^4.4.0"
+  },
+  "build": {
+    "appId": "com.acueducto.admin",
+    "productName": "Acueducto Admin",
+    "copyright": "Copyright © 2026",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "src/**/*",
+      "assets/**/*",
+      "node_modules/**/*",
+      "!node_modules/**/*.{md,markdown}",
+      "!node_modules/**/test/**",
+      "!node_modules/**/*.map"
+    ],
+    "asarUnpack": [
+      "node_modules/better-sqlite3/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Acueducto Admin"
+    }
+  }
+}

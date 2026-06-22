@@ -1,0 +1,3 @@
+@echo off
+echo Iniciando Sistema Acueducto Veredal...
+call npm start

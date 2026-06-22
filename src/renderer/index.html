@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sistema Administrativo - Acueducto Veredal</title>
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <div id="loginScreen" class="login-screen">
+    <div class="login-card">
+      <div class="login-header">
+        <h1>Acueducto</h1>
+        <p>Sistema Administrativo</p>
+      </div>
+
+      <div id="loginError"></div>
+
+      <form id="loginForm">
+        <div class="form-group">
+          <label for="loginUsuario">Usuario</label>
+          <input type="text" id="loginUsuario" name="loginUsuario" autocomplete="username" required>
+        </div>
+
+        <div class="form-group">
+          <label for="loginPassword">Contraseña</label>
+          <input type="password" id="loginPassword" name="loginPassword" autocomplete="current-password" required>
+        </div>
+
+        <button type="submit" class="btn btn-primary" style="width: 100%;">Ingresar</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="app-container" id="appContainer" style="display: none;">
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <h2>Acueducto</h2>
+      </div>
+      <nav class="sidebar-nav">
+        <a href="#" class="nav-item active" data-page="dashboard">
+          <span class="icon">📊</span>
+          <span>Dashboard</span>
+        </a>
+        <a href="#" class="nav-item" data-page="cuentas">
+          <span class="icon">🏠</span>
+          <span>Cuentas</span>
+        </a>
+        <a href="#" class="nav-item" data-page="propietarios">
+          <span class="icon">👤</span>
+          <span>Propietarios</span>
+        </a>
+        <a href="#" class="nav-item" data-page="categorias">
+          <span class="icon">📋</span>
+          <span>Categorías</span>
+        </a>
+        <a href="#" class="nav-item" data-page="pagos">
+          <span class="icon">💰</span>
+          <span>Pagos</span>
+        </a>
+        <a href="#" class="nav-item" data-page="recibos">
+          <span class="icon">📄</span>
+          <span>Recibos</span>
+        </a>
+        <a href="#" class="nav-item" data-page="gastos">
+          <span class="icon">💸</span>
+          <span>Gastos</span>
+        </a>
+        <a href="#" class="nav-item" data-page="caja">
+          <span class="icon">🏦</span>
+          <span>Caja/Banco</span>
+        </a>
+        <a href="#" class="nav-item" data-page="nuevospuntos">
+          <span class="icon">🔧</span>
+          <span>Nuevos Puntos</span>
+        </a>
+        <a href="#" class="nav-item" data-page="reportes">
+          <span class="icon">📑</span>
+          <span>Reportes</span>
+        </a>
+        <a href="#" class="nav-item" data-page="configuracion">
+          <span class="icon">⚙️</span>
+          <span>Configuración</span>
+        </a>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-user" id="sidebarUser"></div>
+        <button class="btn btn-secondary" id="btnLogout" style="width: 100%;">Cerrar Sesión</button>
+      </div>
+    </aside>
+
+    <main class="main-content">
+      <div id="page-content"></div>
+    </main>
+  </div>
+
+  <div id="modal" class="modal">
+    <div class="modal-content">
+      <span class="modal-close">&times;</span>
+      <div id="modal-body"></div>
+    </div>
+  </div>
+
+  <div id="toastContainer" class="toast-container"></div>
+
+  <script src="../../../node_modules/chart.js/dist/chart.umd.js"></script>
+  <script src="js/app.js"></script>
+  <script src="js/dashboard.js"></script>
+  <script src="js/cuentas.js"></script>
+  <script src="js/propietarios.js"></script>
+  <script src="js/categorias.js"></script>
+  <script src="js/pagos.js"></script>
+  <script src="js/recibos.js"></script>
+  <script src="js/gastos.js"></script>
+  <script src="js/caja.js"></script>
+  <script src="js/configuracion.js"></script>
+  <script src="js/nuevospuntos.js"></script>
+  <script src="js/reportes.js"></script>
+</body>
+</html>

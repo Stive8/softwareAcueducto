@@ -1,0 +1,166 @@
+class CuentaRepository {
+  constructor(dbService) {
+    this.db = dbService.getDb();
+  }
+
+  findAll(params = {}) {
+    const { page = 1, limit = 10, search = '', estado = '', categoria = '' } = params;
+    const offset = (page - 1) * limit;
+
+    let query = `
+      SELECT 
+        c.id,
+        c.codigo,
+        c.direccion,
+        c.estado,
+        c.observaciones,
+        c.fecha_creacion,
+        c.fecha_actualizacion,
+        cat.nombre as categoria_actual,
+        p.nombre_completo as propietario_actual
+      FROM cuentas c
+      LEFT JOIN cuenta_categorias cc ON cc.cuenta_id = c.id AND cc.fecha_fin IS NULL
+      LEFT JOIN categorias cat ON cat.id = cc.categoria_id
+      LEFT JOIN cuenta_propietarios cp ON cp.cuenta_id = c.id AND cp.fecha_fin IS NULL
+      LEFT JOIN propietarios p ON p.id = cp.propietario_id
+      WHERE 1=1
+    `;
+    const queryParams = [];
+
+    if (search) {
+      query += ' AND (c.codigo LIKE ? OR c.direccion LIKE ?)';
+      queryParams.push(`%${search}%`, `%${search}%`);
+    }
+
+    if (estado) {
+      query += ' AND c.estado = ?';
+      queryParams.push(estado);
+    }
+
+    if (categoria) {
+      query += ' AND cat.nombre = ?';
+      queryParams.push(categoria);
+    }
+
+    const countQuery = `
+      SELECT COUNT(DISTINCT c.id) as total
+      FROM cuentas c
+      LEFT JOIN cuenta_categorias cc ON cc.cuenta_id = c.id AND cc.fecha_fin IS NULL
+      LEFT JOIN categorias cat ON cat.id = cc.categoria_id
+      WHERE 1=1 
+      ${search ? ' AND (c.codigo LIKE ? OR c.direccion LIKE ?)' : ''}
+      ${estado ? ' AND c.estado = ?' : ''}
+      ${categoria ? ' AND cat.nombre = ?' : ''}
+    `;
+    const total = this.db.prepare(countQuery).get(...queryParams).total;
+
+    query += ' ORDER BY c.id DESC LIMIT ? OFFSET ?';
+    queryParams.push(limit, offset);
+
+    const cuentas = this.db.prepare(query).all(...queryParams);
+
+    return {
+      data: cuentas,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit)
+      }
+    };
+  }
+
+  findById(id) {
+    const query = `
+      SELECT 
+        c.*,
+        cat.nombre as categoria_actual,
+        p.nombre_completo as propietario_actual,
+        p.numero_identificacion as propietario_identificacion
+      FROM cuentas c
+      LEFT JOIN cuenta_categorias cc ON cc.cuenta_id = c.id AND cc.fecha_fin IS NULL
+      LEFT JOIN categorias cat ON cat.id = cc.categoria_id
+      LEFT JOIN cuenta_propietarios cp ON cp.cuenta_id = c.id AND cp.fecha_fin IS NULL
+      LEFT JOIN propietarios p ON p.id = cp.propietario_id
+      WHERE c.id = ?
+    `;
+    return this.db.prepare(query).get(id);
+  }
+
+  findByCodigo(codigo) {
+    return this.db.prepare('SELECT * FROM cuentas WHERE codigo = ?').get(codigo);
+  }
+
+  create(cuenta) {
+    const ejecutar = this.db.transaction(() => {
+      const result = this.db.prepare(`
+        INSERT INTO cuentas (codigo, direccion, estado, observaciones)
+        VALUES (?, ?, ?, ?)
+      `).run(
+        cuenta.codigo,
+        cuenta.direccion,
+        cuenta.estado || 'Activo',
+        cuenta.observaciones || null
+      );
+
+      const cuentaId = result.lastInsertRowid;
+
+      // Toda cuenta nueva inicia con un historial de categoría. Por defecto desde hoy, pero
+      // puede indicarse una fecha pasada (ej. cuenta que ya existía antes de usar el sistema)
+      // para poder cobrar retroactivamente meses anteriores a la fecha de registro en el sistema.
+      this.db.prepare(`
+        INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio)
+        VALUES (?, ?, ?)
+      `).run(cuentaId, cuenta.categoria_id, cuenta.categoria_fecha_inicio || new Date().toISOString().split('T')[0]);
+
+      return cuentaId;
+    });
+
+    return ejecutar();
+  }
+
+  update(id, cuenta) {
+    const stmt = this.db.prepare(`
+      UPDATE cuentas 
+      SET codigo = ?, direccion = ?, observaciones = ?,
+          fecha_actualizacion = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    
+    stmt.run(
+      cuenta.codigo,
+      cuenta.direccion,
+      cuenta.observaciones || null,
+      id
+    );
+  }
+
+  changeStatus(id, estado) {
+    const stmt = this.db.prepare(`
+      UPDATE cuentas 
+      SET estado = ?, fecha_actualizacion = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `);
+    
+    stmt.run(estado, id);
+  }
+
+  getStats() {
+    const stats = this.db.prepare(`
+      SELECT 
+        COUNT(*) as total,
+        SUM(CASE WHEN estado = 'Activo' THEN 1 ELSE 0 END) as activas,
+        SUM(CASE WHEN estado = 'Inactivo' THEN 1 ELSE 0 END) as inactivas,
+        SUM(CASE WHEN estado = 'Suspendido' THEN 1 ELSE 0 END) as suspendidas
+      FROM cuentas
+    `).get();
+    
+    return stats;
+  }
+
+  getCategorias() {
+    return this.db.prepare('SELECT * FROM categorias WHERE activo = 1 ORDER BY nombre').all();
+  }
+}
+
+module.exports = CuentaRepository;
