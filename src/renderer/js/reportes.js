@@ -1,4 +1,5 @@
-// Módulo de Reportes
+// Módulo de Reportes: cuentas, propietarios y estado de la cartera. Los reportes contables
+// (pagos/gastos, estados financieros, informe de empalme) viven en el módulo Contabilidad.
 const Reportes = {
   grupos: [
     {
@@ -18,30 +19,6 @@ const Reportes = {
         { tipo: 'cuentas_saldo_favor', titulo: 'Cuentas con Saldo a Favor', icon: '💳' },
         { tipo: 'nuevos_puntos', titulo: 'Estado de Nuevos Puntos', icon: '🔧' }
       ]
-    },
-    {
-      titulo: 'Pagos y Gastos',
-      reportes: [
-        { tipo: 'historial_pagos', titulo: 'Historial de Pagos', icon: '💰', rangoFecha: true, filtroCuentaContable: true },
-        { tipo: 'historial_gastos', titulo: 'Historial de Gastos', icon: '💸', rangoFecha: true, filtroCuentaContable: true },
-        { tipo: 'ingresos_periodo', titulo: 'Ingresos por Período', icon: '📈', rangoFecha: true, filtroCuentaContable: true },
-        { tipo: 'gastos_periodo', titulo: 'Gastos por Período', icon: '📉', rangoFecha: true, filtroCuentaContable: true }
-      ]
-    },
-    {
-      titulo: 'Contabilidad',
-      reportes: [
-        { tipo: 'balance_general', titulo: 'Balance General', icon: '📊' },
-        { tipo: 'estado_resultados', titulo: 'Estado de Resultados', icon: '📋', rangoFecha: true },
-        { tipo: 'flujo_caja', titulo: 'Flujo de Caja', icon: '💧', rangoFecha: true },
-        { tipo: 'libro_diario', titulo: 'Libro Diario', icon: '📖', rangoFecha: true }
-      ]
-    },
-    {
-      titulo: 'Informe de Gestión',
-      reportes: [
-        { tipo: 'informe_empalme', titulo: 'Informe de Empalme', icon: '🤝', rangoFecha: true }
-      ]
     }
   ],
 
@@ -51,7 +28,7 @@ const Reportes = {
     let html = `
       <div class="page-header">
         <h1>Reportes</h1>
-        <p>Reportes administrativos y contables simplificados, exportables a PDF y Excel</p>
+        <p>Reportes de cuentas, propietarios y estado de cartera, exportables a PDF y Excel</p>
       </div>
     `;
 
@@ -67,29 +44,6 @@ const Reportes = {
     });
 
     content.innerHTML = html;
-
-    if (this.grupos.some(g => g.reportes.some(r => r.filtroCuentaContable))) {
-      await this.cargarCuentasContables();
-    }
-  },
-
-  // Cuentas contables imputables, para los selects de filtro "Cuenta Contable" de los reportes
-  // que lo soportan. Se cargan una sola vez y se reutilizan en todos los selects de la página.
-  async cargarCuentasContables() {
-    try {
-      const response = await window.api.planCuentas.getImputables({});
-      this.cuentasContables = response.success ? response.data : [];
-    } catch (error) {
-      console.error('Error al cargar cuentas contables:', error);
-      this.cuentasContables = [];
-    }
-
-    document.querySelectorAll('[data-select-cuenta-contable]').forEach(select => {
-      select.innerHTML = `
-        <option value="">Todas las cuentas contables</option>
-        ${this.cuentasContables.map(c => `<option value="${c.id}">${c.codigo} - ${c.nombre}</option>`).join('')}
-      `;
-    });
   },
 
   renderCard(reporte, idSufijo) {
@@ -107,11 +61,6 @@ const Reportes = {
             <input type="date" id="desde_${idSufijo}" value="${inicioMesStr}">
             <input type="date" id="hasta_${idSufijo}" value="${hoy}">
           </div>
-        ` : ''}
-        ${reporte.filtroCuentaContable ? `
-          <select id="cuentaContable_${idSufijo}" data-select-cuenta-contable style="width: 100%; margin-bottom: 8px;">
-            <option value="">Todas las cuentas contables</option>
-          </select>
         ` : ''}
         <div class="reporte-card-actions">
           <button class="btn btn-secondary btn-icon" onclick="Reportes.exportar('${idSufijo}', 'pdf')">PDF</button>
@@ -133,10 +82,6 @@ const Reportes = {
     if (reporte.rangoFecha) {
       params.fechaDesde = document.getElementById(`desde_${idSufijo}`).value;
       params.fechaHasta = document.getElementById(`hasta_${idSufijo}`).value;
-    }
-
-    if (reporte.filtroCuentaContable) {
-      params.cuentaContableId = document.getElementById(`cuentaContable_${idSufijo}`).value;
     }
 
     const tipo = reporte.tipo;

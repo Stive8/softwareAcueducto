@@ -114,7 +114,6 @@ class ReporteService {
   reporteHistorialPagos({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
     const filas = this.repository.getHistorialPagos(fechaDesde, fechaHasta, cuentaContableId).map(f => ({
       ...f,
-      periodo: `${NOMBRES_MES[f.mes - 1]} ${f.anio}`,
       cuenta_contable: f.cuenta_contable_codigo ? `${f.cuenta_contable_codigo} - ${f.cuenta_contable_nombre}` : '-'
     }));
 
@@ -124,7 +123,7 @@ class ReporteService {
       columnas: [
         { key: 'cuenta', label: 'Cuenta' },
         { key: 'propietario', label: 'Propietario' },
-        { key: 'periodo', label: 'Período Pagado' },
+        { key: 'concepto', label: 'Concepto / Período' },
         { key: 'valor', label: 'Valor', tipo: 'moneda' },
         { key: 'fecha_pago', label: 'Fecha de Pago', tipo: 'fecha' },
         { key: 'numero_recibo', label: 'No. Recibo' },

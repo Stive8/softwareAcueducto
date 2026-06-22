@@ -1,50 +1,83 @@
-// Módulo de Plan de Cuentas (PUC) y Mapeo Contable.
-// Preparación para una futura contabilidad de doble partida: aquí solo se administra el
-// catálogo de cuentas y la clasificación de conceptos, sin generar asientos todavía.
-const PlanCuentas = {
-  tabActual: 'catalogo',
+// Módulo de Contabilidad: Plan de Cuentas (PUC), Mapeo de Conceptos y los reportes contables
+// (pagos/gastos, estados financieros, informe de empalme). Preparación para una futura
+// contabilidad de doble partida: aquí solo se administra el catálogo y se generan reportes,
+// sin generar asientos todavía.
+const Contabilidad = {
+  tabActual: 'plancuentas',
+
+  gruposReportes: [
+    {
+      titulo: 'Pagos y Gastos',
+      reportes: [
+        { tipo: 'historial_pagos', titulo: 'Historial de Pagos', icon: '💰', rangoFecha: true, filtroCuentaContable: true },
+        { tipo: 'historial_gastos', titulo: 'Historial de Gastos', icon: '💸', rangoFecha: true, filtroCuentaContable: true },
+        { tipo: 'ingresos_periodo', titulo: 'Ingresos por Período', icon: '📈', rangoFecha: true, filtroCuentaContable: true },
+        { tipo: 'gastos_periodo', titulo: 'Gastos por Período', icon: '📉', rangoFecha: true, filtroCuentaContable: true }
+      ]
+    },
+    {
+      titulo: 'Estados Financieros',
+      reportes: [
+        { tipo: 'balance_general', titulo: 'Balance General', icon: '📊' },
+        { tipo: 'estado_resultados', titulo: 'Estado de Resultados', icon: '📋', rangoFecha: true },
+        { tipo: 'flujo_caja', titulo: 'Flujo de Caja', icon: '💧', rangoFecha: true },
+        { tipo: 'libro_diario', titulo: 'Libro Diario', icon: '📖', rangoFecha: true }
+      ]
+    },
+    {
+      titulo: 'Informe de Gestión',
+      reportes: [
+        { tipo: 'informe_empalme', titulo: 'Informe de Empalme', icon: '🤝', rangoFecha: true }
+      ]
+    }
+  ],
 
   async load() {
     const content = document.getElementById('page-content');
     content.innerHTML = `
       <div class="page-header">
-        <h1>Plan de Cuentas</h1>
-        <p>Catálogo de cuentas contables (PUC) y clasificación de los movimientos del sistema</p>
+        <h1>Contabilidad</h1>
+        <p>Plan de cuentas, clasificación de movimientos y reportes contables</p>
       </div>
 
       <div class="table-container">
         <div class="table-header">
           <div class="table-controls" style="gap: 8px;">
-            <button class="btn btn-secondary" id="tabCatalogoBtn">Catálogo de Cuentas</button>
+            <button class="btn btn-secondary" id="tabPlanCuentasBtn">Plan de Cuentas</button>
             <button class="btn btn-secondary" id="tabMapeoBtn">Mapeo de Conceptos</button>
+            <button class="btn btn-secondary" id="tabReportesContablesBtn">Reportes Contables</button>
           </div>
         </div>
-        <div id="planCuentasBody"></div>
+        <div id="contabilidadBody"></div>
       </div>
     `;
 
-    document.getElementById('tabCatalogoBtn').addEventListener('click', () => this.mostrarTab('catalogo'));
+    document.getElementById('tabPlanCuentasBtn').addEventListener('click', () => this.mostrarTab('plancuentas'));
     document.getElementById('tabMapeoBtn').addEventListener('click', () => this.mostrarTab('mapeo'));
+    document.getElementById('tabReportesContablesBtn').addEventListener('click', () => this.mostrarTab('reportes'));
 
-    await this.mostrarTab('catalogo');
+    await this.mostrarTab('plancuentas');
   },
 
   async mostrarTab(tab) {
     this.tabActual = tab;
-    document.getElementById('tabCatalogoBtn').className = tab === 'catalogo' ? 'btn btn-primary' : 'btn btn-secondary';
+    document.getElementById('tabPlanCuentasBtn').className = tab === 'plancuentas' ? 'btn btn-primary' : 'btn btn-secondary';
     document.getElementById('tabMapeoBtn').className = tab === 'mapeo' ? 'btn btn-primary' : 'btn btn-secondary';
+    document.getElementById('tabReportesContablesBtn').className = tab === 'reportes' ? 'btn btn-primary' : 'btn btn-secondary';
 
-    if (tab === 'catalogo') {
+    if (tab === 'plancuentas') {
       await this.loadCatalogo();
-    } else {
+    } else if (tab === 'mapeo') {
       await this.loadMapeo();
+    } else {
+      await this.loadReportesContables();
     }
   },
 
-  // --- Catálogo de Cuentas ---
+  // --- Catálogo de Cuentas (Plan de Cuentas) ---
 
   async loadCatalogo() {
-    const body = document.getElementById('planCuentasBody');
+    const body = document.getElementById('contabilidadBody');
     body.innerHTML = `
       <div style="padding: 16px 20px; display: flex; justify-content: flex-end;">
         <button class="btn btn-primary" id="btnNuevaCuenta">+ Nueva Cuenta</button>
@@ -101,8 +134,8 @@ const PlanCuentas = {
               <td><span class="badge badge-${c.activo ? 'activo' : 'inactivo'}">${c.activo ? 'Activa' : 'Inactiva'}</span></td>
               <td>
                 <div class="table-actions">
-                  <button class="btn btn-secondary btn-icon" onclick="PlanCuentas.showFormModal(${c.id})">Editar</button>
-                  <button class="btn btn-${c.activo ? 'warning' : 'info'} btn-icon" onclick="PlanCuentas.toggleActivo(${c.id})">${c.activo ? 'Desactivar' : 'Activar'}</button>
+                  <button class="btn btn-secondary btn-icon" onclick="Contabilidad.showFormModal(${c.id})">Editar</button>
+                  <button class="btn btn-${c.activo ? 'warning' : 'info'} btn-icon" onclick="Contabilidad.toggleActivo(${c.id})">${c.activo ? 'Desactivar' : 'Activar'}</button>
                 </div>
               </td>
             </tr>
@@ -139,7 +172,7 @@ const PlanCuentas = {
         </div>
         <div class="form-group">
           <label for="tipo">Tipo <span style="color: #ef4444;">*</span></label>
-          <select id="tipo" name="tipo" required ${!id && padres.length ? '' : ''}>
+          <select id="tipo" name="tipo" required>
             ${['Activo', 'Pasivo', 'Patrimonio', 'Ingreso', 'Gasto', 'Costo'].map(t =>
               `<option value="${t}" ${cuenta?.tipo === t ? 'selected' : ''}>${t}</option>`
             ).join('')}
@@ -233,7 +266,7 @@ const PlanCuentas = {
   // --- Mapeo de Conceptos Contables ---
 
   async loadMapeo() {
-    const body = document.getElementById('planCuentasBody');
+    const body = document.getElementById('contabilidadBody');
     body.innerHTML = `
       <div style="padding: 16px 20px;">
         <p style="color: #64748b; font-size: 0.875rem; margin: 0;">
@@ -284,7 +317,7 @@ const PlanCuentas = {
               <td>${m.concepto === '__default__' ? '<em>Por defecto (cualquier otro)</em>' : m.concepto}</td>
               <td><code>${m.cuenta_codigo}</code> - ${m.cuenta_nombre}</td>
               <td>
-                <button class="btn btn-secondary btn-icon" onclick="PlanCuentas.showCambiarMapeoModal('${m.modulo}', '${m.concepto}')">Cambiar</button>
+                <button class="btn btn-secondary btn-icon" onclick="Contabilidad.showCambiarMapeoModal('${m.modulo}', '${m.concepto}')">Cambiar</button>
               </td>
             </tr>
           `).join('')}
@@ -342,5 +375,115 @@ const PlanCuentas = {
         document.getElementById('formError').innerHTML = '<div class="error-message">Error al guardar el mapeo</div>';
       }
     });
+  },
+
+  // --- Reportes Contables ---
+
+  async loadReportesContables() {
+    const body = document.getElementById('contabilidadBody');
+
+    let html = '';
+    this.gruposReportes.forEach((grupo, gi) => {
+      html += `
+        <div style="padding: 16px 20px;">
+          <h3 style="margin: 0 0 12px 0; color: #334155; font-size: 1rem;">${grupo.titulo}</h3>
+          <div class="reportes-grid">
+            ${grupo.reportes.map((r, ri) => this.renderCard(r, `${gi}_${ri}`)).join('')}
+          </div>
+        </div>
+      `;
+    });
+
+    body.innerHTML = html;
+
+    if (this.gruposReportes.some(g => g.reportes.some(r => r.filtroCuentaContable))) {
+      await this.cargarCuentasContables();
+    }
+  },
+
+  // Cuentas contables imputables, para los selects de filtro "Cuenta Contable" de los reportes
+  // que lo soportan. Se cargan una sola vez y se reutilizan en todos los selects de la página.
+  async cargarCuentasContables() {
+    try {
+      const response = await window.api.planCuentas.getImputables({});
+      this.cuentasContables = response.success ? response.data : [];
+    } catch (error) {
+      console.error('Error al cargar cuentas contables:', error);
+      this.cuentasContables = [];
+    }
+
+    document.querySelectorAll('[data-select-cuenta-contable]').forEach(select => {
+      select.innerHTML = `
+        <option value="">Todas las cuentas contables</option>
+        ${this.cuentasContables.map(c => `<option value="${c.id}">${c.codigo} - ${c.nombre}</option>`).join('')}
+      `;
+    });
+  },
+
+  renderCard(reporte, idSufijo) {
+    const hoy = new Date().toISOString().split('T')[0];
+    const inicioMes = new Date();
+    inicioMes.setDate(1);
+    const inicioMesStr = inicioMes.toISOString().split('T')[0];
+
+    return `
+      <div class="reporte-card">
+        <div class="reporte-card-icon">${reporte.icon}</div>
+        <div class="reporte-card-titulo">${reporte.titulo}</div>
+        ${reporte.rangoFecha ? `
+          <div class="reporte-card-fechas">
+            <input type="date" id="desde_${idSufijo}" value="${inicioMesStr}">
+            <input type="date" id="hasta_${idSufijo}" value="${hoy}">
+          </div>
+        ` : ''}
+        ${reporte.filtroCuentaContable ? `
+          <select id="cuentaContable_${idSufijo}" data-select-cuenta-contable style="width: 100%; margin-bottom: 8px;">
+            <option value="">Todas las cuentas contables</option>
+          </select>
+        ` : ''}
+        <div class="reporte-card-actions">
+          <button class="btn btn-secondary btn-icon" onclick="Contabilidad.exportarReporte('${idSufijo}', 'pdf')">PDF</button>
+          <button class="btn btn-success btn-icon" onclick="Contabilidad.exportarReporte('${idSufijo}', 'excel')">Excel</button>
+        </div>
+      </div>
+    `;
+  },
+
+  obtenerReportePorSufijo(idSufijo) {
+    const [gi, ri] = idSufijo.split('_').map(Number);
+    return this.gruposReportes[gi].reportes[ri];
+  },
+
+  async exportarReporte(idSufijo, formato) {
+    const reporte = this.obtenerReportePorSufijo(idSufijo);
+    const params = {};
+
+    if (reporte.rangoFecha) {
+      params.fechaDesde = document.getElementById(`desde_${idSufijo}`).value;
+      params.fechaHasta = document.getElementById(`hasta_${idSufijo}`).value;
+    }
+
+    if (reporte.filtroCuentaContable) {
+      params.cuentaContableId = document.getElementById(`cuentaContable_${idSufijo}`).value;
+    }
+
+    const tipo = reporte.tipo;
+
+    try {
+      const response = formato === 'pdf'
+        ? await window.api.reportes.generarPDF(tipo, params)
+        : await window.api.reportes.generarExcel(tipo, params);
+
+      if (response.canceled) return;
+
+      if (response.success) {
+        App.toast(`Reporte generado en: ${response.filePath}`);
+      } else {
+        App.toast('Error al generar el reporte: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al generar el reporte', 'error');
+    }
   }
 };

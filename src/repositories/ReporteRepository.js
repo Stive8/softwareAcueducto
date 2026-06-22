@@ -44,25 +44,29 @@ class ReporteRepository {
     `).all();
   }
 
+  // Un registro por cada renglón de recibo (rd.concepto ya trae el período agrupado cuando
+  // aplica, p.ej. "Sostenimiento Enero 2026 - Junio 2026"), no por mes individual: así un mismo
+  // recibo que cobró varios meses sale en una sola fila, y se incluyen también los renglones que
+  // no son meses de sostenimiento (abono a conexión, aplicación de saldo a favor), que antes no
+  // aparecían en este reporte porque la consulta solo miraba pago_periodos.
   getHistorialPagos(fechaDesde = '', fechaHasta = '', cuentaContableId = '') {
     let query = `
       SELECT c.codigo as cuenta, c.direccion, p.nombre_completo as propietario,
-             pp.anio, pp.mes, pp.valor, pp.fecha_pago, r.numero_recibo,
+             rd.concepto, rd.valor, r.fecha_recibo as fecha_pago, r.numero_recibo,
              pc.codigo as cuenta_contable_codigo, pc.nombre as cuenta_contable_nombre
-      FROM pago_periodos pp
-      INNER JOIN cuentas c ON c.id = pp.cuenta_id
-      LEFT JOIN recibo_detalles rd ON rd.id = pp.recibo_detalle_id
-      LEFT JOIN recibos r ON r.id = rd.recibo_id
+      FROM recibo_detalles rd
+      INNER JOIN recibos r ON r.id = rd.recibo_id
+      INNER JOIN cuentas c ON c.id = r.cuenta_id
       LEFT JOIN cuenta_propietarios cp ON cp.cuenta_id = c.id AND cp.fecha_fin IS NULL
       LEFT JOIN propietarios p ON p.id = cp.propietario_id
       LEFT JOIN plan_cuentas pc ON pc.id = rd.cuenta_contable_id
-      WHERE 1=1
+      WHERE r.estado != 'Anulado'
     `;
     const params = [];
-    if (fechaDesde) { query += ' AND pp.fecha_pago >= ?'; params.push(fechaDesde); }
-    if (fechaHasta) { query += ' AND pp.fecha_pago <= ?'; params.push(fechaHasta); }
+    if (fechaDesde) { query += ' AND r.fecha_recibo >= ?'; params.push(fechaDesde); }
+    if (fechaHasta) { query += ' AND r.fecha_recibo <= ?'; params.push(fechaHasta); }
     if (cuentaContableId) { query += ' AND rd.cuenta_contable_id = ?'; params.push(cuentaContableId); }
-    query += ' ORDER BY pp.fecha_pago DESC';
+    query += ' ORDER BY r.fecha_recibo DESC, r.numero_recibo DESC';
     return this.db.prepare(query).all(...params);
   }
 
