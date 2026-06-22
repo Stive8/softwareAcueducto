@@ -3,6 +3,17 @@ class PagoRepository {
     this.db = dbService.getDb();
   }
 
+  getConfiguracionAsociacion() {
+    const rows = this.db.prepare(`
+      SELECT clave, valor FROM configuracion
+      WHERE clave IN ('nombre_asociacion', 'nit', 'direccion', 'telefono', 'email')
+    `).all();
+
+    const config = {};
+    rows.forEach(r => { config[r.clave] = r.valor; });
+    return config;
+  }
+
   transaccion(fn) {
     return this.db.transaction(fn)();
   }
@@ -65,6 +76,20 @@ class PagoRepository {
       LEFT JOIN recibos r ON r.id = rd.recibo_id
       WHERE pp.cuenta_id = ?
       ORDER BY pp.anio DESC, pp.mes DESC
+    `).all(cuentaId);
+  }
+
+  // Historial agrupado por recibo: cada fila ya es un grupo de meses consecutivos pagados juntos
+  // (periodo_desde/periodo_hasta), con un solo valor, fecha y número de recibo — en vez de repetir
+  // la misma info mes por mes como hace getMesesPagados. Se excluyen recibos anulados.
+  getHistorialRecibosSostenimiento(cuentaId) {
+    return this.db.prepare(`
+      SELECT rd.id as recibo_detalle_id, rd.periodo_desde, rd.periodo_hasta, rd.valor,
+             r.id as recibo_id, r.numero_recibo, r.fecha_recibo
+      FROM recibo_detalles rd
+      INNER JOIN recibos r ON r.id = rd.recibo_id
+      WHERE r.cuenta_id = ? AND rd.periodo_desde IS NOT NULL AND r.estado != 'Anulado'
+      ORDER BY r.fecha_recibo DESC, rd.id DESC
     `).all(cuentaId);
   }
 

@@ -193,7 +193,7 @@ const Pagos = {
         </div>
 
         <div class="detail-section">
-          <h3>Historial de Meses Pagados</h3>
+          <h3>Historial de Pagos</h3>
           ${historial.length > 0 ? `
             <table style="width: 100%; margin-top: 12px;">
               <thead>
@@ -202,10 +202,10 @@ const Pagos = {
               <tbody>
                 ${historial.map(h => `
                   <tr>
-                    <td>${this.formatPeriodo(h.anio, h.mes)}</td>
+                    <td>${h.periodo_desde === h.periodo_hasta ? h.periodo_desde : `${h.periodo_desde} - ${h.periodo_hasta}`}</td>
                     <td>$${this.formatNumber(h.valor)}</td>
-                    <td>${this.formatDate(h.fecha_pago)}</td>
-                    <td>${h.numero_recibo ? `<a href="#" onclick="App.closeModal(); Recibos.showDetailModal(${h.recibo_id}); return false;">No. ${h.numero_recibo}</a>` : '-'}</td>
+                    <td>${this.formatDate(h.fecha_recibo)}</td>
+                    <td><a href="#" onclick="App.closeModal(); Recibos.showDetailModal(${h.recibo_id}); return false;">No. ${h.numero_recibo}</a></td>
                   </tr>
                 `).join('')}
               </tbody>
@@ -223,6 +223,8 @@ const Pagos = {
 
         <div class="form-actions">
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+          <button class="btn btn-secondary" onclick="Pagos.imprimirEstadoCuenta(${cuentaId})">Imprimir Estado de Cuenta</button>
+          <button class="btn btn-secondary" onclick="Pagos.exportarEstadoCuentaPDF(${cuentaId})">Exportar PDF</button>
           <button class="btn btn-success" onclick="App.closeModal(); Pagos.showRegistrarPagoModal(${cuentaId})">Registrar Pago</button>
         </div>
       `;
@@ -641,6 +643,33 @@ const Pagos = {
     } catch (error) {
       console.error('Error:', error);
       errorDiv.innerHTML = `<div class="error-message">Error al registrar el pago</div>`;
+    }
+  },
+
+  async imprimirEstadoCuenta(cuentaId) {
+    try {
+      const response = await window.api.pagos.imprimirEstadoCuenta(cuentaId);
+      if (!response.success && !response.canceled) {
+        App.toast('Error al imprimir: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al imprimir el estado de cuenta', 'error');
+    }
+  },
+
+  async exportarEstadoCuentaPDF(cuentaId) {
+    try {
+      const response = await window.api.pagos.exportarEstadoCuentaPDF(cuentaId);
+      if (response.canceled) return;
+      if (response.success) {
+        App.toast('PDF guardado en: ' + response.filePath);
+      } else {
+        App.toast('Error al exportar PDF: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al exportar el estado de cuenta a PDF', 'error');
     }
   },
 

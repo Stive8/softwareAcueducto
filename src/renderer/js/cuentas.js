@@ -492,7 +492,6 @@ const Cuentas = {
               <option value="">Seleccione una categoría...</option>
               ${(await this.getCategoriasOptions()).map(c => `<option value="${c.id}">${c.nombre}</option>`).join('')}
             </select>
-            <small style="color: #64748b; font-size: 0.875rem;">El propietario se asigna desde el módulo Propietarios.</small>
           </div>
 
           <div class="form-group">
@@ -508,6 +507,43 @@ const Cuentas = {
               <input type="text" inputmode="numeric" id="valor_conexion" name="valor_conexion">
             </div>
             <small style="color: #64748b; font-size: 0.875rem;">Si esta es una conexión nueva con un cargo de conexión a cobrar, indique el valor aquí. Podrá registrar abonos parciales desde "Estado de Pagos" hasta saldarlo.</small>
+          </div>
+
+          <h3 style="color: #1e40af; font-size: 16px; margin: 24px 0 16px 0; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">Propietario</h3>
+
+          <div class="table-controls" style="margin-bottom: 16px;">
+            <button class="btn btn-primary" id="btnTabPropietarioNuevo" type="button">Propietario Nuevo</button>
+            <button class="btn btn-secondary" id="btnTabPropietarioExistente" type="button">Propietario Existente</button>
+          </div>
+
+          <div id="panelPropietarioNuevo">
+            <div class="form-group">
+              <label for="prop_nombre_completo">Nombre Completo</label>
+              <input type="text" id="prop_nombre_completo" name="prop_nombre_completo">
+            </div>
+            <div class="form-group">
+              <label for="prop_numero_identificacion">Número de Identificación</label>
+              <input type="text" id="prop_numero_identificacion" name="prop_numero_identificacion">
+            </div>
+            <div class="form-group">
+              <label for="prop_telefono">Teléfono</label>
+              <input type="text" id="prop_telefono" name="prop_telefono">
+            </div>
+            <div class="form-group">
+              <label for="prop_email">Correo Electrónico</label>
+              <input type="email" id="prop_email" name="prop_email">
+            </div>
+            <small style="color: #64748b; font-size: 0.875rem;">Puede dejarlo en blanco y asignar el propietario después desde el módulo Propietarios.</small>
+          </div>
+
+          <div id="panelPropietarioExistente" style="display: none;">
+            <div class="form-group">
+              <label for="prop_buscar">Buscar por nombre o identificación</label>
+              <input type="text" id="prop_buscar" name="prop_buscar" placeholder="Escriba para buscar...">
+              <input type="hidden" id="prop_existente_id">
+              <div id="prop_buscar_resultados" style="margin-top: 8px;"></div>
+              <div id="prop_existente_seleccionado" style="margin-top: 8px; font-size: 0.875rem;"></div>
+            </div>
           </div>
         ` : ''}
 
@@ -538,12 +574,68 @@ const Cuentas = {
 
     if (!id) {
       App.attachMoneyInput(document.getElementById('valor_conexion'));
+      this.setupPropietarioTabs();
     }
 
     document.getElementById('cuentaForm').addEventListener('submit', (e) => {
       e.preventDefault();
       this.saveCuenta(id);
     });
+  },
+
+  setupPropietarioTabs() {
+    const btnNuevo = document.getElementById('btnTabPropietarioNuevo');
+    const btnExistente = document.getElementById('btnTabPropietarioExistente');
+    const panelNuevo = document.getElementById('panelPropietarioNuevo');
+    const panelExistente = document.getElementById('panelPropietarioExistente');
+
+    btnNuevo.addEventListener('click', () => {
+      panelNuevo.style.display = 'block';
+      panelExistente.style.display = 'none';
+      btnNuevo.className = 'btn btn-primary';
+      btnExistente.className = 'btn btn-secondary';
+    });
+
+    btnExistente.addEventListener('click', () => {
+      panelNuevo.style.display = 'none';
+      panelExistente.style.display = 'block';
+      btnNuevo.className = 'btn btn-secondary';
+      btnExistente.className = 'btn btn-primary';
+    });
+
+    let timeoutBusqueda;
+    document.getElementById('prop_buscar').addEventListener('input', (e) => {
+      clearTimeout(timeoutBusqueda);
+      document.getElementById('prop_existente_id').value = '';
+      document.getElementById('prop_existente_seleccionado').innerHTML = '';
+      const texto = e.target.value.trim();
+      const resultadosDiv = document.getElementById('prop_buscar_resultados');
+      if (!texto) { resultadosDiv.innerHTML = ''; return; }
+
+      timeoutBusqueda = setTimeout(async () => {
+        try {
+          const response = await window.api.propietarios.getAll({ search: texto, limit: 5 });
+          const data = response.success ? response.data.data : [];
+          resultadosDiv.innerHTML = data.length === 0
+            ? '<p style="font-size: 0.8rem; color: #64748b;">Sin resultados</p>'
+            : data.map(p => `
+                <div style="padding: 8px; border: 1px solid #e2e8f0; border-radius: 6px; margin-bottom: 4px; cursor: pointer;"
+                     onclick="Cuentas.seleccionarPropietarioExistente(${p.id}, '${p.nombre_completo.replace(/'/g, "\\'")}', '${p.numero_identificacion || ''}')">
+                  ${p.nombre_completo} ${p.numero_identificacion ? `(${p.numero_identificacion})` : ''}
+                </div>
+              `).join('');
+        } catch (error) {
+          console.error('Error:', error);
+        }
+      }, 300);
+    });
+  },
+
+  seleccionarPropietarioExistente(id, nombre, identificacion) {
+    document.getElementById('prop_existente_id').value = id;
+    document.getElementById('prop_buscar_resultados').innerHTML = '';
+    document.getElementById('prop_buscar').value = '';
+    document.getElementById('prop_existente_seleccionado').innerHTML = `Seleccionado: <strong>${nombre}</strong> ${identificacion ? `(${identificacion})` : ''}`;
   },
 
   async saveCuenta(id) {
@@ -568,16 +660,44 @@ const Cuentas = {
         : await window.api.cuentas.create(formData);
 
       if (response.success) {
-        if (!id && valorConexion > 0) {
+        if (!id) {
           const cuentaId = response.data.id;
-          const conexionResponse = await window.api.nuevosPuntos.create({
-            cuentaId,
-            valorTotal: valorConexion,
-            fechaRegistro: formData.categoria_fecha_inicio,
-            observaciones: 'Cargo de conexión inicial'
-          });
-          if (!conexionResponse.success) {
-            App.toast('La cuenta se creó, pero no se pudo registrar el cargo de conexión: ' + conexionResponse.error, 'error');
+
+          if (valorConexion > 0) {
+            const conexionResponse = await window.api.nuevosPuntos.create({
+              cuentaId,
+              valorTotal: valorConexion,
+              fechaRegistro: formData.categoria_fecha_inicio,
+              observaciones: 'Cargo de conexión inicial'
+            });
+            if (!conexionResponse.success) {
+              App.toast('La cuenta se creó, pero no se pudo registrar el cargo de conexión: ' + conexionResponse.error, 'error');
+            }
+          }
+
+          const propietarioExistenteId = document.getElementById('prop_existente_id').value;
+          const nombreNuevo = document.getElementById('prop_nombre_completo').value.trim();
+
+          if (propietarioExistenteId) {
+            const asignarResponse = await window.api.propietarios.asignarACuenta(cuentaId, parseInt(propietarioExistenteId, 10), formData.categoria_fecha_inicio);
+            if (!asignarResponse.success) {
+              App.toast('La cuenta se creó, pero no se pudo asignar el propietario: ' + asignarResponse.error, 'error');
+            }
+          } else if (nombreNuevo) {
+            const propietarioResponse = await window.api.propietarios.create({
+              nombre_completo: nombreNuevo,
+              numero_identificacion: document.getElementById('prop_numero_identificacion').value.trim() || null,
+              telefono: document.getElementById('prop_telefono').value.trim() || null,
+              email: document.getElementById('prop_email').value.trim() || null
+            });
+            if (propietarioResponse.success) {
+              const asignarResponse = await window.api.propietarios.asignarACuenta(cuentaId, propietarioResponse.data.id, formData.categoria_fecha_inicio);
+              if (!asignarResponse.success) {
+                App.toast('El propietario se creó, pero no se pudo asignar a la cuenta: ' + asignarResponse.error, 'error');
+              }
+            } else {
+              App.toast('La cuenta se creó, pero no se pudo crear el propietario: ' + propietarioResponse.error, 'error');
+            }
           }
         }
 

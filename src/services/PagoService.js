@@ -10,6 +10,26 @@ const NOMBRES_MES = [
 
 const METODOS_PAGO_VALIDOS = ['Efectivo', 'Transferencia'];
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatNumeroDinero(num) {
+  return Number(num || 0).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+// Formatea 'YYYY-MM-DD' a 'DD/MM/AAAA' sin pasar por new Date() (ver nota de zona horaria arriba).
+function formatFechaCorta(fechaString) {
+  if (!fechaString) return '-';
+  const [anio, mes, dia] = fechaString.split(' ')[0].split('-');
+  return `${dia}/${mes}/${anio}`;
+}
+
 // Codifica un período (año, mes 1-12) como un entero comparable: útil para calcular
 // diferencias en meses y para ordenar sin tener que comparar año y mes por separado.
 function codificarPeriodo(anio, mes) {
@@ -259,7 +279,104 @@ class PagoService {
   }
 
   getHistorialPagos(cuentaId) {
-    return this.repository.getMesesPagados(cuentaId);
+    return this.repository.getHistorialRecibosSostenimiento(cuentaId);
+  }
+
+  // Documento imprimible/exportable de estado de cuenta: resumen + historial agrupado por
+  // recibo (no mes por mes), para entregar o archivar sin tener que mirar el módulo en pantalla.
+  generarHTMLEstadoCuenta(cuentaId) {
+    const cuenta = this.cuentaRepository.findById(cuentaId);
+    if (!cuenta) throw new Error('Cuenta no encontrada');
+
+    const propietario = this.propietarioRepository.getPropietarioActualCuenta(cuentaId);
+    const estado = this.getEstadoCuenta(cuentaId);
+    const historial = this.getHistorialPagos(cuentaId);
+    const config = this.repository.getConfiguracionAsociacion();
+
+    const filasHistorial = historial.map(h => `
+      <tr>
+        <td>${escapeHtml(h.periodo_desde === h.periodo_hasta ? h.periodo_desde : `${h.periodo_desde} - ${h.periodo_hasta}`)}</td>
+        <td class="text-right">$${formatNumeroDinero(h.valor)}</td>
+        <td>${formatFechaCorta(h.fecha_recibo)}</td>
+        <td>No. ${h.numero_recibo}</td>
+      </tr>
+    `).join('');
+
+    return `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Estado de Cuenta - ${escapeHtml(cuenta.codigo)}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; padding: 32px; color: #1f2937; }
+  .header { text-align: center; margin-bottom: 24px; border-bottom: 2px solid #1e40af; padding-bottom: 16px; }
+  .header h1 { color: #1e40af; font-size: 20px; margin: 0 0 6px 0; }
+  .header p { font-size: 12px; color: #475569; margin: 2px 0; }
+  .titulo { text-align: center; font-size: 16px; font-weight: bold; color: #1e40af; margin-bottom: 20px; }
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 20px; font-size: 13px; }
+  .info-grid div span { font-weight: bold; color: #334155; }
+  .resumen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 24px; }
+  .resumen-card { border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; text-align: center; }
+  .resumen-card .label { font-size: 11px; color: #64748b; text-transform: uppercase; }
+  .resumen-card .valor { font-size: 15px; font-weight: bold; color: #1e293b; margin-top: 4px; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  th, td { border: 1px solid #cbd5e1; padding: 8px 10px; font-size: 12px; text-align: left; }
+  th { background: #f1f5f9; color: #334155; }
+  .text-right { text-align: right; }
+  .footer { margin-top: 32px; font-size: 11px; color: #64748b; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>${escapeHtml(config.nombre_asociacion || 'Acueducto Veredal')}</h1>
+    ${config.nit ? `<p>NIT: ${escapeHtml(config.nit)}</p>` : ''}
+    ${config.direccion ? `<p>${escapeHtml(config.direccion)}</p>` : ''}
+    ${config.telefono ? `<p>Tel: ${escapeHtml(config.telefono)}</p>` : ''}
+  </div>
+
+  <div class="titulo">Estado de Cuenta</div>
+
+  <div class="info-grid">
+    <div>Cuenta: <span>${escapeHtml(cuenta.codigo)}</span></div>
+    <div>Dirección: <span>${escapeHtml(cuenta.direccion)}</span></div>
+    <div>Propietario: <span>${escapeHtml(propietario?.nombre_completo || 'Sin asignar')}</span></div>
+    <div>Identificación: <span>${escapeHtml(propietario?.numero_identificacion || '-')}</span></div>
+  </div>
+
+  <div class="resumen">
+    <div class="resumen-card">
+      <div class="label">Pagado Hasta</div>
+      <div class="valor">${estado.pagadoHasta ? estado.pagadoHasta.label : 'Sin pagos'}</div>
+    </div>
+    <div class="resumen-card">
+      <div class="label">Estado</div>
+      <div class="valor">${estado.estadoMora === 'En mora' ? `En mora (${estado.mesesMora})` : 'Al día'}</div>
+    </div>
+    <div class="resumen-card">
+      <div class="label">Total Pagado</div>
+      <div class="valor">$${formatNumeroDinero(estado.totalPagado)}</div>
+    </div>
+    <div class="resumen-card">
+      <div class="label">Saldo a Favor</div>
+      <div class="valor">$${formatNumeroDinero(estado.saldoAFavor)}</div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Período</th><th class="text-right">Valor</th><th>Fecha de Pago</th><th>Recibo</th></tr>
+    </thead>
+    <tbody>
+      ${filasHistorial || '<tr><td colspan="4" style="text-align:center; color:#64748b;">Sin pagos registrados</td></tr>'}
+    </tbody>
+  </table>
+
+  <div class="footer">Documento generado por el sistema administrativo del acueducto el ${formatFechaCorta(new Date().toISOString())}.</div>
+</body>
+</html>
+    `;
   }
 
   getCuentasConEstado(params) {
