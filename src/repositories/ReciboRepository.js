@@ -76,11 +76,28 @@ class ReciboRepository {
     return this.db.transaction(fn)();
   }
 
+  // Resuelve a qué cuenta contable corresponde un concepto, según el mapeo configurable
+  // (mapeo_conceptos_contables). Si no hay un mapeo específico, usa el "__default__" del módulo.
+  // Preparación para una futura contabilidad de doble partida: por ahora solo se guarda el dato,
+  // no se generan asientos.
+  resolverCuentaContable(modulo, concepto) {
+    const exacto = this.db.prepare(`
+      SELECT cuenta_contable_id FROM mapeo_conceptos_contables WHERE modulo = ? AND concepto = ?
+    `).get(modulo, concepto);
+    if (exacto) return exacto.cuenta_contable_id;
+
+    const porDefecto = this.db.prepare(`
+      SELECT cuenta_contable_id FROM mapeo_conceptos_contables WHERE modulo = ? AND concepto = '__default__'
+    `).get(modulo);
+    return porDefecto ? porDefecto.cuenta_contable_id : null;
+  }
+
   crearMovimiento({ tipo, origen, monto, concepto, referenciaId, referenciaTipo, fechaMovimiento, observaciones }) {
+    const cuentaContableId = this.resolverCuentaContable('Movimiento', origen);
     return this.db.prepare(`
-      INSERT INTO movimientos (tipo, origen, monto, concepto, referencia_id, referencia_tipo, fecha_movimiento, observaciones)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `).run(tipo, origen, monto, concepto, referenciaId, referenciaTipo, fechaMovimiento, observaciones || null).lastInsertRowid;
+      INSERT INTO movimientos (tipo, origen, monto, concepto, referencia_id, referencia_tipo, fecha_movimiento, observaciones, cuenta_contable_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(tipo, origen, monto, concepto, referenciaId, referenciaTipo, fechaMovimiento, observaciones || null, cuentaContableId).lastInsertRowid;
   }
 
   // Anular un recibo libera los meses/abonos/conexión que cubría, para que se puedan volver

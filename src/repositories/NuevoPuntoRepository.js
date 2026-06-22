@@ -134,19 +134,37 @@ class NuevoPuntoRepository {
     return result.lastInsertRowid;
   }
 
+  // Resuelve a qué cuenta contable corresponde un concepto, según el mapeo configurable
+  // (mapeo_conceptos_contables). Si no hay un mapeo específico, usa el "__default__" del módulo.
+  // Preparación para una futura contabilidad de doble partida: por ahora solo se guarda el dato,
+  // no se generan asientos.
+  resolverCuentaContable(modulo, concepto) {
+    const exacto = this.db.prepare(`
+      SELECT cuenta_contable_id FROM mapeo_conceptos_contables WHERE modulo = ? AND concepto = ?
+    `).get(modulo, concepto);
+    if (exacto) return exacto.cuenta_contable_id;
+
+    const porDefecto = this.db.prepare(`
+      SELECT cuenta_contable_id FROM mapeo_conceptos_contables WHERE modulo = ? AND concepto = '__default__'
+    `).get(modulo);
+    return porDefecto ? porDefecto.cuenta_contable_id : null;
+  }
+
   crearReciboDetalle({ reciboId, concepto, valor, observaciones = null }) {
+    const cuentaContableId = this.resolverCuentaContable('RecibosDetalle', 'AbonoPuntoNuevo');
     const result = this.db.prepare(`
-      INSERT INTO recibo_detalles (recibo_id, concepto, valor, observaciones)
-      VALUES (?, ?, ?, ?)
-    `).run(reciboId, concepto, valor, observaciones);
+      INSERT INTO recibo_detalles (recibo_id, concepto, valor, observaciones, cuenta_contable_id)
+      VALUES (?, ?, ?, ?, ?)
+    `).run(reciboId, concepto, valor, observaciones, cuentaContableId);
     return result.lastInsertRowid;
   }
 
   crearMovimiento({ tipo, origen, monto, concepto, referenciaId, referenciaTipo, fechaMovimiento }) {
+    const cuentaContableId = this.resolverCuentaContable('Movimiento', origen);
     const result = this.db.prepare(`
-      INSERT INTO movimientos (tipo, origen, monto, concepto, referencia_id, referencia_tipo, fecha_movimiento)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(tipo, origen, monto, concepto, referenciaId, referenciaTipo, fechaMovimiento);
+      INSERT INTO movimientos (tipo, origen, monto, concepto, referencia_id, referencia_tipo, fecha_movimiento, cuenta_contable_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(tipo, origen, monto, concepto, referenciaId, referenciaTipo, fechaMovimiento, cuentaContableId);
     return result.lastInsertRowid;
   }
 }

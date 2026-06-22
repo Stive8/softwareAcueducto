@@ -132,6 +132,8 @@ const App = {
       Configuracion.load();
     } else if (page === 'reportes') {
       Reportes.load();
+    } else if (page === 'plancuentas') {
+      PlanCuentas.load();
     }
   },
 

@@ -22,10 +22,10 @@ const Reportes = {
     {
       titulo: 'Pagos y Gastos',
       reportes: [
-        { tipo: 'historial_pagos', titulo: 'Historial de Pagos', icon: '💰', rangoFecha: true },
-        { tipo: 'historial_gastos', titulo: 'Historial de Gastos', icon: '💸', rangoFecha: true },
-        { tipo: 'ingresos_periodo', titulo: 'Ingresos por Período', icon: '📈', rangoFecha: true },
-        { tipo: 'gastos_periodo', titulo: 'Gastos por Período', icon: '📉', rangoFecha: true }
+        { tipo: 'historial_pagos', titulo: 'Historial de Pagos', icon: '💰', rangoFecha: true, filtroCuentaContable: true },
+        { tipo: 'historial_gastos', titulo: 'Historial de Gastos', icon: '💸', rangoFecha: true, filtroCuentaContable: true },
+        { tipo: 'ingresos_periodo', titulo: 'Ingresos por Período', icon: '📈', rangoFecha: true, filtroCuentaContable: true },
+        { tipo: 'gastos_periodo', titulo: 'Gastos por Período', icon: '📉', rangoFecha: true, filtroCuentaContable: true }
       ]
     },
     {
@@ -67,6 +67,29 @@ const Reportes = {
     });
 
     content.innerHTML = html;
+
+    if (this.grupos.some(g => g.reportes.some(r => r.filtroCuentaContable))) {
+      await this.cargarCuentasContables();
+    }
+  },
+
+  // Cuentas contables imputables, para los selects de filtro "Cuenta Contable" de los reportes
+  // que lo soportan. Se cargan una sola vez y se reutilizan en todos los selects de la página.
+  async cargarCuentasContables() {
+    try {
+      const response = await window.api.planCuentas.getImputables({});
+      this.cuentasContables = response.success ? response.data : [];
+    } catch (error) {
+      console.error('Error al cargar cuentas contables:', error);
+      this.cuentasContables = [];
+    }
+
+    document.querySelectorAll('[data-select-cuenta-contable]').forEach(select => {
+      select.innerHTML = `
+        <option value="">Todas las cuentas contables</option>
+        ${this.cuentasContables.map(c => `<option value="${c.id}">${c.codigo} - ${c.nombre}</option>`).join('')}
+      `;
+    });
   },
 
   renderCard(reporte, idSufijo) {
@@ -84,6 +107,11 @@ const Reportes = {
             <input type="date" id="desde_${idSufijo}" value="${inicioMesStr}">
             <input type="date" id="hasta_${idSufijo}" value="${hoy}">
           </div>
+        ` : ''}
+        ${reporte.filtroCuentaContable ? `
+          <select id="cuentaContable_${idSufijo}" data-select-cuenta-contable style="width: 100%; margin-bottom: 8px;">
+            <option value="">Todas las cuentas contables</option>
+          </select>
         ` : ''}
         <div class="reporte-card-actions">
           <button class="btn btn-secondary btn-icon" onclick="Reportes.exportar('${idSufijo}', 'pdf')">PDF</button>
@@ -105,6 +133,10 @@ const Reportes = {
     if (reporte.rangoFecha) {
       params.fechaDesde = document.getElementById(`desde_${idSufijo}`).value;
       params.fechaHasta = document.getElementById(`hasta_${idSufijo}`).value;
+    }
+
+    if (reporte.filtroCuentaContable) {
+      params.cuentaContableId = document.getElementById(`cuentaContable_${idSufijo}`).value;
     }
 
     const tipo = reporte.tipo;

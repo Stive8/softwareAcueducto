@@ -18,6 +18,8 @@ const ReporteService = require('./src/services/ReporteService');
 const ExcelExportService = require('./src/services/ExcelExportService');
 const DevToolsService = require('./src/services/DevToolsService');
 const AuditoriaService = require('./src/services/AuditoriaService');
+const PlanCuentaService = require('./src/services/PlanCuentaService');
+const MapeoContableService = require('./src/services/MapeoContableService');
 
 let mainWindow;
 let dbService;
@@ -37,6 +39,8 @@ let reporteService;
 let excelExportService;
 let devToolsService;
 let auditoriaService;
+let planCuentaService;
+let mapeoContableService;
 
 // Sesión activa del único usuario que puede estar usando esta app de escritorio a la vez.
 // No es solo un dato de UI: la capa de permisos de abajo (envolverHandle) la usa para decidir
@@ -53,7 +57,9 @@ const CANALES_SOLO_ADMIN = new Set([
   'usuarios:getAll', 'usuarios:crear', 'usuarios:toggleActivo', 'usuarios:resetearPassword',
   'config:actualizar', 'backup:restaurar',
   'devtools:cargarDatosEjemplo', 'devtools:eliminarDatosOperativos',
-  'auditoria:getAll'
+  'auditoria:getAll',
+  'plancuentas:create', 'plancuentas:update', 'plancuentas:toggleActivo',
+  'mapeocontable:actualizar'
 ]);
 
 function esCanalDeLectura(canal) {
@@ -160,6 +166,8 @@ app.whenReady().then(() => {
   excelExportService = new ExcelExportService(dbService);
   devToolsService = new DevToolsService(dbService);
   auditoriaService = new AuditoriaService(dbService);
+  planCuentaService = new PlanCuentaService(dbService);
+  mapeoContableService = new MapeoContableService(dbService);
 
   setupIpcHandlers();
   createWindow();
@@ -419,6 +427,78 @@ function setupIpcHandlers() {
   envolverHandle('categorias:getHistorialCategoriasCuenta', async (event, cuentaId) => {
     try {
       return { success: true, data: categoriaService.getHistorialCategoriasCuenta(cuentaId) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Plan de Cuentas (PUC) y mapeo contable. Preparación para una futura contabilidad de doble
+  // partida: por ahora solo administra el catálogo y la clasificación, sin generar asientos.
+  envolverHandle('plancuentas:getAll', async (event, params) => {
+    try {
+      return { success: true, data: planCuentaService.getAll(params) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('plancuentas:getImputables', async (event, params) => {
+    try {
+      return { success: true, data: planCuentaService.getImputables(params) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('plancuentas:getById', async (event, id) => {
+    try {
+      const cuenta = planCuentaService.getById(id);
+      if (!cuenta) return { success: false, error: 'Cuenta contable no encontrada' };
+      return { success: true, data: cuenta };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('plancuentas:create', async (event, cuentaData) => {
+    try {
+      const id = planCuentaService.create(cuentaData);
+      return { success: true, data: { id } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('plancuentas:update', async (event, id, cuentaData) => {
+    try {
+      planCuentaService.update(id, cuentaData);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('plancuentas:toggleActivo', async (event, id) => {
+    try {
+      planCuentaService.toggleActivo(id);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('mapeocontable:getAll', async (event, modulo) => {
+    try {
+      return { success: true, data: mapeoContableService.getAll(modulo) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('mapeocontable:actualizar', async (event, modulo, concepto, cuentaContableId) => {
+    try {
+      mapeoContableService.actualizar(modulo, concepto, cuentaContableId);
+      return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
     }

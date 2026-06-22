@@ -111,10 +111,11 @@ class ReporteService {
     };
   }
 
-  reporteHistorialPagos({ fechaDesde = '', fechaHasta = '' } = {}) {
-    const filas = this.repository.getHistorialPagos(fechaDesde, fechaHasta).map(f => ({
+  reporteHistorialPagos({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
+    const filas = this.repository.getHistorialPagos(fechaDesde, fechaHasta, cuentaContableId).map(f => ({
       ...f,
-      periodo: `${NOMBRES_MES[f.mes - 1]} ${f.anio}`
+      periodo: `${NOMBRES_MES[f.mes - 1]} ${f.anio}`,
+      cuenta_contable: f.cuenta_contable_codigo ? `${f.cuenta_contable_codigo} - ${f.cuenta_contable_nombre}` : '-'
     }));
 
     return {
@@ -126,15 +127,19 @@ class ReporteService {
         { key: 'periodo', label: 'Período Pagado' },
         { key: 'valor', label: 'Valor', tipo: 'moneda' },
         { key: 'fecha_pago', label: 'Fecha de Pago', tipo: 'fecha' },
-        { key: 'numero_recibo', label: 'No. Recibo' }
+        { key: 'numero_recibo', label: 'No. Recibo' },
+        { key: 'cuenta_contable', label: 'Cuenta Contable' }
       ],
       filas,
       totales: { valor: filas.reduce((s, f) => s + f.valor, 0) }
     };
   }
 
-  reporteHistorialGastos({ fechaDesde = '', fechaHasta = '' } = {}) {
-    const filas = this.repository.getHistorialGastos(fechaDesde, fechaHasta);
+  reporteHistorialGastos({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
+    const filas = this.repository.getHistorialGastos(fechaDesde, fechaHasta, cuentaContableId).map(f => ({
+      ...f,
+      cuenta_contable: f.cuenta_contable_codigo ? `${f.cuenta_contable_codigo} - ${f.cuenta_contable_nombre}` : '-'
+    }));
     return {
       tipo: 'tabla',
       titulo: 'Historial de Gastos',
@@ -145,7 +150,8 @@ class ReporteService {
         { key: 'proveedor', label: 'Proveedor' },
         { key: 'valor', label: 'Valor', tipo: 'moneda' },
         { key: 'metodo_pago', label: 'Método de Pago' },
-        { key: 'estado', label: 'Estado' }
+        { key: 'estado', label: 'Estado' },
+        { key: 'cuenta_contable', label: 'Cuenta Contable' }
       ],
       filas,
       totales: { valor: filas.filter(f => f.estado !== 'Anulado').reduce((s, f) => s + f.valor, 0) }
@@ -237,8 +243,11 @@ class ReporteService {
     };
   }
 
-  reporteIngresosPeriodo({ fechaDesde = '', fechaHasta = '' } = {}) {
-    const filas = this.repository.getIngresosPorPeriodo(fechaDesde, fechaHasta);
+  reporteIngresosPeriodo({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
+    const filas = this.repository.getIngresosPorPeriodo(fechaDesde, fechaHasta, cuentaContableId).map(f => ({
+      ...f,
+      cuentas_contables: f.cuentas_contables || '-'
+    }));
     return {
       tipo: 'tabla',
       titulo: 'Ingresos por Período',
@@ -248,15 +257,19 @@ class ReporteService {
         { key: 'cuenta', label: 'Cuenta' },
         { key: 'conceptos', label: 'Conceptos' },
         { key: 'total', label: 'Total', tipo: 'moneda' },
-        { key: 'metodo_pago', label: 'Método de Pago' }
+        { key: 'metodo_pago', label: 'Método de Pago' },
+        { key: 'cuentas_contables', label: 'Cuentas Contables' }
       ],
       filas,
       totales: { total: filas.reduce((s, f) => s + f.total, 0) }
     };
   }
 
-  reporteGastosPeriodo({ fechaDesde = '', fechaHasta = '' } = {}) {
-    const filas = this.repository.getGastosPorPeriodo(fechaDesde, fechaHasta);
+  reporteGastosPeriodo({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
+    const filas = this.repository.getGastosPorPeriodo(fechaDesde, fechaHasta, cuentaContableId).map(f => ({
+      ...f,
+      cuenta_contable: f.cuenta_contable_codigo ? `${f.cuenta_contable_codigo} - ${f.cuenta_contable_nombre}` : '-'
+    }));
     return {
       tipo: 'tabla',
       titulo: 'Gastos por Período',
@@ -264,7 +277,8 @@ class ReporteService {
         { key: 'fecha_gasto', label: 'Fecha', tipo: 'fecha' },
         { key: 'concepto', label: 'Concepto' },
         { key: 'tipo_gasto', label: 'Tipo' },
-        { key: 'valor', label: 'Valor', tipo: 'moneda' }
+        { key: 'valor', label: 'Valor', tipo: 'moneda' },
+        { key: 'cuenta_contable', label: 'Cuenta Contable' }
       ],
       filas,
       totales: { valor: filas.reduce((s, f) => s + f.valor, 0) }

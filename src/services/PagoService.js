@@ -246,7 +246,8 @@ class PagoService {
         const detalleCreditoId = this.repository.crearReciboDetalle({
           reciboId,
           concepto: 'Aplicación de saldo a favor',
-          valor: -creditoAplicado
+          valor: -creditoAplicado,
+          tipoConceptoContable: 'AplicacionSaldoFavor'
         });
         this.repository.crearMovimientoCredito(cuentaId, 'Aplicado', creditoAplicado, detalleCreditoId, fechaPago, 'Aplicado a pago de sostenimiento');
       }
@@ -256,7 +257,8 @@ class PagoService {
         const detalleConexionId = this.repository.crearReciboDetalle({
           reciboId,
           concepto: `Abono Punto Nuevo - Cuenta ${puntoConexion.cuenta_codigo || ''}`.trim(),
-          valor: abonoConexion
+          valor: abonoConexion,
+          tipoConceptoContable: 'AbonoPuntoNuevo'
         });
         this.nuevoPuntoRepository.crearAbono({ nuevoPuntoId, monto: abonoConexion, fechaAbono: fechaPago, reciboDetalleId: detalleConexionId, observaciones });
         estadoConexion = this.nuevoPuntoRepository.actualizarSaldoYEstado(nuevoPuntoId);

@@ -44,35 +44,41 @@ class ReporteRepository {
     `).all();
   }
 
-  getHistorialPagos(fechaDesde = '', fechaHasta = '') {
+  getHistorialPagos(fechaDesde = '', fechaHasta = '', cuentaContableId = '') {
     let query = `
       SELECT c.codigo as cuenta, c.direccion, p.nombre_completo as propietario,
-             pp.anio, pp.mes, pp.valor, pp.fecha_pago, r.numero_recibo
+             pp.anio, pp.mes, pp.valor, pp.fecha_pago, r.numero_recibo,
+             pc.codigo as cuenta_contable_codigo, pc.nombre as cuenta_contable_nombre
       FROM pago_periodos pp
       INNER JOIN cuentas c ON c.id = pp.cuenta_id
       LEFT JOIN recibo_detalles rd ON rd.id = pp.recibo_detalle_id
       LEFT JOIN recibos r ON r.id = rd.recibo_id
       LEFT JOIN cuenta_propietarios cp ON cp.cuenta_id = c.id AND cp.fecha_fin IS NULL
       LEFT JOIN propietarios p ON p.id = cp.propietario_id
+      LEFT JOIN plan_cuentas pc ON pc.id = rd.cuenta_contable_id
       WHERE 1=1
     `;
     const params = [];
     if (fechaDesde) { query += ' AND pp.fecha_pago >= ?'; params.push(fechaDesde); }
     if (fechaHasta) { query += ' AND pp.fecha_pago <= ?'; params.push(fechaHasta); }
+    if (cuentaContableId) { query += ' AND rd.cuenta_contable_id = ?'; params.push(cuentaContableId); }
     query += ' ORDER BY pp.fecha_pago DESC';
     return this.db.prepare(query).all(...params);
   }
 
-  getHistorialGastos(fechaDesde = '', fechaHasta = '') {
+  getHistorialGastos(fechaDesde = '', fechaHasta = '', cuentaContableId = '') {
     let query = `
-      SELECT fecha_gasto, concepto, tipo_gasto, proveedor, valor, metodo_pago, estado
-      FROM gastos
+      SELECT g.fecha_gasto, g.concepto, g.tipo_gasto, g.proveedor, g.valor, g.metodo_pago, g.estado,
+             pc.codigo as cuenta_contable_codigo, pc.nombre as cuenta_contable_nombre
+      FROM gastos g
+      LEFT JOIN plan_cuentas pc ON pc.id = g.cuenta_contable_id
       WHERE 1=1
     `;
     const params = [];
-    if (fechaDesde) { query += ' AND fecha_gasto >= ?'; params.push(fechaDesde); }
-    if (fechaHasta) { query += ' AND fecha_gasto <= ?'; params.push(fechaHasta); }
-    query += ' ORDER BY fecha_gasto DESC';
+    if (fechaDesde) { query += ' AND g.fecha_gasto >= ?'; params.push(fechaDesde); }
+    if (fechaHasta) { query += ' AND g.fecha_gasto <= ?'; params.push(fechaHasta); }
+    if (cuentaContableId) { query += ' AND g.cuenta_contable_id = ?'; params.push(cuentaContableId); }
+    query += ' ORDER BY g.fecha_gasto DESC';
     return this.db.prepare(query).all(...params);
   }
 
@@ -119,10 +125,12 @@ class ReporteRepository {
     `).all();
   }
 
-  getIngresosPorPeriodo(fechaDesde = '', fechaHasta = '') {
+  getIngresosPorPeriodo(fechaDesde = '', fechaHasta = '', cuentaContableId = '') {
     let query = `
       SELECT r.fecha_recibo, r.numero_recibo, c.codigo as cuenta,
         (SELECT GROUP_CONCAT(concepto, ' | ') FROM recibo_detalles WHERE recibo_id = r.id) as conceptos,
+        (SELECT GROUP_CONCAT(DISTINCT pc.nombre) FROM recibo_detalles rd2
+           INNER JOIN plan_cuentas pc ON pc.id = rd2.cuenta_contable_id WHERE rd2.recibo_id = r.id) as cuentas_contables,
         r.total, r.metodo_pago
       FROM recibos r
       INNER JOIN cuentas c ON c.id = r.cuenta_id
@@ -131,12 +139,16 @@ class ReporteRepository {
     const params = [];
     if (fechaDesde) { query += ' AND r.fecha_recibo >= ?'; params.push(fechaDesde); }
     if (fechaHasta) { query += ' AND r.fecha_recibo <= ?'; params.push(fechaHasta); }
+    if (cuentaContableId) {
+      query += ' AND EXISTS (SELECT 1 FROM recibo_detalles rd3 WHERE rd3.recibo_id = r.id AND rd3.cuenta_contable_id = ?)';
+      params.push(cuentaContableId);
+    }
     query += ' ORDER BY r.fecha_recibo DESC, r.numero_recibo DESC';
     return this.db.prepare(query).all(...params);
   }
 
-  getGastosPorPeriodo(fechaDesde = '', fechaHasta = '') {
-    return this.getHistorialGastos(fechaDesde, fechaHasta).filter(g => g.estado !== 'Anulado');
+  getGastosPorPeriodo(fechaDesde = '', fechaHasta = '', cuentaContableId = '') {
+    return this.getHistorialGastos(fechaDesde, fechaHasta, cuentaContableId).filter(g => g.estado !== 'Anulado');
   }
 
   // --- Datos base para los reportes contables simplificados ---

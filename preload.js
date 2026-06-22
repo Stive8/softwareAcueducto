@@ -103,6 +103,18 @@ contextBridge.exposeInMainWorld('api', {
     generarPDF: (tipoReporte, params) => ipcRenderer.invoke('reportes:generarPDF', tipoReporte, params),
     generarExcel: (tipoReporte, params) => ipcRenderer.invoke('reportes:generarExcel', tipoReporte, params)
   },
+  planCuentas: {
+    getAll: (params) => ipcRenderer.invoke('plancuentas:getAll', params),
+    getImputables: (params) => ipcRenderer.invoke('plancuentas:getImputables', params),
+    getById: (id) => ipcRenderer.invoke('plancuentas:getById', id),
+    create: (cuentaData) => ipcRenderer.invoke('plancuentas:create', cuentaData),
+    update: (id, cuentaData) => ipcRenderer.invoke('plancuentas:update', id, cuentaData),
+    toggleActivo: (id) => ipcRenderer.invoke('plancuentas:toggleActivo', id)
+  },
+  mapeoContable: {
+    getAll: (modulo) => ipcRenderer.invoke('mapeocontable:getAll', modulo),
+    actualizar: (modulo, concepto, cuentaContableId) => ipcRenderer.invoke('mapeocontable:actualizar', modulo, concepto, cuentaContableId)
+  },
   devtools: {
     tieneDatosOperativos: () => ipcRenderer.invoke('devtools:tieneDatosOperativos'),
     cargarDatosEjemplo: () => ipcRenderer.invoke('devtools:cargarDatosEjemplo'),
