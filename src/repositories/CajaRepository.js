@@ -98,6 +98,28 @@ class CajaRepository {
     return { ingresos, gastos, flujoNeto: ingresos - gastos };
   }
 
+  // Flujo de caja (Caja+Banco combinados): saldo inicial al comenzar el período, entradas y
+  // salidas de dinero dentro del período, y el saldo final resultante. Los 'Traslado' (caja a
+  // banco) se excluyen porque son movimientos internos entre cuentas propias: no son entradas
+  // ni salidas reales de dinero del acueducto, y al combinar Caja+Banco se cancelan entre sí.
+  getResumenFlujoCaja(fechaDesde = '', fechaHasta = '') {
+    const saldoInicialConfigurado = this.getSaldoInicial('saldo_caja_inicial') + this.getSaldoInicial('saldo_banco_inicial');
+
+    let saldoInicial = saldoInicialConfigurado;
+    if (fechaDesde) {
+      const antes = this.db.prepare(`
+        SELECT COALESCE(SUM(CASE WHEN tipo = 'Ingreso' THEN monto WHEN tipo = 'Egreso' THEN -monto ELSE 0 END), 0) as total
+        FROM movimientos
+        WHERE fecha_movimiento < ?
+      `).get(fechaDesde);
+      saldoInicial += antes.total;
+    }
+
+    const { ingresos: entradas, gastos: salidas } = this.getResumenPeriodo(fechaDesde, fechaHasta);
+
+    return { saldoInicial, entradas, salidas, saldoFinal: saldoInicial + entradas - salidas };
+  }
+
   crearMovimiento({ tipo, origen, destino = null, monto, concepto, referenciaId = null, referenciaTipo = null, fechaMovimiento, observaciones = null }) {
     const result = this.db.prepare(`
       INSERT INTO movimientos (tipo, origen, destino, monto, concepto, referencia_id, referencia_tipo, fecha_movimiento, observaciones)

@@ -55,6 +55,8 @@ class ReporteService {
         return this.reporteBalanceGeneral();
       case 'estado_resultados':
         return this.reporteEstadoResultados(params);
+      case 'flujo_caja':
+        return this.reporteFlujoCaja(params);
       case 'libro_diario':
         return this.reporteLibroDiario(params);
       default:
@@ -317,6 +319,41 @@ class ReporteService {
           titulo: 'Resultado Neto del Período',
           items: [{ label: 'Ingresos - Gastos', valor: totalIngresos - totalGastos }],
           total: totalIngresos - totalGastos
+        }
+      ]
+    };
+  }
+
+  // Flujo de Caja: a diferencia del Estado de Resultados (que clasifica por concepto/tipo),
+  // este reporte muestra el movimiento real de efectivo: cuánto había, cuánto entró, cuánto
+  // salió, y cuánto queda. Caja y Banco se presentan combinados (ver getResumenFlujoCaja).
+  reporteFlujoCaja({ fechaDesde = '', fechaHasta = '' } = {}) {
+    const { saldoInicial, entradas, salidas, saldoFinal } = this.cajaRepository.getResumenFlujoCaja(fechaDesde, fechaHasta);
+
+    return {
+      tipo: 'resumen',
+      titulo: 'Flujo de Caja',
+      periodo: { fechaDesde, fechaHasta },
+      secciones: [
+        {
+          titulo: 'Saldo Inicial (Caja + Banco)',
+          items: [{ label: 'Saldo al inicio del período', valor: saldoInicial }],
+          total: saldoInicial
+        },
+        {
+          titulo: 'Entradas de Dinero',
+          items: [{ label: 'Total ingresos del período', valor: entradas }],
+          total: entradas
+        },
+        {
+          titulo: 'Salidas de Dinero',
+          items: [{ label: 'Total gastos del período', valor: salidas }],
+          total: salidas
+        },
+        {
+          titulo: 'Saldo Final (Caja + Banco)',
+          items: [{ label: 'Saldo Inicial + Entradas - Salidas', valor: saldoFinal }],
+          total: saldoFinal
         }
       ]
     };

@@ -33,6 +33,7 @@ const Reportes = {
       reportes: [
         { tipo: 'balance_general', titulo: 'Balance General', icon: '📊' },
         { tipo: 'estado_resultados', titulo: 'Estado de Resultados', icon: '📋', rangoFecha: true },
+        { tipo: 'flujo_caja', titulo: 'Flujo de Caja', icon: '💧', rangoFecha: true },
         { tipo: 'libro_diario', titulo: 'Libro Diario', icon: '📖', rangoFecha: true }
       ]
     }
