@@ -66,6 +66,15 @@ class PagoRepository {
     return result.lastInsertRowid;
   }
 
+  // Total histórico pagado en sostenimiento y cantidad de meses/períodos cubiertos por esos pagos
+  getResumenPagos(cuentaId) {
+    return this.db.prepare(`
+      SELECT COALESCE(SUM(valor), 0) as totalPagado, COUNT(*) as totalMesesPagados
+      FROM pago_periodos
+      WHERE cuenta_id = ?
+    `).get(cuentaId);
+  }
+
   getSaldoCredito(cuentaId) {
     const result = this.db.prepare(`
       SELECT COALESCE(SUM(CASE WHEN tipo = 'Abono' THEN monto ELSE -monto END), 0) as saldo
@@ -119,10 +128,12 @@ class PagoRepository {
     return result.lastInsertRowid;
   }
 
-  // Listado paginado de cuentas con sus datos agregados de pago (para el módulo de Pagos)
+  // Cuentas con sus datos agregados de pago (para el módulo de Pagos). Devuelve TODAS las
+  // cuentas que cumplen search/estado, sin paginar: el servicio necesita conocer el estado de
+  // mora/saldo de cada una (calculado en JS) antes de poder filtrar por esos criterios y
+  // paginar correctamente sobre el resultado ya filtrado.
   getCuentasConEstado(params = {}) {
-    const { page = 1, limit = 10, search = '', estado = 'Activo' } = params;
-    const offset = (page - 1) * limit;
+    const { search = '', estado = 'Activo' } = params;
 
     let query = `
       SELECT
@@ -151,18 +162,9 @@ class PagoRepository {
       queryParams.push(estado);
     }
 
-    const countQuery = `SELECT COUNT(*) as total FROM cuentas c WHERE 1=1 ${search ? ' AND (c.codigo LIKE ? OR c.direccion LIKE ?)' : ''} ${estado ? ' AND c.estado = ?' : ''}`;
-    const total = this.db.prepare(countQuery).get(...queryParams).total;
+    query += ' ORDER BY c.codigo ASC';
 
-    query += ' ORDER BY c.codigo ASC LIMIT ? OFFSET ?';
-    queryParams.push(limit, offset);
-
-    const data = this.db.prepare(query).all(...queryParams);
-
-    return {
-      data,
-      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
-    };
+    return this.db.prepare(query).all(...queryParams);
   }
 }
 

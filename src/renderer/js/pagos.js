@@ -3,6 +3,7 @@ const Pagos = {
   currentPage: 1,
   limit: 10,
   search: '',
+  filtroPago: '',
 
   async load() {
     const content = document.getElementById('page-content');
@@ -17,6 +18,12 @@ const Pagos = {
           <h2>Estado de Cuentas</h2>
           <div class="table-controls">
             <input type="text" id="searchInput" class="search-box" placeholder="Buscar por código o dirección...">
+            <select id="filtroPagoSelect" class="filter-select">
+              <option value="">Todas las cuentas</option>
+              <option value="al_dia">Solo al día</option>
+              <option value="en_mora">Solo en mora</option>
+              <option value="saldo_favor">Solo con saldo a favor</option>
+            </select>
           </div>
         </div>
 
@@ -36,6 +43,12 @@ const Pagos = {
       this.currentPage = 1;
       this.loadCuentas();
     });
+
+    document.getElementById('filtroPagoSelect').addEventListener('change', (e) => {
+      this.filtroPago = e.target.value;
+      this.currentPage = 1;
+      this.loadCuentas();
+    });
   },
 
   async loadCuentas() {
@@ -44,7 +57,8 @@ const Pagos = {
         page: this.currentPage,
         limit: this.limit,
         search: this.search,
-        estado: 'Activo'
+        estado: 'Activo',
+        filtroPago: this.filtroPago
       });
 
       if (response.success) {
@@ -158,6 +172,18 @@ const Pagos = {
           <div class="detail-row">
             <div class="detail-label">Saldo a Favor:</div>
             <div class="detail-value">${estado.saldoAFavor > 0 ? `<strong>$${this.formatNumber(estado.saldoAFavor)}</strong>` : '$0'}</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Saldo Pendiente:</div>
+            <div class="detail-value">${estado.saldoPendienteEstimado > 0 ? `<strong style="color: #ef4444;">$${this.formatNumber(estado.saldoPendienteEstimado)}</strong> <small style="color: #64748b;">(estimado a tarifa actual)</small>` : '$0'}</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Total Pagado:</div>
+            <div class="detail-value">$${this.formatNumber(estado.totalPagado)}</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Meses Cubiertos:</div>
+            <div class="detail-value">${estado.totalMesesPagados}</div>
           </div>
         </div>
 

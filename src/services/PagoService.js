@@ -57,6 +57,15 @@ class PagoService {
     const mesesMora = Math.max(codificarPeriodo(periodoActual.anio, periodoActual.mes) - codificarPeriodo(siguiente.anio, siguiente.mes) + 1, 0);
     const enMora = mesesMora > 0;
     const saldoAFavor = this.repository.getSaldoCredito(cuentaId);
+    const { totalPagado, totalMesesPagados } = this.repository.getResumenPagos(cuentaId);
+
+    // Estimado en dinero de la deuda pendiente: meses en mora valorados a la tarifa vigente
+    // hoy de la categoría actual de la cuenta (igual criterio que en los reportes de cartera).
+    let saldoPendienteEstimado = 0;
+    if (enMora) {
+      const tarifaActual = this.repository.getCategoriaTarifaParaMes(cuentaId, periodoActual.anio, periodoActual.mes);
+      saldoPendienteEstimado = tarifaActual ? mesesMora * tarifaActual.tarifa_sostenimiento : 0;
+    }
 
     return {
       cuentaId,
@@ -66,7 +75,10 @@ class PagoService {
       siguientePeriodo: { anio: siguiente.anio, mes: siguiente.mes, label: this.formatPeriodo(siguiente.anio, siguiente.mes) },
       mesesMora,
       estadoMora: enMora ? 'En mora' : 'Al día',
-      saldoAFavor
+      saldoAFavor,
+      totalPagado,
+      totalMesesPagados,
+      saldoPendienteEstimado
     };
   }
 
@@ -260,11 +272,12 @@ class PagoService {
   }
 
   getCuentasConEstado(params) {
-    const resultado = this.repository.getCuentasConEstado(params);
+    const { page = 1, limit = 10, filtroPago = '' } = params;
+    const filas = this.repository.getCuentasConEstado(params);
     const ahora = new Date();
     const periodoActualCod = codificarPeriodo(ahora.getFullYear(), ahora.getMonth() + 1);
 
-    resultado.data = resultado.data.map(row => {
+    let procesadas = filas.map(row => {
       let pagadoHasta = null;
       let siguienteCod;
 
@@ -288,7 +301,22 @@ class PagoService {
       };
     });
 
-    return resultado;
+    if (filtroPago === 'al_dia') {
+      procesadas = procesadas.filter(c => c.meses_mora === 0);
+    } else if (filtroPago === 'en_mora') {
+      procesadas = procesadas.filter(c => c.meses_mora > 0);
+    } else if (filtroPago === 'saldo_favor') {
+      procesadas = procesadas.filter(c => c.saldo_favor > 0);
+    }
+
+    const total = procesadas.length;
+    const offset = (page - 1) * limit;
+    const data = procesadas.slice(offset, offset + limit);
+
+    return {
+      data,
+      pagination: { page, limit, total, totalPages: Math.ceil(total / limit) }
+    };
   }
 }
 
