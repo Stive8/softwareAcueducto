@@ -85,5 +85,10 @@ contextBridge.exposeInMainWorld('api', {
   reportes: {
     generarPDF: (tipoReporte, params) => ipcRenderer.invoke('reportes:generarPDF', tipoReporte, params),
     generarExcel: (tipoReporte, params) => ipcRenderer.invoke('reportes:generarExcel', tipoReporte, params)
+  },
+  devtools: {
+    tieneDatosOperativos: () => ipcRenderer.invoke('devtools:tieneDatosOperativos'),
+    cargarDatosEjemplo: () => ipcRenderer.invoke('devtools:cargarDatosEjemplo'),
+    eliminarDatosOperativos: () => ipcRenderer.invoke('devtools:eliminarDatosOperativos')
   }
 });

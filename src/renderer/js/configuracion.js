@@ -129,6 +129,21 @@ const Configuracion = {
           </div>
         </div>
       </div>
+
+      <div class="table-container" style="margin-top: 24px;">
+        <div class="table-header"><h2>Modo de Pruebas</h2></div>
+        <div style="padding: 24px;">
+          <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 16px;">
+            <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+              <strong>Solo para pruebas.</strong> Estas opciones no se ejecutan nunca de forma automática; sirven para activar o desactivar datos de ejemplo (cuentas, propietarios, pagos, gastos) mientras se valida el sistema. No afectan categorías, configuración ni el usuario administrador.
+            </p>
+          </div>
+          <div class="form-actions" style="justify-content: flex-start;">
+            <button type="button" class="btn btn-success" id="btnCargarEjemplo">Cargar Datos de Ejemplo</button>
+            <button type="button" class="btn btn-danger" id="btnEliminarOperativos">Eliminar Todos los Datos Operativos</button>
+          </div>
+        </div>
+      </div>
     `;
 
     App.attachMoneyInput(document.getElementById('valor_nuevo_punto'));
@@ -147,6 +162,8 @@ const Configuracion = {
 
     document.getElementById('btnCrearBackup').addEventListener('click', () => this.crearBackup());
     document.getElementById('btnRestaurarBackup').addEventListener('click', () => this.restaurarBackup());
+    document.getElementById('btnCargarEjemplo').addEventListener('click', () => this.cargarDatosEjemplo());
+    document.getElementById('btnEliminarOperativos').addEventListener('click', () => this.eliminarDatosOperativos());
   },
 
   formatMoney(value) {
@@ -245,6 +262,46 @@ const Configuracion = {
     } catch (error) {
       console.error('Error:', error);
       App.toast('Error al restaurar la copia de seguridad', 'error');
+    }
+  },
+
+  async cargarDatosEjemplo() {
+    const confirmado = await App.confirmDialog(
+      'Esto creará cuentas, propietarios, pagos, gastos y un punto nuevo de ejemplo para que pruebes el sistema. Solo funciona si no hay cuentas registradas todavía. ¿Desea continuar?',
+      { titulo: 'Cargar Datos de Ejemplo', textoConfirmar: 'Sí, cargar' }
+    );
+    if (!confirmado) return;
+
+    try {
+      const response = await window.api.devtools.cargarDatosEjemplo();
+      if (response.success) {
+        App.toast('Datos de ejemplo cargados con éxito');
+      } else {
+        App.toast('Error al cargar los datos de ejemplo: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al cargar los datos de ejemplo', 'error');
+    }
+  },
+
+  async eliminarDatosOperativos() {
+    const confirmado = await App.confirmDialog(
+      'Esto eliminará PERMANENTEMENTE todas las cuentas, propietarios, pagos, recibos, gastos, movimientos y nuevos puntos (sean de ejemplo o reales). No afecta categorías, configuración ni el usuario administrador. Esta acción no se puede deshacer. ¿Desea continuar?',
+      { titulo: 'Eliminar Todos los Datos Operativos', textoConfirmar: 'Sí, eliminar todo' }
+    );
+    if (!confirmado) return;
+
+    try {
+      const response = await window.api.devtools.eliminarDatosOperativos();
+      if (response.success) {
+        App.toast('Datos operativos eliminados con éxito');
+      } else {
+        App.toast('Error al eliminar los datos operativos: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al eliminar los datos operativos', 'error');
     }
   }
 };

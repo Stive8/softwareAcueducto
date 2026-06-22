@@ -16,6 +16,7 @@ const BackupService = require('./src/services/BackupService');
 const NuevoPuntoService = require('./src/services/NuevoPuntoService');
 const ReporteService = require('./src/services/ReporteService');
 const ExcelExportService = require('./src/services/ExcelExportService');
+const DevToolsService = require('./src/services/DevToolsService');
 
 let mainWindow;
 let dbService;
@@ -33,6 +34,7 @@ let backupService;
 let nuevoPuntoService;
 let reporteService;
 let excelExportService;
+let devToolsService;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -54,7 +56,11 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  dbService = new DatabaseService(app.getPath('userData'));
+  // Empaquetada (instalada): app.getPath('userData'), la única carpeta escribible una vez
+  // instalada en Program Files. En desarrollo (npm start): la carpeta del proyecto, para que
+  // borrar/inspeccionar data/acueducto.db localmente tenga efecto real.
+  const baseDirDb = app.isPackaged ? app.getPath('userData') : __dirname;
+  dbService = new DatabaseService(baseDirDb);
   dbService.initialize();
   
   cuentaService = new CuentaService(dbService);
@@ -71,6 +77,7 @@ app.whenReady().then(() => {
   nuevoPuntoService = new NuevoPuntoService(dbService);
   reporteService = new ReporteService(dbService);
   excelExportService = new ExcelExportService(dbService);
+  devToolsService = new DevToolsService(dbService);
 
   setupIpcHandlers();
   createWindow();
@@ -736,6 +743,32 @@ function setupIpcHandlers() {
       fs.writeFileSync(filePath, buffer);
 
       return { success: true, filePath };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Herramientas de prueba (solo datos de ejemplo, nunca se ejecutan automáticamente)
+  ipcMain.handle('devtools:tieneDatosOperativos', async () => {
+    try {
+      return { success: true, data: devToolsService.tieneDatosOperativos() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('devtools:cargarDatosEjemplo', async () => {
+    try {
+      return { success: true, data: devToolsService.cargarDatosEjemplo() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('devtools:eliminarDatosOperativos', async () => {
+    try {
+      devToolsService.eliminarDatosOperativos();
+      return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
     }

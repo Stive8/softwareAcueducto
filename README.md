@@ -1,189 +1,73 @@
 # Sistema Administrativo - Acueducto Veredal
 
-Sistema de escritorio 100% offline para la administración de acueductos veredales en Colombia.
+Aplicación de escritorio 100% offline para la administración de acueductos veredales en Colombia: cuentas/predios, propietarios, categorías y tarifas históricas, pagos y recibos, gastos, caja y bancos, nuevos puntos de conexión, reportes y configuración con seguridad básica.
+
+No es un ERP: el sistema está deliberadamente acotado a lo que necesita una junta de acueducto veredal, sin contabilidad de doble partida ni módulos que no se usan en este contexto.
 
 ## Stack Tecnológico
 
-- **Electron**: Framework para aplicaciones de escritorio
-- **SQLite**: Base de datos local con better-sqlite3
-- **JavaScript Vanilla**: Frontend sin frameworks adicionales
-- **Chart.js**: Visualización de datos
-- **HTML/CSS**: Interfaz de usuario moderna
+- **Electron** — aplicación de escritorio para Windows
+- **better-sqlite3** — base de datos local, sin dependencias externas ni nube
+- **JavaScript vanilla** en el renderer (sin frameworks de frontend)
+- **Chart.js** — gráficos del dashboard
+- **exceljs** — exportación de reportes a Excel
+- **electron-builder** — empaquetado del instalador `.exe`
 
-## Estructura del Proyecto
+## Reglas de negocio clave
 
-```
-softwareAcueducto/
-├── main.js                          # Proceso principal de Electron
-├── preload.js                       # Bridge seguro entre main y renderer
-├── package.json                     # Dependencias y scripts
-├── data/                            # Base de datos SQLite (generada automáticamente)
-│   └── acueducto.db
-├── src/
-│   ├── database/
-│   │   ├── DatabaseService.js       # Servicio de base de datos
-│   │   └── migrations/              # Migraciones SQL
-│   │       └── 001_create_initial_tables.sql
-│   ├── repositories/                # Capa de acceso a datos
-│   │   ├── CuentaRepository.js
-│   │   └── DashboardRepository.js
-│   ├── services/                    # Lógica de negocio
-│   │   ├── CuentaService.js
-│   │   └── DashboardService.js
-│   └── renderer/                    # Frontend
-│       ├── index.html
-│       ├── css/
-│       │   └── styles.css
-│       └── js/
-│           ├── app.js               # Aplicación principal
-│           ├── dashboard.js         # Módulo Dashboard
-│           └── cuentas.js           # Módulo Cuentas
-└── assets/                          # Recursos estáticos
-```
+- La **cuenta/predio** es la entidad central, no el usuario. Propietarios y categorías cambian con el tiempo y se conserva su historial completo.
+- Los pagos son siempre por **mes calendario completo** (nunca por cortes ni rangos de días), y un solo pago puede cubrir varios meses atrasados o futuros.
+- Las **tarifas son históricas por categoría y año**: nunca se sobrescriben, así que una deuda vieja se cobra al precio vigente en esa fecha, no al precio actual.
+- La numeración de recibos es **global y consecutiva**, configurable pero nunca reiniciable libremente.
+- **Nada se elimina**, solo se desactiva/anula/cancela (cuentas, gastos, nuevos puntos, etc.).
+- El sistema **no genera facturación automática**: todo pago o gasto se registra manualmente.
+
+## Módulos
+
+| Módulo | Qué hace |
+|---|---|
+| Dashboard | Indicadores generales: cuentas al día/en mora/con saldo a favor, caja, banco |
+| Cuentas | Alta y gestión de predios, código manual, historial de propietarios y categorías |
+| Propietarios | Personas/entidades asociadas a una o más cuentas a lo largo del tiempo |
+| Categorías | Tipos de cuenta (Finca, Tienda, etc.) y su tarifa histórica de sostenimiento |
+| Pagos | Estado de cartera (al día/en mora/saldo a favor), registro de pagos y abonos |
+| Recibos | Comprobantes generados por cada pago, impresión y exportación a PDF |
+| Gastos | Egresos del acueducto (proveedor, NIT/cédula, categoría del gasto) |
+| Caja y Bancos | Saldos, movimientos, consignaciones, resumen de flujo del período |
+| Nuevos Puntos | Conexiones nuevas con valor total y abonos parciales hasta saldarse |
+| Reportes | Cartera, ingresos/gastos por período, y contabilidad simplificada (Estado de Resultados, Balance General, Flujo de Caja) exportables a PDF y Excel |
+| Configuración | Datos de la asociación, parámetros, cambio de contraseña, copia de seguridad/restauración |
 
 ## Arquitectura
 
-### Capas de la Aplicación
+- **Renderer** (`src/renderer/`): HTML/CSS/JS vanilla, un archivo por módulo, sin acceso directo a Node — todo pasa por `window.api` (expuesto en `preload.js` vía `contextBridge`).
+- **Proceso principal** (`main.js`): registra los manejadores `ipcMain.handle(...)`, cada uno devuelve `{ success, data }` o `{ success, error }`.
+- **Servicios** (`src/services/`): lógica de negocio y validaciones, componen uno o más repositorios.
+- **Repositorios** (`src/repositories/`): acceso directo a SQLite vía `better-sqlite3`.
+- **Migraciones** (`src/database/migrations/`): archivos `.sql` numerados, ejecutados una sola vez y registrados en la tabla `migrations`.
 
-1. **Capa de Presentación (Renderer)**
-   - HTML/CSS/JS vanilla
-   - Comunicación con backend vía IPC (Electron)
+## Instalación y ejecución (desarrollo)
 
-2. **Capa de Servicios**
-   - Lógica de negocio
-   - Validaciones
-   - Orquestación de repositorios
-
-3. **Capa de Repositorios**
-   - Acceso directo a base de datos
-   - Queries SQL
-   - CRUD operations
-
-4. **Capa de Persistencia**
-   - SQLite con better-sqlite3
-   - Sistema de migraciones
-   - Integridad referencial
-
-### Sistema de Migraciones
-
-Las migraciones SQL se ejecutan automáticamente al iniciar la aplicación:
-- Se crean en orden numérico: `001_nombre.sql`, `002_nombre.sql`, etc.
-- Se registran en tabla `migrations` para evitar re-ejecución
-- Permiten evolucionar el esquema sin perder datos
-
-## Funcionalidades Implementadas (Fase 1)
-
-### Dashboard
-- Total de cuentas por estado (Activo/Inactivo/Suspendido)
-- Cuentas al día vs en mora
-- Ingresos del mes actual
-- Gastos del mes actual
-- Saldo en caja
-- Saldo en banco
-- Gráfico de ingresos vs gastos (últimos 6 meses)
-
-### Módulo de Cuentas/Predios
-- Listado con paginación
-- Búsqueda por código o dirección
-- Filtros por estado y categoría
-- Crear cuenta con código manual (obligatorio)
-- Editar cuenta existente
-- Cambiar estado (nunca eliminar)
-- Ver detalle completo de cuenta
-- Campos: código, dirección, categoría, estado, observaciones, fechas
-
-## Preparado para Fases Siguientes
-
-El sistema está arquitectónicamente preparado para:
-
-- **Propietarios**: Gestión de personas asociadas a cuentas
-- **Historial de propietarios**: Trazabilidad de cambios de dueño
-- **Categorías personalizadas**: Gestión de tipos de cuenta
-- **Historial de categorías**: Cambios de categoría por cuenta
-- **Tarifas**: Configuración de precios por categoría
-- **Historial de tarifas**: Control de cambios de precios
-- **Pagos**: Registro de pagos de usuarios
-- **Recibos**: Generación de comprobantes
-- **Gastos**: Control de egresos del acueducto
-- **Caja y Banco**: Movimientos financieros
-- **Configuración**: Parámetros del sistema
-- **Seguridad**: Autenticación y permisos
-
-Las tablas ya están creadas en la base de datos.
-
-## Instalación y Ejecución
-
-### Requisitos Previos
-- Node.js 18 o superior
-- Windows 10/11
-
-### Comandos de Instalación
+Requisitos: Node.js 18+ y Windows.
 
 ```bash
-# 1. Instalar dependencias
 npm install
-
-# 2. Ejecutar aplicación en modo desarrollo
 npm start
-
-# 3. Ejecutar con DevTools abierto
-npm run dev
 ```
 
-### Primera Ejecución
+En desarrollo la base de datos vive en `data/acueducto.db` dentro del proyecto (se crea sola en el primer arranque, junto con las categorías base y el usuario `admin`/`admin123`). Si necesitas reiniciarla por completo, usa `resetear_db.bat` o bórrala manualmente.
 
-Al ejecutar por primera vez:
-1. Se crea automáticamente la carpeta `data/`
-2. Se genera la base de datos `acueducto.db`
-3. Se ejecutan todas las migraciones SQL
-4. Se insertan datos iniciales (categorías, configuración)
+### Modo de Pruebas
 
-## Base de Datos
+Desde **Configuración → Modo de Pruebas** puedes cargar o eliminar datos de ejemplo (cuentas, propietarios, pagos, gastos) mientras pruebas el sistema, sin afectar categorías, configuración ni el usuario administrador. Nunca se ejecuta automáticamente.
 
-### Tablas Principales (Fase 1)
+## Generar el instalador de Windows
 
-- **cuentas**: Predios/cuentas del acueducto
-- **categorias**: Tipos de cuenta (Residencial, Comercial, Institucional)
-- **configuracion**: Parámetros del sistema
+```bash
+npm run dist
+```
 
-### Tablas Preparadas (Fases futuras)
-
-- **propietarios**: Personas asociadas a cuentas
-- **cuenta_propietarios**: Historial de propietarios por cuenta
-- **cuenta_categorias**: Historial de categorías por cuenta
-- **tarifas**: Precios por categoría
-- **pagos**: Registros de pago
-- **gastos**: Egresos del acueducto
-- **movimientos**: Flujo de caja y banco
-
-## Diseño de Interfaz
-
-- **Colores**: Azul (#1e40af), blanco, grises
-- **Menú lateral izquierdo** con íconos
-- **Diseño limpio y moderno**
-- **Fácil de usar** para usuarios con conocimientos básicos
-- **Totalmente responsive**
-
-## Buenas Prácticas Implementadas
-
-- Separación de responsabilidades (repositorios, servicios, vistas)
-- Context isolation en Electron (seguridad)
-- Sistema de migraciones SQL versionado
-- Validaciones en capa de servicio
-- No se eliminan registros, solo se cambia estado
-- Códigos manuales (no autogenerados)
-- Persistencia 100% en SQLite (no localStorage)
-
-## Desarrollo Futuro
-
-Para agregar nuevas funcionalidades:
-
-1. **Crear migración SQL** en `src/database/migrations/`
-2. **Agregar repositorio** en `src/repositories/`
-3. **Crear servicio** en `src/services/`
-4. **Exponer IPC handlers** en `main.js`
-5. **Agregar APIs** en `preload.js`
-6. **Crear vista** en `src/renderer/js/`
+Esto recompila `better-sqlite3` para la versión de Electron usada (`npm run rebuild`) y genera `dist/Acueducto Admin Setup <version>.exe` con electron-builder. En la app instalada, la base de datos vive en la carpeta de datos del usuario de Windows (`%APPDATA%/acueducto-admin`), no dentro de la carpeta de instalación.
 
 ## Licencia
 
