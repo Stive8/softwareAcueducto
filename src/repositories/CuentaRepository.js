@@ -146,15 +146,17 @@ class CuentaRepository {
   }
 
   getStats() {
+    // COALESCE es necesario porque SUM() sobre una tabla vacía devuelve NULL (no 0),
+    // sin importar que el CASE siempre evalúe a 0: simplemente no hay filas que sumar.
     const stats = this.db.prepare(`
-      SELECT 
+      SELECT
         COUNT(*) as total,
-        SUM(CASE WHEN estado = 'Activo' THEN 1 ELSE 0 END) as activas,
-        SUM(CASE WHEN estado = 'Inactivo' THEN 1 ELSE 0 END) as inactivas,
-        SUM(CASE WHEN estado = 'Suspendido' THEN 1 ELSE 0 END) as suspendidas
+        COALESCE(SUM(CASE WHEN estado = 'Activo' THEN 1 ELSE 0 END), 0) as activas,
+        COALESCE(SUM(CASE WHEN estado = 'Inactivo' THEN 1 ELSE 0 END), 0) as inactivas,
+        COALESCE(SUM(CASE WHEN estado = 'Suspendido' THEN 1 ELSE 0 END), 0) as suspendidas
       FROM cuentas
     `).get();
-    
+
     return stats;
   }
 
