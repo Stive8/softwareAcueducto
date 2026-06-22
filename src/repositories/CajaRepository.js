@@ -80,6 +80,24 @@ class CajaRepository {
     };
   }
 
+  // Resumen de Ingresos/Gastos/Flujo neto en un rango de fechas. Los 'Traslado' (ej.
+  // consignación de caja a banco) se excluyen a propósito: son movimientos internos entre
+  // cuentas propias, no ingresos ni gastos reales.
+  getResumenPeriodo(fechaDesde = '', fechaHasta = '') {
+    let query = `SELECT tipo, COALESCE(SUM(monto), 0) as total FROM movimientos WHERE tipo IN ('Ingreso', 'Egreso')`;
+    const params = [];
+
+    if (fechaDesde) { query += ' AND fecha_movimiento >= ?'; params.push(fechaDesde); }
+    if (fechaHasta) { query += ' AND fecha_movimiento <= ?'; params.push(fechaHasta); }
+    query += ' GROUP BY tipo';
+
+    const rows = this.db.prepare(query).all(...params);
+    const ingresos = rows.find(r => r.tipo === 'Ingreso')?.total || 0;
+    const gastos = rows.find(r => r.tipo === 'Egreso')?.total || 0;
+
+    return { ingresos, gastos, flujoNeto: ingresos - gastos };
+  }
+
   crearMovimiento({ tipo, origen, destino = null, monto, concepto, referenciaId = null, referenciaTipo = null, fechaMovimiento, observaciones = null }) {
     const result = this.db.prepare(`
       INSERT INTO movimientos (tipo, origen, destino, monto, concepto, referencia_id, referencia_tipo, fecha_movimiento, observaciones)

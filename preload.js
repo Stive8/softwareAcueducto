@@ -60,7 +60,8 @@ contextBridge.exposeInMainWorld('api', {
   caja: {
     getSaldos: () => ipcRenderer.invoke('caja:getSaldos'),
     getMovimientos: (params) => ipcRenderer.invoke('caja:getMovimientos', params),
-    registrarConsignacion: (payload) => ipcRenderer.invoke('caja:registrarConsignacion', payload)
+    registrarConsignacion: (payload) => ipcRenderer.invoke('caja:registrarConsignacion', payload),
+    getResumenPeriodo: (fechaDesde, fechaHasta) => ipcRenderer.invoke('caja:getResumenPeriodo', fechaDesde, fechaHasta)
   },
   auth: {
     login: (usuario, password) => ipcRenderer.invoke('auth:login', usuario, password),

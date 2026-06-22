@@ -9,6 +9,16 @@ const Caja = {
 
   async load() {
     const content = document.getElementById('page-content');
+
+    if (!this.fechaDesde) {
+      const inicioMes = new Date();
+      inicioMes.setDate(1);
+      this.fechaDesde = inicioMes.toISOString().split('T')[0];
+    }
+    if (!this.fechaHasta) {
+      this.fechaHasta = new Date().toISOString().split('T')[0];
+    }
+
     content.innerHTML = `
       <div class="page-header">
         <h1>Caja y Bancos</h1>
@@ -17,6 +27,16 @@ const Caja = {
 
       <div class="stats-grid" id="saldosGrid">
         <p style="padding: 24px; text-align: center;">Cargando saldos...</p>
+      </div>
+
+      <div class="table-container" style="margin-bottom: 24px;">
+        <div class="table-header">
+          <h2>Resumen del Período</h2>
+          <p style="color: #64748b; font-size: 13px;">Usa los filtros de fecha de "Historial de Movimientos" para cambiar el período.</p>
+        </div>
+        <div class="stats-grid" id="resumenPeriodoGrid" style="padding: 24px;">
+          <p style="text-align: center;">Cargando resumen...</p>
+        </div>
       </div>
 
       <div class="table-container">
@@ -34,8 +54,8 @@ const Caja = {
               <option value="Egreso">Egresos</option>
               <option value="Traslado">Traslados</option>
             </select>
-            <input type="date" id="fechaDesdeFilter" class="filter-select" title="Desde">
-            <input type="date" id="fechaHastaFilter" class="filter-select" title="Hasta">
+            <input type="date" id="fechaDesdeFilter" class="filter-select" title="Desde" value="${this.fechaDesde}">
+            <input type="date" id="fechaHastaFilter" class="filter-select" title="Hasta" value="${this.fechaHasta}">
             <button class="btn btn-primary" id="btnConsignacion">+ Registrar Consignación</button>
           </div>
         </div>
@@ -48,6 +68,7 @@ const Caja = {
 
     this.setupEventListeners();
     await this.loadSaldos();
+    await this.loadResumenPeriodo();
     await this.loadMovimientos();
   },
 
@@ -67,12 +88,14 @@ const Caja = {
     document.getElementById('fechaDesdeFilter').addEventListener('change', (e) => {
       this.fechaDesde = e.target.value;
       this.currentPage = 1;
+      this.loadResumenPeriodo();
       this.loadMovimientos();
     });
 
     document.getElementById('fechaHastaFilter').addEventListener('change', (e) => {
       this.fechaHasta = e.target.value;
       this.currentPage = 1;
+      this.loadResumenPeriodo();
       this.loadMovimientos();
     });
 
@@ -114,6 +137,47 @@ const Caja = {
             <span class="stat-card-icon">💰</span>
           </div>
           <div class="stat-card-value">$${this.formatNumber(saldoCaja + saldoBanco)}</div>
+        </div>
+      `;
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  },
+
+  async loadResumenPeriodo() {
+    try {
+      const response = await window.api.caja.getResumenPeriodo(this.fechaDesde, this.fechaHasta);
+      const grid = document.getElementById('resumenPeriodoGrid');
+
+      if (!response.success) {
+        grid.innerHTML = `<p style="color: #ef4444;">Error al cargar el resumen: ${response.error}</p>`;
+        return;
+      }
+
+      const { ingresos, gastos, flujoNeto } = response.data;
+      const colorFlujo = flujoNeto >= 0 ? '#10b981' : '#ef4444';
+
+      grid.innerHTML = `
+        <div class="stat-card">
+          <div class="stat-card-header">
+            <span class="stat-card-title">Ingresos del Período</span>
+            <span class="stat-card-icon">📈</span>
+          </div>
+          <div class="stat-card-value" style="color: #10b981;">$${this.formatNumber(ingresos)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-header">
+            <span class="stat-card-title">Gastos del Período</span>
+            <span class="stat-card-icon">📉</span>
+          </div>
+          <div class="stat-card-value" style="color: #ef4444;">$${this.formatNumber(gastos)}</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-card-header">
+            <span class="stat-card-title">Flujo Neto</span>
+            <span class="stat-card-icon">⚖️</span>
+          </div>
+          <div class="stat-card-value" style="color: ${colorFlujo};">$${this.formatNumber(flujoNeto)}</div>
         </div>
       `;
     } catch (error) {

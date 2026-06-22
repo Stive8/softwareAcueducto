@@ -535,6 +535,14 @@ function setupIpcHandlers() {
     }
   });
 
+  ipcMain.handle('caja:getResumenPeriodo', async (event, fechaDesde, fechaHasta) => {
+    try {
+      return { success: true, data: cajaService.getResumenPeriodo(fechaDesde, fechaHasta) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Autenticación
   ipcMain.handle('auth:login', async (event, usuario, password) => {
     try {
