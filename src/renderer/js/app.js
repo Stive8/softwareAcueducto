@@ -80,7 +80,12 @@ const App = {
     });
   },
 
-  logout() {
+  async logout() {
+    try {
+      await window.api.auth.logout();
+    } catch (error) {
+      console.error('Error al cerrar sesión:', error);
+    }
     this.currentUser = null;
     document.getElementById('appContainer').style.display = 'none';
     document.getElementById('loginScreen').style.display = 'flex';

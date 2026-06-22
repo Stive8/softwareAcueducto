@@ -17,6 +17,7 @@ const NuevoPuntoService = require('./src/services/NuevoPuntoService');
 const ReporteService = require('./src/services/ReporteService');
 const ExcelExportService = require('./src/services/ExcelExportService');
 const DevToolsService = require('./src/services/DevToolsService');
+const AuditoriaService = require('./src/services/AuditoriaService');
 
 let mainWindow;
 let dbService;
@@ -35,6 +36,82 @@ let nuevoPuntoService;
 let reporteService;
 let excelExportService;
 let devToolsService;
+let auditoriaService;
+
+// Sesión activa del único usuario que puede estar usando esta app de escritorio a la vez.
+// No es solo un dato de UI: la capa de permisos de abajo (envolverHandle) la usa para decidir
+// qué canal de IPC puede ejecutar cada rol, y para saber a quién atribuir cada acción auditada.
+let sesionActual = null;
+
+// Canales de solo lectura: identificados por el verbo del método (get/find/simular/...). Estos
+// están permitidos para cualquier rol, incluido Consulta. Todo lo que no matchee aquí se considera
+// una escritura y requiere rol Usuario o Administrador como mínimo.
+const PREFIJOS_LECTURA = ['get', 'find', 'simular', 'tiene', 'imprimir', 'exportar', 'generar'];
+
+// Acciones reservadas exclusivamente al rol Administrador, sin importar que no sean de lectura.
+const CANALES_SOLO_ADMIN = new Set([
+  'usuarios:getAll', 'usuarios:crear', 'usuarios:toggleActivo', 'usuarios:resetearPassword',
+  'config:actualizar', 'backup:restaurar',
+  'devtools:cargarDatosEjemplo', 'devtools:eliminarDatosOperativos',
+  'auditoria:getAll'
+]);
+
+function esCanalDeLectura(canal) {
+  const metodo = canal.split(':')[1] || '';
+  return PREFIJOS_LECTURA.some(prefijo => metodo.startsWith(prefijo));
+}
+
+// Envuelve ipcMain.handle para aplicar sesión, permisos por rol y auditoría automática a TODOS
+// los canales sin tener que tocar cada handler uno por uno. auth:login es la única excepción
+// (todavía no hay sesión cuando se llama), y auth:cambiarPassword solo exige estar logueado
+// (cualquier rol puede cambiar su propia contraseña).
+function envolverHandle(canal, fn) {
+  ipcMain.handle(canal, async (event, ...args) => {
+    if (canal === 'auth:login') {
+      const resultado = await fn(event, ...args);
+      if (resultado.success) {
+        sesionActual = resultado.data;
+        auditoriaService.registrar({ usuarioId: sesionActual.id, accion: 'login', tabla: 'usuarios', registroId: sesionActual.id });
+      }
+      return resultado;
+    }
+
+    if (!sesionActual) {
+      return { success: false, error: 'Debe iniciar sesión' };
+    }
+
+    if (canal === 'auth:logout') {
+      auditoriaService.registrar({ usuarioId: sesionActual.id, accion: 'logout', tabla: 'usuarios', registroId: sesionActual.id });
+      sesionActual = null;
+      return { success: true };
+    }
+
+    if (canal === 'auth:cambiarPassword') {
+      return fn(event, ...args);
+    }
+
+    if (CANALES_SOLO_ADMIN.has(canal) && sesionActual.rol !== 'Administrador') {
+      return { success: false, error: 'Esta acción requiere permisos de Administrador' };
+    }
+
+    const esLectura = esCanalDeLectura(canal);
+    if (!esLectura && sesionActual.rol === 'Consulta') {
+      return { success: false, error: 'Su rol de Consulta solo permite ver información, no modificarla' };
+    }
+
+    const resultado = await fn(event, ...args);
+
+    if (!esLectura && resultado && resultado.success) {
+      const [modulo, metodo] = canal.split(':');
+      const registroId = resultado.data?.id ?? resultado.data?.reciboId ?? (typeof args[0] === 'number' ? args[0] : null);
+      let datosNuevos = null;
+      try { datosNuevos = JSON.stringify(args[0] ?? null); } catch { /* no serializable, se omite */ }
+      auditoriaService.registrar({ usuarioId: sesionActual.id, accion: metodo, tabla: modulo, registroId, datosNuevos });
+    }
+
+    return resultado;
+  });
+}
 
 function createWindow() {
   // Esta es una app administrativa, no un navegador: el menú File/Edit/View de Electron
@@ -82,9 +159,13 @@ app.whenReady().then(() => {
   reporteService = new ReporteService(dbService);
   excelExportService = new ExcelExportService(dbService);
   devToolsService = new DevToolsService(dbService);
+  auditoriaService = new AuditoriaService(dbService);
 
   setupIpcHandlers();
   createWindow();
+
+  // No bloquea el arranque: corre en segundo plano y solo actúa si ya pasó el intervalo.
+  backupService.ejecutarSiCorresponde();
 });
 
 app.on('window-all-closed', () => {
@@ -101,7 +182,7 @@ app.on('activate', () => {
 
 function setupIpcHandlers() {
   // Dashboard
-  ipcMain.handle('dashboard:getStats', async () => {
+  envolverHandle('dashboard:getStats', async () => {
     try {
       return { success: true, data: dashboardService.getStats() };
     } catch (error) {
@@ -109,7 +190,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('dashboard:getChartData', async () => {
+  envolverHandle('dashboard:getChartData', async () => {
     try {
       return { success: true, data: dashboardService.getChartData() };
     } catch (error) {
@@ -118,7 +199,7 @@ function setupIpcHandlers() {
   });
 
   // Cuentas
-  ipcMain.handle('cuentas:getAll', async (event, params) => {
+  envolverHandle('cuentas:getAll', async (event, params) => {
     try {
       return { success: true, data: cuentaService.getAll(params) };
     } catch (error) {
@@ -126,7 +207,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('cuentas:getById', async (event, id) => {
+  envolverHandle('cuentas:getById', async (event, id) => {
     try {
       const cuenta = cuentaService.getById(id);
       if (!cuenta) {
@@ -138,7 +219,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('cuentas:getCategorias', async () => {
+  envolverHandle('cuentas:getCategorias', async () => {
     try {
       return { success: true, data: cuentaService.getCategorias() };
     } catch (error) {
@@ -146,7 +227,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('cuentas:create', async (event, cuentaData) => {
+  envolverHandle('cuentas:create', async (event, cuentaData) => {
     try {
       const id = cuentaService.create(cuentaData);
       return { success: true, data: { id } };
@@ -155,7 +236,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('cuentas:update', async (event, id, cuentaData) => {
+  envolverHandle('cuentas:update', async (event, id, cuentaData) => {
     try {
       cuentaService.update(id, cuentaData);
       return { success: true };
@@ -164,7 +245,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('cuentas:changeStatus', async (event, id, estado) => {
+  envolverHandle('cuentas:changeStatus', async (event, id, estado) => {
     try {
       cuentaService.changeStatus(id, estado);
       return { success: true };
@@ -174,7 +255,7 @@ function setupIpcHandlers() {
   });
 
   // Propietarios
-  ipcMain.handle('propietarios:getAll', async (event, params) => {
+  envolverHandle('propietarios:getAll', async (event, params) => {
     try {
       return { success: true, data: propietarioService.getAll(params) };
     } catch (error) {
@@ -182,7 +263,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('propietarios:getById', async (event, id) => {
+  envolverHandle('propietarios:getById', async (event, id) => {
     try {
       const propietario = propietarioService.getById(id);
       if (!propietario) {
@@ -194,7 +275,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('propietarios:create', async (event, propietarioData) => {
+  envolverHandle('propietarios:create', async (event, propietarioData) => {
     try {
       const id = propietarioService.create(propietarioData);
       return { success: true, data: { id } };
@@ -203,7 +284,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('propietarios:update', async (event, id, propietarioData) => {
+  envolverHandle('propietarios:update', async (event, id, propietarioData) => {
     try {
       propietarioService.update(id, propietarioData);
       return { success: true };
@@ -212,7 +293,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('propietarios:getCuentasActuales', async (event, propietarioId) => {
+  envolverHandle('propietarios:getCuentasActuales', async (event, propietarioId) => {
     try {
       return { success: true, data: propietarioService.getCuentasActuales(propietarioId) };
     } catch (error) {
@@ -220,7 +301,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('propietarios:getHistorialCuentas', async (event, propietarioId) => {
+  envolverHandle('propietarios:getHistorialCuentas', async (event, propietarioId) => {
     try {
       return { success: true, data: propietarioService.getHistorialCuentas(propietarioId) };
     } catch (error) {
@@ -228,7 +309,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('propietarios:asignarACuenta', async (event, cuentaId, propietarioId, fechaInicio, observaciones) => {
+  envolverHandle('propietarios:asignarACuenta', async (event, cuentaId, propietarioId, fechaInicio, observaciones) => {
     try {
       propietarioService.asignarACuenta(cuentaId, propietarioId, fechaInicio, observaciones);
       return { success: true };
@@ -237,7 +318,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('propietarios:getHistorialPropietariosCuenta', async (event, cuentaId) => {
+  envolverHandle('propietarios:getHistorialPropietariosCuenta', async (event, cuentaId) => {
     try {
       return { success: true, data: propietarioService.getHistorialPropietariosCuenta(cuentaId) };
     } catch (error) {
@@ -246,7 +327,7 @@ function setupIpcHandlers() {
   });
 
   // Categorías
-  ipcMain.handle('categorias:getAll', async (event, params) => {
+  envolverHandle('categorias:getAll', async (event, params) => {
     try {
       return { success: true, data: categoriaService.getAll(params) };
     } catch (error) {
@@ -254,7 +335,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('categorias:getById', async (event, id) => {
+  envolverHandle('categorias:getById', async (event, id) => {
     try {
       const categoria = categoriaService.getById(id);
       if (!categoria) {
@@ -266,7 +347,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('categorias:create', async (event, categoriaData) => {
+  envolverHandle('categorias:create', async (event, categoriaData) => {
     try {
       const id = categoriaService.create(categoriaData);
       return { success: true, data: { id } };
@@ -275,7 +356,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('categorias:update', async (event, id, categoriaData) => {
+  envolverHandle('categorias:update', async (event, id, categoriaData) => {
     try {
       categoriaService.update(id, categoriaData);
       return { success: true };
@@ -284,7 +365,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('categorias:toggleActivo', async (event, id) => {
+  envolverHandle('categorias:toggleActivo', async (event, id) => {
     try {
       categoriaService.toggleActivo(id);
       return { success: true };
@@ -293,7 +374,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('categorias:getTarifaVigente', async (event, categoriaId, fecha) => {
+  envolverHandle('categorias:getTarifaVigente', async (event, categoriaId, fecha) => {
     try {
       return { success: true, data: categoriaService.getTarifaVigente(categoriaId, fecha) };
     } catch (error) {
@@ -301,7 +382,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('categorias:getHistorialTarifas', async (event, categoriaId) => {
+  envolverHandle('categorias:getHistorialTarifas', async (event, categoriaId) => {
     try {
       return { success: true, data: categoriaService.getHistorialTarifas(categoriaId) };
     } catch (error) {
@@ -309,7 +390,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('categorias:crearTarifa', async (event, categoriaId, tarifa, fechaDesde, observaciones) => {
+  envolverHandle('categorias:crearTarifa', async (event, categoriaId, tarifa, fechaDesde, observaciones) => {
     try {
       categoriaService.crearTarifa(categoriaId, tarifa, fechaDesde, observaciones);
       return { success: true };
@@ -318,7 +399,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('categorias:getCuentasConCategoria', async (event, categoriaId) => {
+  envolverHandle('categorias:getCuentasConCategoria', async (event, categoriaId) => {
     try {
       return { success: true, data: categoriaService.getCuentasConCategoria(categoriaId) };
     } catch (error) {
@@ -326,7 +407,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('categorias:asignarACuenta', async (event, cuentaId, categoriaId, fechaInicio, observaciones) => {
+  envolverHandle('categorias:asignarACuenta', async (event, cuentaId, categoriaId, fechaInicio, observaciones) => {
     try {
       categoriaService.asignarACuenta(cuentaId, categoriaId, fechaInicio, observaciones);
       return { success: true };
@@ -335,7 +416,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('categorias:getHistorialCategoriasCuenta', async (event, cuentaId) => {
+  envolverHandle('categorias:getHistorialCategoriasCuenta', async (event, cuentaId) => {
     try {
       return { success: true, data: categoriaService.getHistorialCategoriasCuenta(cuentaId) };
     } catch (error) {
@@ -344,7 +425,7 @@ function setupIpcHandlers() {
   });
 
   // Pagos
-  ipcMain.handle('pagos:getCuentasConEstado', async (event, params) => {
+  envolverHandle('pagos:getCuentasConEstado', async (event, params) => {
     try {
       return { success: true, data: pagoService.getCuentasConEstado(params) };
     } catch (error) {
@@ -352,7 +433,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('pagos:getEstadoCuenta', async (event, cuentaId) => {
+  envolverHandle('pagos:getEstadoCuenta', async (event, cuentaId) => {
     try {
       return { success: true, data: pagoService.getEstadoCuenta(cuentaId) };
     } catch (error) {
@@ -360,7 +441,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('pagos:simularPago', async (event, cuentaId, anioInicio, mesInicio, cantidadMeses) => {
+  envolverHandle('pagos:simularPago', async (event, cuentaId, anioInicio, mesInicio, cantidadMeses) => {
     try {
       return { success: true, data: pagoService.simularPago(cuentaId, anioInicio, mesInicio, cantidadMeses) };
     } catch (error) {
@@ -368,7 +449,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('pagos:registrarPagoSostenimiento', async (event, payload) => {
+  envolverHandle('pagos:registrarPagoSostenimiento', async (event, payload) => {
     try {
       return { success: true, data: pagoService.registrarPagoSostenimiento(payload) };
     } catch (error) {
@@ -376,7 +457,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('pagos:getHistorialPagos', async (event, cuentaId) => {
+  envolverHandle('pagos:getHistorialPagos', async (event, cuentaId) => {
     try {
       return { success: true, data: pagoService.getHistorialPagos(cuentaId) };
     } catch (error) {
@@ -385,7 +466,7 @@ function setupIpcHandlers() {
   });
 
   // Recibos
-  ipcMain.handle('recibos:getAll', async (event, params) => {
+  envolverHandle('recibos:getAll', async (event, params) => {
     try {
       return { success: true, data: reciboService.getAll(params) };
     } catch (error) {
@@ -393,7 +474,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('recibos:getById', async (event, id) => {
+  envolverHandle('recibos:getById', async (event, id) => {
     try {
       const recibo = reciboService.getById(id);
       if (!recibo) {
@@ -405,7 +486,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('recibos:anular', async (event, id, motivo) => {
+  envolverHandle('recibos:anular', async (event, id, motivo) => {
     try {
       reciboService.anular(id, motivo);
       return { success: true };
@@ -414,7 +495,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('recibos:getConsecutivo', async () => {
+  envolverHandle('recibos:getConsecutivo', async () => {
     try {
       return { success: true, data: reciboService.getConsecutivoRecibo() };
     } catch (error) {
@@ -422,7 +503,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('recibos:registrarAnuladoFisico', async (event, datos) => {
+  envolverHandle('recibos:registrarAnuladoFisico', async (event, datos) => {
     try {
       return { success: true, data: reciboService.registrarAnuladoFisico(datos) };
     } catch (error) {
@@ -430,7 +511,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('recibos:getAnuladosFisicos', async () => {
+  envolverHandle('recibos:getAnuladosFisicos', async () => {
     try {
       return { success: true, data: reciboService.getAnuladosFisicos() };
     } catch (error) {
@@ -438,7 +519,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('recibos:imprimir', async (event, id) => {
+  envolverHandle('recibos:imprimir', async (event, id) => {
     let ventanaImpresion;
     try {
       const html = reciboService.generarHTML(id);
@@ -464,7 +545,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('recibos:exportarPDF', async (event, id) => {
+  envolverHandle('recibos:exportarPDF', async (event, id) => {
     let ventanaImpresion;
     try {
       const recibo = reciboService.getById(id);
@@ -499,7 +580,7 @@ function setupIpcHandlers() {
   });
 
   // Gastos
-  ipcMain.handle('gastos:getAll', async (event, params) => {
+  envolverHandle('gastos:getAll', async (event, params) => {
     try {
       return { success: true, data: gastoService.getAll(params) };
     } catch (error) {
@@ -507,7 +588,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('gastos:getById', async (event, id) => {
+  envolverHandle('gastos:getById', async (event, id) => {
     try {
       const gasto = gastoService.getById(id);
       if (!gasto) {
@@ -519,7 +600,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('gastos:getTiposGasto', async () => {
+  envolverHandle('gastos:getTiposGasto', async () => {
     try {
       return { success: true, data: gastoService.getTiposGasto() };
     } catch (error) {
@@ -527,7 +608,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('gastos:create', async (event, gastoData) => {
+  envolverHandle('gastos:create', async (event, gastoData) => {
     try {
       const id = gastoService.create(gastoData);
       return { success: true, data: { id } };
@@ -536,7 +617,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('gastos:anular', async (event, id, motivo) => {
+  envolverHandle('gastos:anular', async (event, id, motivo) => {
     try {
       gastoService.anular(id, motivo);
       return { success: true };
@@ -546,7 +627,7 @@ function setupIpcHandlers() {
   });
 
   // Caja y Bancos
-  ipcMain.handle('caja:getSaldos', async () => {
+  envolverHandle('caja:getSaldos', async () => {
     try {
       return { success: true, data: cajaService.getSaldos() };
     } catch (error) {
@@ -554,7 +635,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('caja:getMovimientos', async (event, params) => {
+  envolverHandle('caja:getMovimientos', async (event, params) => {
     try {
       return { success: true, data: cajaService.getMovimientos(params) };
     } catch (error) {
@@ -562,7 +643,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('caja:registrarConsignacion', async (event, payload) => {
+  envolverHandle('caja:registrarConsignacion', async (event, payload) => {
     try {
       cajaService.registrarConsignacion(payload);
       return { success: true };
@@ -571,7 +652,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('caja:getResumenPeriodo', async (event, fechaDesde, fechaHasta) => {
+  envolverHandle('caja:getResumenPeriodo', async (event, fechaDesde, fechaHasta) => {
     try {
       return { success: true, data: cajaService.getResumenPeriodo(fechaDesde, fechaHasta) };
     } catch (error) {
@@ -580,7 +661,7 @@ function setupIpcHandlers() {
   });
 
   // Autenticación
-  ipcMain.handle('auth:login', async (event, usuario, password) => {
+  envolverHandle('auth:login', async (event, usuario, password) => {
     try {
       return { success: true, data: authService.login(usuario, password) };
     } catch (error) {
@@ -588,7 +669,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('auth:cambiarPassword', async (event, usuarioId, passwordActual, passwordNueva) => {
+  envolverHandle('auth:cambiarPassword', async (event, usuarioId, passwordActual, passwordNueva) => {
     try {
       authService.cambiarPassword(usuarioId, passwordActual, passwordNueva);
       return { success: true };
@@ -597,8 +678,56 @@ function setupIpcHandlers() {
     }
   });
 
+  envolverHandle('auth:logout', async () => {
+    return { success: true };
+  });
+
+  // Gestión de usuarios (solo Administrador, ver CANALES_SOLO_ADMIN)
+  envolverHandle('usuarios:getAll', async () => {
+    try {
+      return { success: true, data: authService.getAll() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('usuarios:crear', async (event, datos) => {
+    try {
+      return { success: true, data: { id: authService.crearUsuario(datos) } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('usuarios:toggleActivo', async (event, id, activo) => {
+    try {
+      authService.toggleActivoUsuario(id, activo, sesionActual?.id);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('usuarios:resetearPassword', async (event, id, passwordNueva) => {
+    try {
+      authService.resetearPassword(id, passwordNueva);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Auditoría (solo lectura, pero restringida a Administrador en CANALES_SOLO_ADMIN)
+  envolverHandle('auditoria:getAll', async (event, params) => {
+    try {
+      return { success: true, data: auditoriaService.getAll(params) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Configuración
-  ipcMain.handle('config:getAll', async () => {
+  envolverHandle('config:getAll', async () => {
     try {
       return { success: true, data: configuracionService.getAll() };
     } catch (error) {
@@ -606,7 +735,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('config:actualizar', async (event, datos) => {
+  envolverHandle('config:actualizar', async (event, datos) => {
     try {
       configuracionService.actualizar(datos);
       return { success: true };
@@ -616,7 +745,7 @@ function setupIpcHandlers() {
   });
 
   // Copias de seguridad
-  ipcMain.handle('backup:crear', async () => {
+  envolverHandle('backup:crear', async () => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
         title: 'Crear copia de seguridad',
@@ -635,7 +764,15 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('backup:restaurar', async () => {
+  envolverHandle('backup:getEstadoAutomatico', async () => {
+    try {
+      return { success: true, data: backupService.getEstadoAutomatico() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('backup:restaurar', async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
         title: 'Restaurar copia de seguridad',
@@ -681,7 +818,7 @@ function setupIpcHandlers() {
   });
 
   // Nuevos Puntos
-  ipcMain.handle('nuevospuntos:getAll', async (event, params) => {
+  envolverHandle('nuevospuntos:getAll', async (event, params) => {
     try {
       return { success: true, data: nuevoPuntoService.getAll(params) };
     } catch (error) {
@@ -689,7 +826,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('nuevospuntos:getById', async (event, id) => {
+  envolverHandle('nuevospuntos:getById', async (event, id) => {
     try {
       const punto = nuevoPuntoService.getById(id);
       if (!punto) return { success: false, error: 'Punto nuevo no encontrado' };
@@ -699,7 +836,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('nuevospuntos:getByCuentaId', async (event, cuentaId) => {
+  envolverHandle('nuevospuntos:getByCuentaId', async (event, cuentaId) => {
     try {
       return { success: true, data: nuevoPuntoService.getByCuentaId(cuentaId) };
     } catch (error) {
@@ -707,7 +844,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('nuevospuntos:create', async (event, datos) => {
+  envolverHandle('nuevospuntos:create', async (event, datos) => {
     try {
       const id = nuevoPuntoService.create(datos);
       return { success: true, data: { id } };
@@ -716,7 +853,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('nuevospuntos:registrarAbono', async (event, payload) => {
+  envolverHandle('nuevospuntos:registrarAbono', async (event, payload) => {
     try {
       return { success: true, data: nuevoPuntoService.registrarAbono(payload) };
     } catch (error) {
@@ -724,7 +861,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('nuevospuntos:cancelar', async (event, id, motivo) => {
+  envolverHandle('nuevospuntos:cancelar', async (event, id, motivo) => {
     try {
       nuevoPuntoService.cancelar(id, motivo);
       return { success: true };
@@ -734,7 +871,7 @@ function setupIpcHandlers() {
   });
 
   // Reportes
-  ipcMain.handle('reportes:generarPDF', async (event, tipoReporte, params) => {
+  envolverHandle('reportes:generarPDF', async (event, tipoReporte, params) => {
     let ventanaImpresion;
     try {
       const html = reporteService.generarHTML(tipoReporte, params);
@@ -764,7 +901,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('reportes:generarExcel', async (event, tipoReporte, params) => {
+  envolverHandle('reportes:generarExcel', async (event, tipoReporte, params) => {
     try {
       const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
         title: 'Guardar Reporte como Excel',
@@ -786,7 +923,7 @@ function setupIpcHandlers() {
   });
 
   // Herramientas de prueba (solo datos de ejemplo, nunca se ejecutan automáticamente)
-  ipcMain.handle('devtools:tieneDatosOperativos', async () => {
+  envolverHandle('devtools:tieneDatosOperativos', async () => {
     try {
       return { success: true, data: devToolsService.tieneDatosOperativos() };
     } catch (error) {
@@ -794,7 +931,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('devtools:cargarDatosEjemplo', async () => {
+  envolverHandle('devtools:cargarDatosEjemplo', async () => {
     try {
       return { success: true, data: devToolsService.cargarDatosEjemplo() };
     } catch (error) {
@@ -802,7 +939,7 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('devtools:eliminarDatosOperativos', async () => {
+  envolverHandle('devtools:eliminarDatosOperativos', async () => {
     try {
       devToolsService.eliminarDatosOperativos();
       return { success: true };

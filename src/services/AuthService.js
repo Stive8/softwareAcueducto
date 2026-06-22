@@ -1,6 +1,8 @@
 const UsuarioRepository = require('../repositories/UsuarioRepository');
 const { hashPassword, verifyPassword, isHashed } = require('../utils/passwordHasher');
 
+const ROLES_VALIDOS = ['Administrador', 'Usuario', 'Consulta'];
+
 class AuthService {
   constructor(dbService) {
     this.repository = new UsuarioRepository(dbService);
@@ -46,6 +48,43 @@ class AuthService {
     }
 
     this.repository.updatePassword(usuarioId, hashPassword(passwordNueva));
+  }
+
+  // --- Gestión de usuarios (solo Administrador, validado en la capa de permisos de main.js) ---
+
+  getAll() {
+    return this.repository.findAll();
+  }
+
+  crearUsuario({ usuario, password, nombreCompleto, rol }) {
+    if (!usuario || !usuario.trim()) throw new Error('El nombre de usuario es obligatorio');
+    if (!password || password.length < 4) throw new Error('La contraseña debe tener al menos 4 caracteres');
+    if (!nombreCompleto || !nombreCompleto.trim()) throw new Error('El nombre completo es obligatorio');
+    if (!ROLES_VALIDOS.includes(rol)) throw new Error('Rol inválido');
+    if (this.repository.findByUsuario(usuario.trim())) throw new Error(`Ya existe un usuario con el nombre "${usuario}"`);
+
+    return this.repository.create({
+      usuario: usuario.trim(),
+      passwordHasheado: hashPassword(password),
+      nombreCompleto: nombreCompleto.trim(),
+      rol
+    });
+  }
+
+  toggleActivoUsuario(id, activo, usuarioQueEjecutaId) {
+    if (id === usuarioQueEjecutaId) throw new Error('No puede desactivar su propio usuario');
+    const user = this.repository.findById(id);
+    if (!user) throw new Error('Usuario no encontrado');
+    this.repository.toggleActivo(id, activo);
+  }
+
+  // Restablece la contraseña de OTRO usuario sin necesitar la contraseña actual (a diferencia
+  // de cambiarPassword, que es el flujo de "cambiar mi propia contraseña").
+  resetearPassword(id, passwordNueva) {
+    if (!passwordNueva || passwordNueva.length < 4) throw new Error('La nueva contraseña debe tener al menos 4 caracteres');
+    const user = this.repository.findById(id);
+    if (!user) throw new Error('Usuario no encontrado');
+    this.repository.updatePassword(id, hashPassword(passwordNueva));
   }
 }
 

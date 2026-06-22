@@ -16,11 +16,13 @@ const Configuracion = {
   },
 
   async renderForm() {
+    const esAdmin = App.currentUser.rol === 'Administrador';
     const response = await window.api.config.getAll();
     const config = response.success ? response.data : {};
     const container = document.getElementById('configContent');
 
     container.innerHTML = `
+      ${esAdmin ? `
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header"><h2>Datos de la Asociación</h2></div>
         <div style="padding: 24px;">
@@ -89,6 +91,7 @@ const Configuracion = {
           </form>
         </div>
       </div>
+      ` : ''}
 
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header"><h2>Seguridad</h2></div>
@@ -117,17 +120,34 @@ const Configuracion = {
         </div>
       </div>
 
-      <div class="table-container">
+      <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header"><h2>Copias de Seguridad</h2></div>
         <div style="padding: 24px;">
           <p style="color: #64748b; font-size: 14px; margin-bottom: 16px;">
             La copia de seguridad incluye toda la información del sistema (cuentas, propietarios, pagos, recibos, gastos, etc.) en un solo archivo.
+            Además de esta copia manual, el sistema guarda automáticamente una copia diaria en segundo plano (ver más abajo).
           </p>
           <div class="form-actions" style="justify-content: flex-start;">
             <button type="button" class="btn btn-success" id="btnCrearBackup">Crear Copia de Seguridad</button>
-            <button type="button" class="btn btn-warning" id="btnRestaurarBackup">Restaurar desde Archivo</button>
+            ${esAdmin ? '<button type="button" class="btn btn-warning" id="btnRestaurarBackup">Restaurar desde Archivo</button>' : ''}
           </div>
         </div>
+      </div>
+
+      <div id="backupAutomaticoContainer" style="margin-bottom: 24px;"></div>
+
+      ${esAdmin ? `
+      <div class="table-container" style="margin-bottom: 24px;">
+        <div class="table-header">
+          <h2>Usuarios</h2>
+          <button type="button" class="btn btn-primary" id="btnNuevoUsuario">+ Nuevo Usuario</button>
+        </div>
+        <div id="usuariosContent"><p style="padding: 24px; text-align: center;">Cargando...</p></div>
+      </div>
+
+      <div class="table-container" style="margin-bottom: 24px;">
+        <div class="table-header"><h2>Auditoría</h2></div>
+        <div id="auditoriaContent"><p style="padding: 24px; text-align: center;">Cargando...</p></div>
       </div>
 
       <div class="table-container" style="margin-top: 24px;">
@@ -144,16 +164,27 @@ const Configuracion = {
           </div>
         </div>
       </div>
+      ` : ''}
     `;
 
-    App.attachMoneyInput(document.getElementById('valor_nuevo_punto'));
-    App.attachMoneyInput(document.getElementById('saldo_caja_inicial'));
-    App.attachMoneyInput(document.getElementById('saldo_banco_inicial'));
+    if (esAdmin) {
+      App.attachMoneyInput(document.getElementById('valor_nuevo_punto'));
+      App.attachMoneyInput(document.getElementById('saldo_caja_inicial'));
+      App.attachMoneyInput(document.getElementById('saldo_banco_inicial'));
 
-    document.getElementById('configForm').addEventListener('submit', (e) => {
-      e.preventDefault();
-      this.guardarConfiguracion();
-    });
+      document.getElementById('configForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.guardarConfiguracion();
+      });
+
+      document.getElementById('btnRestaurarBackup').addEventListener('click', () => this.restaurarBackup());
+      document.getElementById('btnCargarEjemplo').addEventListener('click', () => this.cargarDatosEjemplo());
+      document.getElementById('btnEliminarOperativos').addEventListener('click', () => this.eliminarDatosOperativos());
+      document.getElementById('btnNuevoUsuario').addEventListener('click', () => this.showNuevoUsuarioModal());
+
+      await this.renderUsuarios();
+      await this.renderAuditoria();
+    }
 
     document.getElementById('passwordForm').addEventListener('submit', (e) => {
       e.preventDefault();
@@ -161,9 +192,8 @@ const Configuracion = {
     });
 
     document.getElementById('btnCrearBackup').addEventListener('click', () => this.crearBackup());
-    document.getElementById('btnRestaurarBackup').addEventListener('click', () => this.restaurarBackup());
-    document.getElementById('btnCargarEjemplo').addEventListener('click', () => this.cargarDatosEjemplo());
-    document.getElementById('btnEliminarOperativos').addEventListener('click', () => this.eliminarDatosOperativos());
+
+    await this.renderBackupAutomatico();
   },
 
   formatMoney(value) {
@@ -304,5 +334,245 @@ const Configuracion = {
       console.error('Error:', error);
       App.toast('Error al eliminar los datos operativos', 'error');
     }
+  },
+
+  // --- Usuarios (solo Administrador) ---
+
+  async renderUsuarios() {
+    const container = document.getElementById('usuariosContent');
+    try {
+      const response = await window.api.usuarios.getAll();
+      if (!response.success) {
+        container.innerHTML = `<p style="padding: 24px; color: #ef4444;">Error: ${response.error}</p>`;
+        return;
+      }
+
+      container.innerHTML = `
+        <table>
+          <thead>
+            <tr><th>Usuario</th><th>Nombre Completo</th><th>Rol</th><th>Estado</th><th>Último Acceso</th><th>Acciones</th></tr>
+          </thead>
+          <tbody>
+            ${response.data.map(u => `
+              <tr>
+                <td><strong>${u.usuario}</strong></td>
+                <td>${u.nombre_completo}</td>
+                <td>${u.rol}</td>
+                <td><span class="badge badge-${u.activo ? 'activo' : 'inactivo'}">${u.activo ? 'Activo' : 'Inactivo'}</span></td>
+                <td>${u.fecha_ultimo_acceso ? this.formatDate(u.fecha_ultimo_acceso) : '<em>Nunca</em>'}</td>
+                <td>
+                  <div class="table-actions">
+                    <button class="btn btn-secondary btn-icon" onclick="Configuracion.showResetPasswordModal(${u.id}, '${u.usuario}')">Resetear Clave</button>
+                    ${u.id !== App.currentUser.id ? `
+                      <button class="btn btn-${u.activo ? 'warning' : 'success'} btn-icon" onclick="Configuracion.toggleActivoUsuario(${u.id}, ${u.activo ? 0 : 1})">${u.activo ? 'Desactivar' : 'Activar'}</button>
+                    ` : '<em style="font-size: 0.8rem; color: #64748b;">(usted)</em>'}
+                  </div>
+                </td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    } catch (error) {
+      console.error('Error:', error);
+      container.innerHTML = '<p style="padding: 24px; color: #ef4444;">Error al cargar los usuarios</p>';
+    }
+  },
+
+  showNuevoUsuarioModal() {
+    const content = `
+      <div class="modal-header"><h2>Nuevo Usuario</h2></div>
+      <div id="formError"></div>
+      <form id="nuevoUsuarioForm">
+        <div class="form-group">
+          <label for="nuevo_usuario">Usuario <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="nuevo_usuario" name="nuevo_usuario" required>
+        </div>
+        <div class="form-group">
+          <label for="nuevo_nombre_completo">Nombre Completo <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="nuevo_nombre_completo" name="nuevo_nombre_completo" required>
+        </div>
+        <div class="form-group">
+          <label for="nuevo_password">Contraseña <span style="color: #ef4444;">*</span></label>
+          <input type="password" id="nuevo_password" name="nuevo_password" required minlength="4">
+        </div>
+        <div class="form-group">
+          <label for="nuevo_rol">Rol <span style="color: #ef4444;">*</span></label>
+          <select id="nuevo_rol" name="nuevo_rol" required>
+            <option value="Usuario">Usuario (operación diaria: cuentas, pagos, gastos)</option>
+            <option value="Administrador">Administrador (acceso total, incluye usuarios y configuración)</option>
+            <option value="Consulta">Consulta (solo puede ver información, no modificarla)</option>
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Crear Usuario</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('nuevoUsuarioForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.usuarios.crear({
+          usuario: document.getElementById('nuevo_usuario').value.trim(),
+          nombreCompleto: document.getElementById('nuevo_nombre_completo').value.trim(),
+          password: document.getElementById('nuevo_password').value,
+          rol: document.getElementById('nuevo_rol').value
+        });
+
+        if (response.success) {
+          App.closeModal();
+          this.renderUsuarios();
+          App.toast('Usuario creado con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al crear el usuario</div>`;
+      }
+    });
+  },
+
+  showResetPasswordModal(id, usuario) {
+    const content = `
+      <div class="modal-header"><h2>Resetear Contraseña de "${usuario}"</h2></div>
+      <div id="formError"></div>
+      <form id="resetPasswordForm">
+        <div class="form-group">
+          <label for="reset_password_nueva">Nueva Contraseña <span style="color: #ef4444;">*</span></label>
+          <input type="password" id="reset_password_nueva" name="reset_password_nueva" required minlength="4">
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Restablecer</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('resetPasswordForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.usuarios.resetearPassword(id, document.getElementById('reset_password_nueva').value);
+        if (response.success) {
+          App.closeModal();
+          App.toast('Contraseña restablecida con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al restablecer la contraseña</div>`;
+      }
+    });
+  },
+
+  async toggleActivoUsuario(id, activo) {
+    try {
+      const response = await window.api.usuarios.toggleActivo(id, activo);
+      if (response.success) {
+        this.renderUsuarios();
+        App.toast(activo ? 'Usuario activado' : 'Usuario desactivado');
+      } else {
+        App.toast('Error: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al cambiar el estado del usuario', 'error');
+    }
+  },
+
+  // --- Auditoría (solo Administrador, solo lectura) ---
+
+  async renderAuditoria() {
+    const container = document.getElementById('auditoriaContent');
+    try {
+      const response = await window.api.auditoria.getAll({ page: 1, limit: 30 });
+      if (!response.success) {
+        container.innerHTML = `<p style="padding: 24px; color: #ef4444;">Error: ${response.error}</p>`;
+        return;
+      }
+
+      if (response.data.data.length === 0) {
+        container.innerHTML = '<p style="padding: 24px; text-align: center; color: #64748b;">Sin actividad registrada todavía</p>';
+        return;
+      }
+
+      container.innerHTML = `
+        <table>
+          <thead>
+            <tr><th>Fecha</th><th>Usuario</th><th>Acción</th><th>Módulo</th><th>Registro</th></tr>
+          </thead>
+          <tbody>
+            ${response.data.data.map(a => `
+              <tr>
+                <td>${this.formatDateTime(a.fecha_accion)}</td>
+                <td>${a.nombre_completo || '<em>Desconocido</em>'}</td>
+                <td>${a.accion}</td>
+                <td>${a.tabla}</td>
+                <td>${a.registro_id ?? '-'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+        <p style="padding: 16px 24px; font-size: 0.8rem; color: #64748b;">Mostrando las últimas ${response.data.data.length} acciones.</p>
+      `;
+    } catch (error) {
+      console.error('Error:', error);
+      container.innerHTML = '<p style="padding: 24px; color: #ef4444;">Error al cargar la auditoría</p>';
+    }
+  },
+
+  // --- Respaldo automático ---
+
+  async renderBackupAutomatico() {
+    const container = document.getElementById('backupAutomaticoContainer');
+    try {
+      const response = await window.api.backup.getEstadoAutomatico();
+      const info = response.success ? response.data : null;
+
+      container.innerHTML = `
+        <div class="table-container">
+          <div class="table-header"><h2>Respaldo Automático</h2></div>
+          <div style="padding: 24px;">
+            <p style="color: #64748b; font-size: 14px;">
+              Además de la copia manual, el sistema guarda automáticamente una copia de seguridad
+              ${info ? `cada vez que ha pasado más de un día desde la última, en una carpeta local del sistema` : ''}.
+              No reemplaza tener copias en otro lugar (USB, nube): es solo una red de seguridad adicional.
+            </p>
+            ${info ? `
+              <p style="font-size: 14px; margin-top: 12px;">
+                <strong>Último respaldo automático:</strong> ${info.ultimoBackup ? this.formatDateTime(info.ultimoBackup) : 'Todavía no se ha generado ninguno'}<br>
+                <strong>Copias guardadas:</strong> ${info.cantidad} (se conservan las últimas ${info.maximo})
+              </p>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    } catch (error) {
+      console.error('Error:', error);
+      container.innerHTML = '';
+    }
+  },
+
+  formatDateTime(value) {
+    if (!value) return '-';
+    const [fecha, hora] = value.split(' ');
+    const [anio, mes, dia] = fecha.split('-');
+    return `${dia}/${mes}/${anio}${hora ? ' ' + hora.slice(0, 5) : ''}`;
+  },
+
+  formatDate(value) {
+    if (!value) return '-';
+    return this.formatDateTime(value).split(' ')[0];
   }
 };

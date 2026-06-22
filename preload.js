@@ -68,7 +68,17 @@ contextBridge.exposeInMainWorld('api', {
   },
   auth: {
     login: (usuario, password) => ipcRenderer.invoke('auth:login', usuario, password),
+    logout: () => ipcRenderer.invoke('auth:logout'),
     cambiarPassword: (usuarioId, passwordActual, passwordNueva) => ipcRenderer.invoke('auth:cambiarPassword', usuarioId, passwordActual, passwordNueva)
+  },
+  usuarios: {
+    getAll: () => ipcRenderer.invoke('usuarios:getAll'),
+    crear: (datos) => ipcRenderer.invoke('usuarios:crear', datos),
+    toggleActivo: (id, activo) => ipcRenderer.invoke('usuarios:toggleActivo', id, activo),
+    resetearPassword: (id, passwordNueva) => ipcRenderer.invoke('usuarios:resetearPassword', id, passwordNueva)
+  },
+  auditoria: {
+    getAll: (params) => ipcRenderer.invoke('auditoria:getAll', params)
   },
   config: {
     getAll: () => ipcRenderer.invoke('config:getAll'),
@@ -76,7 +86,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   backup: {
     crear: () => ipcRenderer.invoke('backup:crear'),
-    restaurar: () => ipcRenderer.invoke('backup:restaurar')
+    restaurar: () => ipcRenderer.invoke('backup:restaurar'),
+    getEstadoAutomatico: () => ipcRenderer.invoke('backup:getEstadoAutomatico')
   },
   nuevosPuntos: {
     getAll: (params) => ipcRenderer.invoke('nuevospuntos:getAll', params),
