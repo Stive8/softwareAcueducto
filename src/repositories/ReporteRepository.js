@@ -126,7 +126,7 @@ class ReporteRepository {
         r.total, r.metodo_pago
       FROM recibos r
       INNER JOIN cuentas c ON c.id = r.cuenta_id
-      WHERE 1=1
+      WHERE r.estado != 'Anulado'
     `;
     const params = [];
     if (fechaDesde) { query += ' AND r.fecha_recibo >= ?'; params.push(fechaDesde); }
@@ -154,7 +154,7 @@ class ReporteRepository {
         SUM(rd.valor) as total
       FROM recibo_detalles rd
       INNER JOIN recibos r ON r.id = rd.recibo_id
-      WHERE 1=1
+      WHERE r.estado != 'Anulado'
     `;
     const params = [];
     if (fechaDesde) { query += ' AND r.fecha_recibo >= ?'; params.push(fechaDesde); }
@@ -222,7 +222,7 @@ class ReporteRepository {
              'Ingreso' as tipo, r.total as valor
       FROM recibos r
       INNER JOIN cuentas c ON c.id = r.cuenta_id
-      WHERE 1=1
+      WHERE r.estado != 'Anulado'
     `;
     let queryGastos = `
       SELECT fecha_gasto as fecha, concepto, 'Egreso' as tipo, valor

@@ -470,12 +470,17 @@ const Pagos = {
   },
 
   async showRegistrarPagoModal(cuentaId) {
-    const estadoResponse = await window.api.pagos.getEstadoCuenta(cuentaId);
+    const [estadoResponse, conexionesResponse] = await Promise.all([
+      window.api.pagos.getEstadoCuenta(cuentaId),
+      window.api.nuevosPuntos.getByCuentaId(cuentaId)
+    ]);
     if (!estadoResponse.success) {
       App.toast('Error al cargar el estado de la cuenta: ' + estadoResponse.error, 'error');
       return;
     }
     const estado = estadoResponse.data;
+    const conexiones = conexionesResponse.success ? conexionesResponse.data : [];
+    const conexionPendiente = conexiones.find(p => p.estado === 'Pendiente') || null;
     const hoy = new Date().toISOString().split('T')[0];
 
     const content = `
@@ -491,124 +496,78 @@ const Pagos = {
         </p>
       </div>
 
-      <div class="table-controls" style="margin-bottom: 20px;">
-        <button class="btn btn-primary" id="btnTabSostenimiento" type="button">Pago de Sostenimiento</button>
-        <button class="btn btn-secondary" id="btnTabAbono" type="button">Abono (Saldo a Favor)</button>
-      </div>
-
       <div id="formError"></div>
 
-      <div id="panelSostenimiento">
-        <form id="sostenimientoForm">
-          <div class="form-group">
-            <label>Mes y Año de Inicio <span style="color: #ef4444;">*</span></label>
-            <div style="display: flex; gap: 12px;">
-              <select id="mes_inicio" name="mes_inicio" style="flex: 1;">
-                ${this.opcionesMeses(estado.siguientePeriodo.mes)}
-              </select>
-              <input type="number" id="anio_inicio" name="anio_inicio" value="${estado.siguientePeriodo.anio}" min="2000" max="2100" style="flex: 1;">
-            </div>
-          </div>
-
-          <div class="form-group">
-            <label for="cantidad_meses">Cantidad de Meses a Pagar <span style="color: #ef4444;">*</span></label>
-            <input type="number" id="cantidad_meses" name="cantidad_meses" value="1" min="1" max="120" required>
-            <small style="color: #64748b; font-size: 0.875rem;">Puede pagar uno o varios meses, incluso de años distintos, atrasados o futuros.</small>
-          </div>
-
-          <div class="form-group">
-            <button type="button" class="btn btn-secondary" id="btnSimular">Calcular Total</button>
-          </div>
-
-          <div id="simulacionResultado"></div>
-
-          <div class="form-group">
-            <label for="fecha_pago_sost">Fecha de Pago <span style="color: #ef4444;">*</span></label>
-            <input type="date" id="fecha_pago_sost" name="fecha_pago_sost" value="${hoy}" required>
-          </div>
-
-          <div class="form-group">
-            <label for="metodo_pago_sost">Método de Pago <span style="color: #ef4444;">*</span></label>
-            <select id="metodo_pago_sost" name="metodo_pago_sost" required>
-              <option value="Efectivo">Efectivo</option>
-              <option value="Transferencia">Transferencia</option>
+      <form id="sostenimientoForm">
+        <div class="form-group">
+          <label>Mes y Año de Inicio <span style="color: #ef4444;">*</span></label>
+          <div style="display: flex; gap: 12px;">
+            <select id="mes_inicio" name="mes_inicio" style="flex: 1;">
+              ${this.opcionesMeses(estado.siguientePeriodo.mes)}
             </select>
+            <input type="number" id="anio_inicio" name="anio_inicio" value="${estado.siguientePeriodo.anio}" min="2000" max="2100" style="flex: 1;">
           </div>
+        </div>
 
+        <div class="form-group">
+          <label for="cantidad_meses">Cantidad de Meses a Pagar <span style="color: #ef4444;">*</span></label>
+          <input type="number" id="cantidad_meses" name="cantidad_meses" value="1" min="1" max="120" required>
+          <small style="color: #64748b; font-size: 0.875rem;">Puede pagar uno o varios meses, incluso de años distintos, atrasados, actuales o por adelantado.</small>
+        </div>
+
+        <div class="form-group">
+          <button type="button" class="btn btn-secondary" id="btnSimular">Calcular Total</button>
+        </div>
+
+        <div id="simulacionResultado"></div>
+
+        ${conexionPendiente ? `
           <div class="form-group">
-            <label for="observaciones_sost">Observaciones</label>
-            <textarea id="observaciones_sost" name="observaciones_sost"></textarea>
-          </div>
-
-          <div class="form-actions">
-            <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Registrar Pago y Generar Recibo</button>
-          </div>
-        </form>
-      </div>
-
-      <div id="panelAbono" style="display: none;">
-        <form id="abonoForm">
-          <div class="form-group">
-            <label for="monto_abono">Monto del Abono <span style="color: #ef4444;">*</span></label>
+            <label for="abono_conexion">Abono a Conexión Pendiente (opcional)</label>
             <div class="input-currency">
               <span class="currency-symbol">$</span>
-              <input type="text" inputmode="numeric" id="monto_abono" name="monto_abono" required>
+              <input type="text" inputmode="numeric" id="abono_conexion" name="abono_conexion">
             </div>
-            <small style="color: #64748b; font-size: 0.875rem;">Este monto queda como saldo a favor y se aplicará automáticamente al pagar próximos meses.</small>
+            <small style="color: #64748b; font-size: 0.875rem;">
+              Saldo pendiente de conexión: $${this.formatNumber(conexionPendiente.saldo_pendiente)}.
+              Si la persona también paga esto hoy, se incluye en el mismo recibo.
+            </small>
           </div>
+        ` : ''}
 
-          <div class="form-group">
-            <label for="fecha_pago_abono">Fecha de Pago <span style="color: #ef4444;">*</span></label>
-            <input type="date" id="fecha_pago_abono" name="fecha_pago_abono" value="${hoy}" required>
-          </div>
+        <div class="form-group">
+          <label for="fecha_pago_sost">Fecha de Pago <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_pago_sost" name="fecha_pago_sost" value="${hoy}" required>
+        </div>
 
-          <div class="form-group">
-            <label for="metodo_pago_abono">Método de Pago <span style="color: #ef4444;">*</span></label>
-            <select id="metodo_pago_abono" name="metodo_pago_abono" required>
-              <option value="Efectivo">Efectivo</option>
-              <option value="Transferencia">Transferencia</option>
-            </select>
-          </div>
+        <div class="form-group">
+          <label for="metodo_pago_sost">Método de Pago <span style="color: #ef4444;">*</span></label>
+          <select id="metodo_pago_sost" name="metodo_pago_sost" required>
+            <option value="Efectivo">Efectivo</option>
+            <option value="Transferencia">Transferencia</option>
+          </select>
+        </div>
 
-          <div class="form-group">
-            <label for="observaciones_abono">Observaciones</label>
-            <textarea id="observaciones_abono" name="observaciones_abono"></textarea>
-          </div>
+        <div class="form-group">
+          <label for="observaciones_sost">Observaciones</label>
+          <textarea id="observaciones_sost" name="observaciones_sost"></textarea>
+        </div>
 
-          <div class="form-actions">
-            <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
-            <button type="submit" class="btn btn-primary">Registrar Abono y Generar Recibo</button>
-          </div>
-        </form>
-      </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Registrar Pago y Generar Recibo</button>
+        </div>
+      </form>
     `;
 
     App.openModal(content, 'large');
-    this.setupRegistrarPagoModal(cuentaId);
+    this.setupRegistrarPagoModal(cuentaId, conexionPendiente);
   },
 
-  setupRegistrarPagoModal(cuentaId) {
-    App.attachMoneyInput(document.getElementById('monto_abono'));
-
-    const btnTabSost = document.getElementById('btnTabSostenimiento');
-    const btnTabAbono = document.getElementById('btnTabAbono');
-    const panelSost = document.getElementById('panelSostenimiento');
-    const panelAbono = document.getElementById('panelAbono');
-
-    btnTabSost.addEventListener('click', () => {
-      panelSost.style.display = 'block';
-      panelAbono.style.display = 'none';
-      btnTabSost.className = 'btn btn-primary';
-      btnTabAbono.className = 'btn btn-secondary';
-    });
-
-    btnTabAbono.addEventListener('click', () => {
-      panelSost.style.display = 'none';
-      panelAbono.style.display = 'block';
-      btnTabSost.className = 'btn btn-secondary';
-      btnTabAbono.className = 'btn btn-primary';
-    });
+  setupRegistrarPagoModal(cuentaId, conexionPendiente) {
+    if (conexionPendiente) {
+      App.attachMoneyInput(document.getElementById('abono_conexion'));
+    }
 
     document.getElementById('btnSimular').addEventListener('click', async () => {
       await this.simularPago(cuentaId);
@@ -616,12 +575,7 @@ const Pagos = {
 
     document.getElementById('sostenimientoForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      await this.registrarPago(cuentaId);
-    });
-
-    document.getElementById('abonoForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      await this.registrarAbono(cuentaId);
+      await this.registrarPago(cuentaId, conexionPendiente);
     });
   },
 
@@ -658,7 +612,7 @@ const Pagos = {
     }
   },
 
-  async registrarPago(cuentaId) {
+  async registrarPago(cuentaId, conexionPendiente) {
     const mesInicio = parseInt(document.getElementById('mes_inicio').value, 10);
     const anioInicio = parseInt(document.getElementById('anio_inicio').value, 10);
     const cantidadMeses = parseInt(document.getElementById('cantidad_meses').value, 10);
@@ -667,9 +621,14 @@ const Pagos = {
     const observaciones = document.getElementById('observaciones_sost').value.trim();
     const errorDiv = document.getElementById('formError');
 
+    const abonoConexionInput = document.getElementById('abono_conexion');
+    const abonoConexion = abonoConexionInput ? App.parseMoneyValue(abonoConexionInput.value) : 0;
+
     try {
       const response = await window.api.pagos.registrarPagoSostenimiento({
-        cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones
+        cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones,
+        nuevoPuntoId: abonoConexion > 0 && conexionPendiente ? conexionPendiente.id : null,
+        abonoConexion
       });
 
       if (response.success) {
@@ -682,31 +641,6 @@ const Pagos = {
     } catch (error) {
       console.error('Error:', error);
       errorDiv.innerHTML = `<div class="error-message">Error al registrar el pago</div>`;
-    }
-  },
-
-  async registrarAbono(cuentaId) {
-    const monto = App.parseMoneyValue(document.getElementById('monto_abono').value);
-    const fechaPago = document.getElementById('fecha_pago_abono').value;
-    const metodoPago = document.getElementById('metodo_pago_abono').value;
-    const observaciones = document.getElementById('observaciones_abono').value.trim();
-    const errorDiv = document.getElementById('formError');
-
-    try {
-      const response = await window.api.pagos.registrarAbono({
-        cuentaId, monto, fechaPago, metodoPago, observaciones
-      });
-
-      if (response.success) {
-        App.closeModal();
-        this.loadCuentas();
-        App.toast(`Abono registrado con éxito. Recibo No. ${response.data.numeroRecibo}`);
-      } else {
-        errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
-      }
-    } catch (error) {
-      console.error('Error:', error);
-      errorDiv.innerHTML = `<div class="error-message">Error al registrar el abono</div>`;
     }
   },
 

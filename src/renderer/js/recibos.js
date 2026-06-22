@@ -12,7 +12,7 @@ const Recibos = {
         <p>Consulta, impresión y exportación de recibos generados</p>
       </div>
 
-      <div class="table-container">
+      <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header">
           <h2>Listado de Recibos</h2>
           <div class="table-controls">
@@ -24,10 +24,27 @@ const Recibos = {
           <p style="padding: 24px; text-align: center;">Cargando...</p>
         </div>
       </div>
+
+      <div class="table-container">
+        <div class="table-header">
+          <h2>Recibos Anulados del Talonario Físico</h2>
+          <div class="table-controls">
+            <button class="btn btn-warning" id="btnRegistrarAnuladoFisico">+ Registrar Recibo Anulado</button>
+          </div>
+        </div>
+        <div style="padding: 16px 24px; font-size: 13px; color: #64748b; border-bottom: 1px solid #e2e8f0;">
+          Para números de recibo del talonario en papel que se anularon antes de representar un cobro real
+          (error de escritura, tachón, etc.) y por eso nunca generaron cuenta ni valor en el sistema.
+        </div>
+        <div id="anuladosFisicosContent">
+          <p style="padding: 24px; text-align: center;">Cargando...</p>
+        </div>
+      </div>
     `;
 
     this.setupEventListeners();
     await this.loadRecibos();
+    await this.loadAnuladosFisicos();
   },
 
   setupEventListeners() {
@@ -35,6 +52,115 @@ const Recibos = {
       this.search = e.target.value;
       this.currentPage = 1;
       this.loadRecibos();
+    });
+
+    document.getElementById('btnRegistrarAnuladoFisico').addEventListener('click', () => {
+      this.showRegistrarAnuladoFisicoModal();
+    });
+  },
+
+  async loadAnuladosFisicos() {
+    try {
+      const response = await window.api.recibos.getAnuladosFisicos();
+      const container = document.getElementById('anuladosFisicosContent');
+      if (!response.success) {
+        container.innerHTML = `<p style="padding: 24px; color: #ef4444;">Error: ${response.error}</p>`;
+        return;
+      }
+      if (response.data.length === 0) {
+        container.innerHTML = '<p style="padding: 24px; text-align: center; color: #64748b;">No hay recibos anulados del talonario físico registrados</p>';
+        return;
+      }
+      container.innerHTML = `
+        <table>
+          <thead>
+            <tr><th>No. Recibo</th><th>Fecha</th><th>Motivo</th></tr>
+          </thead>
+          <tbody>
+            ${response.data.map(a => `
+              <tr>
+                <td><strong>${a.numero_recibo}</strong></td>
+                <td>${a.fecha ? this.formatDate(a.fecha) : '<em>Sin fecha</em>'}</td>
+                <td>${a.motivo}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `;
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  },
+
+  async showRegistrarAnuladoFisicoModal() {
+    const consecutivoResponse = await window.api.recibos.getConsecutivo();
+    const proximoNumero = consecutivoResponse.success ? consecutivoResponse.data : '';
+
+    const content = `
+      <div class="modal-header">
+        <h2>Registrar Recibo Anulado del Talonario Físico</h2>
+      </div>
+
+      <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+          Use esto solo para números de recibo en papel que se anularon ANTES de representar un cobro real
+          (no afecta cuentas, cartera ni caja). Si el recibo sí llegó a cobrarse y luego hay que anularlo,
+          use "Anular" en el listado de recibos en vez de esto. El número sigue el mismo conteo consecutivo
+          de los recibos reales: se sugiere el próximo número disponible, y si registra uno mayor, el
+          contador avanza automáticamente para no repetirlo. Si está digitando historial viejo, puede
+          cambiarlo por el número real del talonario.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="anuladoFisicoForm">
+        <div class="form-group">
+          <label for="numero_recibo">Número de Recibo <span style="color: #ef4444;">*</span></label>
+          <input type="number" id="numero_recibo" name="numero_recibo" min="1" step="1" value="${proximoNumero}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="fecha_anulado">Fecha (opcional)</label>
+          <input type="date" id="fecha_anulado" name="fecha_anulado">
+        </div>
+
+        <div class="form-group">
+          <label for="motivo_anulado">Motivo <span style="color: #ef4444;">*</span></label>
+          <textarea id="motivo_anulado" name="motivo_anulado" required placeholder="Ej: error de escritura, tachón en el talonario"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-warning">Registrar</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('anuladoFisicoForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.recibos.registrarAnuladoFisico({
+          numeroRecibo: document.getElementById('numero_recibo').value,
+          fecha: document.getElementById('fecha_anulado').value || null,
+          motivo: document.getElementById('motivo_anulado').value.trim()
+        });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadAnuladosFisicos();
+          App.toast('Recibo anulado registrado con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar el recibo anulado</div>`;
+      }
     });
   },
 
@@ -74,6 +200,7 @@ const Recibos = {
             <th>Propietario</th>
             <th>Método de Pago</th>
             <th>Total</th>
+            <th>Estado</th>
             <th>Acciones</th>
           </tr>
         </thead>
@@ -86,11 +213,13 @@ const Recibos = {
               <td>${r.propietario_nombre}</td>
               <td>${r.metodo_pago}</td>
               <td>$${this.formatNumber(r.total)}</td>
+              <td><span class="badge badge-${r.estado === 'Anulado' ? 'inactivo' : 'activo'}">${r.estado}</span></td>
               <td>
                 <div class="table-actions">
                   <button class="btn btn-primary btn-icon" onclick="Recibos.showDetailModal(${r.id})">Ver</button>
                   <button class="btn btn-secondary btn-icon" onclick="Recibos.imprimir(${r.id})">Imprimir</button>
                   <button class="btn btn-success btn-icon" onclick="Recibos.exportarPDF(${r.id})">PDF</button>
+                  ${r.estado !== 'Anulado' ? `<button class="btn btn-warning btn-icon" onclick="Recibos.showAnularModal(${r.id})">Anular</button>` : ''}
                 </div>
               </td>
             </tr>
@@ -151,10 +280,20 @@ const Recibos = {
             <div class="detail-label">Método de Pago:</div>
             <div class="detail-value">${recibo.metodo_pago}</div>
           </div>
+          <div class="detail-row">
+            <div class="detail-label">Estado:</div>
+            <div class="detail-value"><span class="badge badge-${recibo.estado === 'Anulado' ? 'inactivo' : 'activo'}">${recibo.estado}</span></div>
+          </div>
           ${recibo.observaciones ? `
             <div class="detail-row">
               <div class="detail-label">Observaciones:</div>
               <div class="detail-value">${recibo.observaciones}</div>
+            </div>
+          ` : ''}
+          ${recibo.estado === 'Anulado' ? `
+            <div class="detail-row">
+              <div class="detail-label">Motivo Anulación:</div>
+              <div class="detail-value">${recibo.motivo_anulacion} (${this.formatDate(recibo.fecha_anulacion)})</div>
             </div>
           ` : ''}
         </div>
@@ -185,6 +324,7 @@ const Recibos = {
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
           <button class="btn btn-secondary" onclick="Recibos.imprimir(${recibo.id})">Imprimir</button>
           <button class="btn btn-success" onclick="Recibos.exportarPDF(${recibo.id})">Exportar PDF</button>
+          ${recibo.estado !== 'Anulado' ? `<button class="btn btn-warning" onclick="App.closeModal(); Recibos.showAnularModal(${recibo.id})">Anular</button>` : ''}
         </div>
       `;
 
@@ -193,6 +333,58 @@ const Recibos = {
       console.error('Error:', error);
       App.toast('Error al cargar el recibo', 'error');
     }
+  },
+
+  showAnularModal(id) {
+    const content = `
+      <div class="modal-header">
+        <h2>Anular Recibo</h2>
+      </div>
+
+      <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+          <strong>Nota:</strong> El recibo no se elimina, queda marcado como anulado. Los meses, abonos o conexión que cubría
+          quedan libres para volver a cobrarse, y se revierte su efecto en caja/banco. El registro permanece visible para auditoría.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="anularForm">
+        <div class="form-group">
+          <label for="motivo_anulacion">Motivo de la Anulación <span style="color: #ef4444;">*</span></label>
+          <textarea id="motivo_anulacion" name="motivo_anulacion" required></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-warning">Confirmar Anulación</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('anularForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const motivo = document.getElementById('motivo_anulacion').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.recibos.anular(id, motivo);
+
+        if (response.success) {
+          App.closeModal();
+          this.loadRecibos();
+          App.toast('Recibo anulado con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al anular el recibo</div>`;
+      }
+    });
   },
 
   async imprimir(id) {

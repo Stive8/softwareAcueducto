@@ -288,7 +288,7 @@ const Configuracion = {
 
   async eliminarDatosOperativos() {
     const confirmado = await App.confirmDialog(
-      'Esto eliminará PERMANENTEMENTE todas las cuentas, propietarios, pagos, recibos, gastos, movimientos y nuevos puntos (sean de ejemplo o reales). No afecta categorías, configuración ni el usuario administrador. Esta acción no se puede deshacer. ¿Desea continuar?',
+      'Esto eliminará PERMANENTEMENTE todas las cuentas, propietarios, pagos, recibos (incluyendo los anulados del talonario físico), gastos, movimientos y nuevos puntos (sean de ejemplo o reales). No afecta categorías, configuración ni el usuario administrador. Esta acción no se puede deshacer. ¿Desea continuar?',
       { titulo: 'Eliminar Todos los Datos Operativos', textoConfirmar: 'Sí, eliminar todo' }
     );
     if (!confirmado) return;

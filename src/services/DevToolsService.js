@@ -1,6 +1,7 @@
 const CuentaService = require('./CuentaService');
 const PropietarioService = require('./PropietarioService');
 const CategoriaRepository = require('../repositories/CategoriaRepository');
+const CategoriaService = require('./CategoriaService');
 const PagoService = require('./PagoService');
 const GastoService = require('./GastoService');
 const NuevoPuntoService = require('./NuevoPuntoService');
@@ -15,6 +16,7 @@ class DevToolsService {
     this.cuentaService = new CuentaService(dbService);
     this.propietarioService = new PropietarioService(dbService);
     this.categoriaRepository = new CategoriaRepository(dbService);
+    this.categoriaService = new CategoriaService(dbService);
     this.pagoService = new PagoService(dbService);
     this.gastoService = new GastoService(dbService);
     this.nuevoPuntoService = new NuevoPuntoService(dbService);
@@ -44,6 +46,13 @@ class DevToolsService {
     const mesesAlDia = Math.max(mesActual - 1, 1);
 
     return this.db.transaction(() => {
+      // Las categorías ya no traen una tarifa sembrada por defecto (serían precios ficticios
+      // en una instalación real), así que el modo de pruebas registra sus propias tarifas de
+      // ejemplo, claramente marcadas como tales, solo para poder simular pagos.
+      this.categoriaService.crearTarifa(finca.id, 10000, fechaInicioCategoria, 'Tarifa de ejemplo (Modo de Pruebas)');
+      this.categoriaService.crearTarifa(fincaPiscina.id, 16000, fechaInicioCategoria, 'Tarifa de ejemplo (Modo de Pruebas)');
+      this.categoriaService.crearTarifa(tienda.id, 20000, fechaInicioCategoria, 'Tarifa de ejemplo (Modo de Pruebas)');
+
       // Cuenta 1: al día (paga todos los meses transcurridos hasta el anterior al actual)
       const cuenta1 = this.cuentaService.create({ codigo: 'DEMO-001', direccion: 'Vereda El Porvenir, Casa Principal', categoria_id: finca.id, categoria_fecha_inicio: fechaInicioCategoria });
       const prop1 = this.propietarioService.create({ nombre_completo: 'Juan Pérez Gómez (Ejemplo)', numero_identificacion: 'DEMO-12345678', telefono: '3101234567' });
@@ -57,11 +66,11 @@ class DevToolsService {
       const prop2 = this.propietarioService.create({ nombre_completo: 'María Rodríguez (Ejemplo)', numero_identificacion: 'DEMO-23456789', telefono: '3109876543' });
       this.propietarioService.asignarACuenta(cuenta2, prop2, fechaInicioCategoria);
 
-      // Cuenta 3: con saldo a favor (abono libre, sin aplicar a meses)
+      // Cuenta 3: pagó varios meses por adelantado (para probar el caso de cuentas al día con margen)
       const cuenta3 = this.cuentaService.create({ codigo: 'DEMO-003', direccion: 'Vereda El Carmen, Sector Alto', categoria_id: finca.id, categoria_fecha_inicio: fechaInicioCategoria });
       const prop3 = this.propietarioService.create({ nombre_completo: 'Carlos Martínez (Ejemplo)', numero_identificacion: 'DEMO-34567890' });
       this.propietarioService.asignarACuenta(cuenta3, prop3, fechaInicioCategoria);
-      this.pagoService.registrarAbono({ cuentaId: cuenta3, monto: 30000, fechaPago: hoy, metodoPago: 'Transferencia', observaciones: 'Abono de ejemplo' });
+      this.pagoService.registrarPagoSostenimiento({ cuentaId: cuenta3, anioInicio: anio, mesInicio: 1, cantidadMeses: mesesAlDia + 3, fechaPago: hoy, metodoPago: 'Transferencia', observaciones: 'Pago de ejemplo por adelantado' });
 
       // Cuenta 4: suspendida (sin pagos, para probar el filtro de estado)
       const cuenta4 = this.cuentaService.create({ codigo: 'DEMO-004', direccion: 'Vereda El Porvenir, Lote 3', categoria_id: finca.id, categoria_fecha_inicio: fechaInicioCategoria, estado: 'Suspendido', observaciones: 'Suspendida por falta de pago (ejemplo)' });
@@ -98,6 +107,7 @@ class DevToolsService {
         DELETE FROM cuenta_creditos;
         DELETE FROM recibo_detalles;
         DELETE FROM recibos;
+        DELETE FROM recibos_anulados_fisicos;
         DELETE FROM movimientos;
         DELETE FROM gastos;
         DELETE FROM cuenta_categorias;
@@ -106,7 +116,7 @@ class DevToolsService {
         DELETE FROM propietarios;
         DELETE FROM sqlite_sequence WHERE name IN (
           'cuentas', 'propietarios', 'cuenta_propietarios', 'cuenta_categorias',
-          'recibos', 'recibo_detalles', 'gastos', 'movimientos',
+          'recibos', 'recibo_detalles', 'recibos_anulados_fisicos', 'gastos', 'movimientos',
           'pago_periodos', 'cuenta_creditos', 'nuevos_puntos', 'nuevo_punto_abonos'
         );
       `);

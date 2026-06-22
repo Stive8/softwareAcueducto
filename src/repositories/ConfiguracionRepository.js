@@ -17,7 +17,15 @@ class ConfiguracionRepository {
   }
 
   getMaxNumeroRecibo() {
-    const row = this.db.prepare('SELECT MAX(numero_recibo) as max FROM recibos').get();
+    // Incluye tanto recibos reales como anulados del talonario físico: comparten la misma
+    // numeración consecutiva, así que ninguno de los dos puede quedar por delante del contador.
+    const row = this.db.prepare(`
+      SELECT MAX(numero) as max FROM (
+        SELECT MAX(numero_recibo) as numero FROM recibos
+        UNION ALL
+        SELECT MAX(numero_recibo) as numero FROM recibos_anulados_fisicos
+      )
+    `).get();
     return row.max || 0;
   }
 }

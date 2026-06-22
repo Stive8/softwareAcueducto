@@ -292,18 +292,14 @@ INSERT INTO configuracion (clave, valor, descripcion) VALUES
   ('saldo_banco_inicial', '0', 'Saldo inicial en banco');
 
 -- Categorías predeterminadas
-INSERT INTO categorias (nombre, descripcion) VALUES 
+INSERT INTO categorias (nombre, descripcion) VALUES
   ('Finca', 'Finca residencial'),
   ('Finca con piscina', 'Finca con piscina'),
   ('Tienda', 'Establecimiento comercial'),
   ('Finca para alquiler', 'Finca destinada a alquiler turístico');
 
--- Tarifas iniciales para cada categoría (año actual)
-INSERT INTO categoria_tarifas (categoria_id, tarifa_sostenimiento, fecha_vigencia_desde) VALUES 
-  (1, 10000, date('now', 'start of year')),
-  (2, 16000, date('now', 'start of year')),
-  (3, 20000, date('now', 'start of year')),
-  (4, 50000, date('now', 'start of year'));
+-- Las tarifas NO se siembran con valores ficticios: cada asociación debe registrar sus propias
+-- tarifas reales desde Categorías antes de poder cobrar sostenimiento.
 
 -- Plan de cuentas básico
 INSERT INTO plan_cuentas (codigo, nombre, tipo, nivel) VALUES 

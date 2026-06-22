@@ -1,6 +1,7 @@
 const PagoRepository = require('../repositories/PagoRepository');
 const CuentaRepository = require('../repositories/CuentaRepository');
 const PropietarioRepository = require('../repositories/PropietarioRepository');
+const NuevoPuntoRepository = require('../repositories/NuevoPuntoRepository');
 
 const NOMBRES_MES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -32,6 +33,7 @@ class PagoService {
     this.repository = new PagoRepository(dbService);
     this.cuentaRepository = new CuentaRepository(dbService);
     this.propietarioRepository = new PropietarioRepository(dbService);
+    this.nuevoPuntoRepository = new NuevoPuntoRepository(dbService);
   }
 
   formatPeriodo(anio, mes) {
@@ -157,18 +159,32 @@ class PagoService {
     return propietario;
   }
 
-  // Registra el pago de sostenimiento de uno o varios meses (atrasados, futuros o varios años) y genera el recibo
-  registrarPagoSostenimiento({ cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones, usarSaldoAFavor = true }) {
+  // Registra el pago de sostenimiento de uno o varios meses (atrasados, futuros o varios años) y genera el
+  // recibo. Opcionalmente, en el MISMO recibo (mismo número, mismo movimiento de caja) puede incluir un abono
+  // al cargo de conexión pendiente de la cuenta (nuevoPuntoId + abonoConexion), para el caso real de que la
+  // persona pague meses y conexión juntos en un solo recibo físico.
+  registrarPagoSostenimiento({ cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones, usarSaldoAFavor = true, nuevoPuntoId = null, abonoConexion = 0 }) {
     this.validarDatosComunes({ cuentaId, fechaPago, metodoPago });
     if (!anioInicio || !mesInicio) throw new Error('El período inicial es obligatorio');
     if (!cantidadMeses || cantidadMeses < 1) throw new Error('La cantidad de meses debe ser al menos 1');
+
+    let puntoConexion = null;
+    if (abonoConexion > 0) {
+      if (!nuevoPuntoId) throw new Error('Debe indicar a qué cargo de conexión aplica el abono');
+      puntoConexion = this.nuevoPuntoRepository.findById(nuevoPuntoId);
+      if (!puntoConexion || puntoConexion.cuenta_id !== cuentaId) throw new Error('El cargo de conexión no corresponde a esta cuenta');
+      if (puntoConexion.estado !== 'Pendiente') throw new Error(`Este cargo de conexión está en estado "${puntoConexion.estado}" y no admite más abonos`);
+      if (abonoConexion > puntoConexion.saldo_pendiente) {
+        throw new Error(`El abono a conexión ($${abonoConexion}) no puede ser mayor al saldo pendiente ($${puntoConexion.saldo_pendiente})`);
+      }
+    }
 
     const propietario = this.obtenerPropietarioVigente(cuentaId);
     const periodos = this.construirPeriodos(cuentaId, anioInicio, mesInicio, cantidadMeses);
     const subtotal = periodos.reduce((sum, p) => sum + p.valor, 0);
     const saldoDisponible = usarSaldoAFavor ? this.repository.getSaldoCredito(cuentaId) : 0;
     const creditoAplicado = Math.min(saldoDisponible, subtotal);
-    const totalACobrar = subtotal - creditoAplicado;
+    const totalACobrar = subtotal - creditoAplicado + abonoConexion;
 
     return this.repository.transaccion(() => {
       const numeroRecibo = this.repository.getConsecutivoRecibo();
@@ -215,63 +231,30 @@ class PagoService {
         this.repository.crearMovimientoCredito(cuentaId, 'Aplicado', creditoAplicado, detalleCreditoId, fechaPago, 'Aplicado a pago de sostenimiento');
       }
 
+      let estadoConexion = null;
+      if (abonoConexion > 0) {
+        const detalleConexionId = this.repository.crearReciboDetalle({
+          reciboId,
+          concepto: `Abono Punto Nuevo - Cuenta ${puntoConexion.cuenta_codigo || ''}`.trim(),
+          valor: abonoConexion
+        });
+        this.nuevoPuntoRepository.crearAbono({ nuevoPuntoId, monto: abonoConexion, fechaAbono: fechaPago, reciboDetalleId: detalleConexionId, observaciones });
+        estadoConexion = this.nuevoPuntoRepository.actualizarSaldoYEstado(nuevoPuntoId);
+      }
+
       if (totalACobrar > 0) {
         this.repository.crearMovimiento({
           tipo: 'Ingreso',
           origen: metodoPago === 'Efectivo' ? 'Caja' : 'Banco',
           monto: totalACobrar,
-          concepto: `Recibo No. ${numeroRecibo} - Sostenimiento`,
+          concepto: `Recibo No. ${numeroRecibo} - Sostenimiento${abonoConexion > 0 ? ' + Abono Conexión' : ''}`,
           referenciaId: reciboId,
           referenciaTipo: 'Recibo',
           fechaMovimiento: fechaPago
         });
       }
 
-      return { reciboId, numeroRecibo, total: totalACobrar, creditoAplicado };
-    });
-  }
-
-  // Abono libre: no se asocia a meses específicos, queda como saldo a favor de la cuenta
-  registrarAbono({ cuentaId, monto, fechaPago, metodoPago, observaciones }) {
-    this.validarDatosComunes({ cuentaId, fechaPago, metodoPago });
-    if (!monto || monto <= 0) throw new Error('El monto del abono debe ser mayor a cero');
-
-    const propietario = this.obtenerPropietarioVigente(cuentaId);
-
-    return this.repository.transaccion(() => {
-      const numeroRecibo = this.repository.getConsecutivoRecibo();
-
-      const reciboId = this.repository.crearRecibo({
-        numeroRecibo,
-        cuentaId,
-        propietarioId: propietario.id,
-        fechaRecibo: fechaPago,
-        total: monto,
-        metodoPago,
-        observaciones
-      });
-
-      this.repository.incrementarConsecutivoRecibo(numeroRecibo + 1);
-
-      const detalleId = this.repository.crearReciboDetalle({
-        reciboId,
-        concepto: 'Abono a saldo a favor',
-        valor: monto
-      });
-
-      this.repository.crearMovimientoCredito(cuentaId, 'Abono', monto, detalleId, fechaPago, observaciones);
-
-      this.repository.crearMovimiento({
-        tipo: 'Ingreso',
-        origen: metodoPago === 'Efectivo' ? 'Caja' : 'Banco',
-        monto,
-        concepto: `Recibo No. ${numeroRecibo} - Abono`,
-        referenciaId: reciboId,
-        referenciaTipo: 'Recibo',
-        fechaMovimiento: fechaPago
-      });
-
-      return { reciboId, numeroRecibo, total: monto };
+      return { reciboId, numeroRecibo, total: totalACobrar, creditoAplicado, estadoConexion };
     });
   }
 

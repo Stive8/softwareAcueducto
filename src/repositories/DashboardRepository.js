@@ -8,8 +8,9 @@ class DashboardRepository {
       SELECT COALESCE(SUM(total), 0) as total
       FROM recibos
       WHERE strftime('%Y-%m', fecha_recibo) = strftime('%Y-%m', 'now')
+      AND estado != 'Anulado'
     `).get();
-    
+
     return result.total;
   }
 
@@ -96,6 +97,7 @@ class DashboardRepository {
         SELECT COALESCE(SUM(total), 0) as total
         FROM recibos
         WHERE strftime('%Y-%m', fecha_recibo) = ?
+        AND estado != 'Anulado'
       `).get(mesAnio);
 
       const gasto = this.db.prepare(`

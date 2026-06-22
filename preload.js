@@ -41,12 +41,15 @@ contextBridge.exposeInMainWorld('api', {
     getEstadoCuenta: (cuentaId) => ipcRenderer.invoke('pagos:getEstadoCuenta', cuentaId),
     simularPago: (cuentaId, anioInicio, mesInicio, cantidadMeses) => ipcRenderer.invoke('pagos:simularPago', cuentaId, anioInicio, mesInicio, cantidadMeses),
     registrarPagoSostenimiento: (payload) => ipcRenderer.invoke('pagos:registrarPagoSostenimiento', payload),
-    registrarAbono: (payload) => ipcRenderer.invoke('pagos:registrarAbono', payload),
     getHistorialPagos: (cuentaId) => ipcRenderer.invoke('pagos:getHistorialPagos', cuentaId)
   },
   recibos: {
     getAll: (params) => ipcRenderer.invoke('recibos:getAll', params),
     getById: (id) => ipcRenderer.invoke('recibos:getById', id),
+    anular: (id, motivo) => ipcRenderer.invoke('recibos:anular', id, motivo),
+    registrarAnuladoFisico: (datos) => ipcRenderer.invoke('recibos:registrarAnuladoFisico', datos),
+    getConsecutivo: () => ipcRenderer.invoke('recibos:getConsecutivo'),
+    getAnuladosFisicos: () => ipcRenderer.invoke('recibos:getAnuladosFisicos'),
     imprimir: (id) => ipcRenderer.invoke('recibos:imprimir', id),
     exportarPDF: (id) => ipcRenderer.invoke('recibos:exportarPDF', id)
   },

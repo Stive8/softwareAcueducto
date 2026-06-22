@@ -35,6 +35,45 @@ class ReciboService {
     return recibo;
   }
 
+  getConsecutivoRecibo() {
+    return this.repository.getConsecutivoRecibo();
+  }
+
+  registrarAnuladoFisico({ numeroRecibo, fecha, motivo }) {
+    if (!numeroRecibo || Number(numeroRecibo) <= 0) throw new Error('Debe indicar el número de recibo');
+    if (!motivo || !motivo.trim()) throw new Error('Debe indicar el motivo de la anulación');
+    if (this.repository.numeroRecibioExiste(Number(numeroRecibo))) {
+      throw new Error(`El número de recibo ${numeroRecibo} ya está registrado (como recibo o como anulado)`);
+    }
+    return this.repository.crearAnuladoFisico({ numeroRecibo: Number(numeroRecibo), fecha, motivo });
+  }
+
+  getAnuladosFisicos() {
+    return this.repository.getAnuladosFisicos();
+  }
+
+  anular(id, motivoAnulacion) {
+    const recibo = this.repository.findById(id);
+    if (!recibo) throw new Error('Recibo no encontrado');
+    if (recibo.estado === 'Anulado') throw new Error('El recibo ya está anulado');
+    if (!motivoAnulacion || !motivoAnulacion.trim()) throw new Error('Debe indicar el motivo de la anulación');
+
+    return this.repository.transaccion(() => {
+      this.repository.anular(id, motivoAnulacion);
+
+      this.repository.crearMovimiento({
+        tipo: 'Egreso',
+        origen: recibo.metodo_pago === 'Efectivo' ? 'Caja' : 'Banco',
+        monto: recibo.total,
+        concepto: `Reversión por anulación de recibo No. ${recibo.numero_recibo}`,
+        referenciaId: id,
+        referenciaTipo: 'Recibo',
+        fechaMovimiento: new Date().toISOString().split('T')[0],
+        observaciones: motivoAnulacion
+      });
+    });
+  }
+
   // Genera el documento HTML imprimible de un recibo (usado tanto para imprimir como para exportar a PDF)
   generarHTML(id) {
     const recibo = this.getById(id);
@@ -83,7 +122,8 @@ class ReciboService {
     ${config.telefono ? `<p>Tel: ${escapeHtml(config.telefono)}</p>` : ''}
   </div>
 
-  <div class="recibo-numero">Recibo No. ${recibo.numero_recibo}</div>
+  <div class="recibo-numero">Recibo No. ${recibo.numero_recibo}${recibo.estado === 'Anulado' ? ' <span style="color:#dc2626;">— ANULADO</span>' : ''}</div>
+  ${recibo.estado === 'Anulado' ? `<p style="color:#dc2626; font-size: 12px; text-align: center; margin: -12px 0 16px 0;">Este recibo fue anulado${recibo.motivo_anulacion ? ': ' + escapeHtml(recibo.motivo_anulacion) : ''}</p>` : ''}
 
   <div class="info-grid">
     <div>Fecha: <span>${formatFecha(recibo.fecha_recibo)}</span></div>

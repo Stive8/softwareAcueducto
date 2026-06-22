@@ -376,14 +376,6 @@ function setupIpcHandlers() {
     }
   });
 
-  ipcMain.handle('pagos:registrarAbono', async (event, payload) => {
-    try {
-      return { success: true, data: pagoService.registrarAbono(payload) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
   ipcMain.handle('pagos:getHistorialPagos', async (event, cuentaId) => {
     try {
       return { success: true, data: pagoService.getHistorialPagos(cuentaId) };
@@ -408,6 +400,39 @@ function setupIpcHandlers() {
         return { success: false, error: 'Recibo no encontrado' };
       }
       return { success: true, data: recibo };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('recibos:anular', async (event, id, motivo) => {
+    try {
+      reciboService.anular(id, motivo);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('recibos:getConsecutivo', async () => {
+    try {
+      return { success: true, data: reciboService.getConsecutivoRecibo() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('recibos:registrarAnuladoFisico', async (event, datos) => {
+    try {
+      return { success: true, data: reciboService.registrarAnuladoFisico(datos) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('recibos:getAnuladosFisicos', async () => {
+    try {
+      return { success: true, data: reciboService.getAnuladosFisicos() };
     } catch (error) {
       return { success: false, error: error.message };
     }
