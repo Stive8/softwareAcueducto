@@ -78,6 +78,7 @@ contextBridge.exposeInMainWorld('api', {
   nuevosPuntos: {
     getAll: (params) => ipcRenderer.invoke('nuevospuntos:getAll', params),
     getById: (id) => ipcRenderer.invoke('nuevospuntos:getById', id),
+    getByCuentaId: (cuentaId) => ipcRenderer.invoke('nuevospuntos:getByCuentaId', cuentaId),
     create: (datos) => ipcRenderer.invoke('nuevospuntos:create', datos),
     registrarAbono: (payload) => ipcRenderer.invoke('nuevospuntos:registrarAbono', payload),
     cancelar: (id, motivo) => ipcRenderer.invoke('nuevospuntos:cancelar', id, motivo)

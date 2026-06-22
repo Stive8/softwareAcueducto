@@ -1,3 +1,10 @@
+// Extrae año/mes de una fecha 'YYYY-MM-DD' sin pasar por new Date(): evita el desfase de un
+// día (y a veces un mes completo) que ocurre en zonas horarias negativas como Colombia (UTC-5).
+function anioMesDeFecha(fechaString) {
+  const [anio, mes] = fechaString.split(' ')[0].split('-').map(Number);
+  return { anio, mes };
+}
+
 class ReporteRepository {
   constructor(dbService) {
     this.db = dbService.getDb();
@@ -75,7 +82,8 @@ class ReporteRepository {
     return this.db.prepare(`
       SELECT c.codigo, c.direccion, c.fecha_creacion,
              p.nombre_completo as propietario,
-             (SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id) as ultimo_periodo_num
+             (SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id) as ultimo_periodo_num,
+             (SELECT MIN(fecha_inicio) FROM cuenta_categorias WHERE cuenta_id = c.id) as fecha_inicio_facturacion
       FROM cuentas c
       LEFT JOIN cuenta_propietarios cp ON cp.cuenta_id = c.id AND cp.fecha_fin IS NULL
       LEFT JOIN propietarios p ON p.id = cp.propietario_id
@@ -178,6 +186,7 @@ class ReporteRepository {
     const rows = this.db.prepare(`
       SELECT c.id, c.fecha_creacion,
         (SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id) as ultimo_periodo_num,
+        (SELECT MIN(fecha_inicio) FROM cuenta_categorias WHERE cuenta_id = c.id) as fecha_inicio_facturacion,
         (
           SELECT ct.tarifa_sostenimiento
           FROM cuenta_categorias cc
@@ -197,8 +206,8 @@ class ReporteRepository {
       if (row.ultimo_periodo_num !== null && row.ultimo_periodo_num !== undefined) {
         siguienteCod = row.ultimo_periodo_num + 1;
       } else {
-        const creacion = new Date(row.fecha_creacion);
-        siguienteCod = creacion.getFullYear() * 12 + creacion.getMonth();
+        const inicio = anioMesDeFecha(row.fecha_inicio_facturacion || row.fecha_creacion);
+        siguienteCod = inicio.anio * 12 + (inicio.mes - 1);
       }
       const mesesMora = Math.max(periodoActual - siguienteCod + 1, 0);
       total += mesesMora * tarifa;

@@ -191,6 +191,7 @@ const Configuracion = {
       const response = await window.api.config.actualizar(datos);
 
       if (response.success) {
+        App.loadNombreAsociacion();
         App.toast('Configuración guardada con éxito');
       } else {
         errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;

@@ -46,6 +46,16 @@ class PagoRepository {
     `).get(cuentaId);
   }
 
+  // Fecha real desde la cual la cuenta debe sostenimiento: el inicio de su PRIMERA categoría
+  // asignada (que puede ser muy anterior a fecha_creacion, ej. una cuenta preexistente cargada
+  // hoy pero que paga desde 2023). Nunca usar fecha_creacion para esto, o se pierde la mora real.
+  getFechaInicioFacturacion(cuentaId) {
+    const row = this.db.prepare(`
+      SELECT MIN(fecha_inicio) as fecha FROM cuenta_categorias WHERE cuenta_id = ?
+    `).get(cuentaId);
+    return row?.fecha;
+  }
+
   getMesesPagados(cuentaId) {
     return this.db.prepare(`
       SELECT pp.anio, pp.mes, pp.valor, pp.fecha_pago, pp.recibo_detalle_id,
@@ -142,7 +152,10 @@ class PagoRepository {
         cat.nombre as categoria_actual,
         (SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id) as ultimo_periodo_num,
         (SELECT COALESCE(SUM(CASE WHEN tipo = 'Abono' THEN monto ELSE -monto END), 0)
-           FROM cuenta_creditos WHERE cuenta_id = c.id) as saldo_favor
+           FROM cuenta_creditos WHERE cuenta_id = c.id) as saldo_favor,
+        (SELECT COALESCE(SUM(saldo_pendiente), 0)
+           FROM nuevos_puntos WHERE cuenta_id = c.id AND estado = 'Pendiente') as conexion_pendiente,
+        (SELECT MIN(fecha_inicio) FROM cuenta_categorias WHERE cuenta_id = c.id) as fecha_inicio_facturacion
       FROM cuentas c
       LEFT JOIN cuenta_propietarios cp ON cp.cuenta_id = c.id AND cp.fecha_fin IS NULL
       LEFT JOIN propietarios p ON p.id = cp.propietario_id
@@ -152,9 +165,18 @@ class PagoRepository {
     `;
     const queryParams = [];
 
+    // Igual que en Cuentas: cubre código, dirección, y el propietario actual o histórico,
+    // porque en la práctica la gente no siempre recuerda su código ni a nombre de quién está.
     if (search) {
-      query += ' AND (c.codigo LIKE ? OR c.direccion LIKE ?)';
-      queryParams.push(`%${search}%`, `%${search}%`);
+      query += ` AND (
+        c.codigo LIKE ? OR c.direccion LIKE ? OR EXISTS (
+          SELECT 1 FROM cuenta_propietarios cp2
+          INNER JOIN propietarios p2 ON p2.id = cp2.propietario_id
+          WHERE cp2.cuenta_id = c.id
+            AND (p2.nombre_completo LIKE ? OR p2.numero_identificacion LIKE ?)
+        )
+      )`;
+      queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
 
     if (estado) {

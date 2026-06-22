@@ -17,7 +17,7 @@ const Pagos = {
         <div class="table-header">
           <h2>Estado de Cuentas</h2>
           <div class="table-controls">
-            <input type="text" id="searchInput" class="search-box" placeholder="Buscar por código o dirección...">
+            <input type="text" id="searchInput" class="search-box" placeholder="Buscar por código, dirección, propietario o identificación...">
             <select id="filtroPagoSelect" class="filter-select">
               <option value="">Todas las cuentas</option>
               <option value="al_dia">Solo al día</option>
@@ -89,6 +89,7 @@ const Pagos = {
             <th>Pagado Hasta</th>
             <th>Estado</th>
             <th>Saldo a Favor</th>
+            <th>Conexión</th>
             <th>Acciones</th>
           </tr>
         </thead>
@@ -105,6 +106,7 @@ const Pagos = {
                   : '<span class="badge badge-aldia">Al día</span>'}
               </td>
               <td>${c.saldo_favor > 0 ? `<span class="badge badge-favor">$${this.formatNumber(c.saldo_favor)}</span>` : '-'}</td>
+              <td>${c.conexion_pendiente > 0 ? `<span class="badge badge-mora">🔧 $${this.formatNumber(c.conexion_pendiente)}</span>` : '-'}</td>
               <td>
                 <div class="table-actions">
                   <button class="btn btn-primary btn-icon" onclick="Pagos.showDetalleModal(${c.id})">Ver</button>
@@ -138,9 +140,10 @@ const Pagos = {
 
   async showDetalleModal(cuentaId) {
     try {
-      const [estadoResponse, historialResponse] = await Promise.all([
+      const [estadoResponse, historialResponse, conexionesResponse] = await Promise.all([
         window.api.pagos.getEstadoCuenta(cuentaId),
-        window.api.pagos.getHistorialPagos(cuentaId)
+        window.api.pagos.getHistorialPagos(cuentaId),
+        window.api.nuevosPuntos.getByCuentaId(cuentaId)
       ]);
 
       if (!estadoResponse.success) {
@@ -150,6 +153,8 @@ const Pagos = {
 
       const estado = estadoResponse.data;
       const historial = historialResponse.success ? historialResponse.data : [];
+      const conexiones = conexionesResponse.success ? conexionesResponse.data : [];
+      const conexionActiva = conexiones.find(p => p.estado === 'Pendiente') || conexiones[0] || null;
 
       const content = `
         <div class="modal-header">
@@ -208,6 +213,14 @@ const Pagos = {
           ` : '<p style="color: #64748b; margin-top: 12px;">Sin pagos registrados</p>'}
         </div>
 
+        <div class="detail-section">
+          <div style="display: flex; justify-content: space-between; align-items: center;">
+            <h3>Conexión (Nuevo Punto)</h3>
+            ${!conexionActiva ? `<button class="btn btn-secondary btn-icon" onclick="App.closeModal(); Pagos.showAgregarConexionModal(${cuentaId})">Agregar Cargo de Conexión</button>` : ''}
+          </div>
+          ${this.renderConexionDetalle(conexionActiva, cuentaId)}
+        </div>
+
         <div class="form-actions">
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
           <button class="btn btn-success" onclick="App.closeModal(); Pagos.showRegistrarPagoModal(${cuentaId})">Registrar Pago</button>
@@ -219,6 +232,241 @@ const Pagos = {
       console.error('Error:', error);
       App.toast('Error al cargar el estado de pagos', 'error');
     }
+  },
+
+  renderConexionDetalle(punto, cuentaId) {
+    if (!punto) {
+      return '<p style="color: #64748b; margin-top: 12px;">Esta cuenta no tiene un cargo de conexión registrado.</p>';
+    }
+
+    const badgeClase = punto.estado === 'Pagado' ? 'badge-activo' : (punto.estado === 'Cancelado' ? 'badge-inactivo' : 'badge-mora');
+    const totalAbonado = punto.valor_total - punto.saldo_pendiente;
+
+    return `
+      <div class="detail-row">
+        <div class="detail-label">Valor Total:</div>
+        <div class="detail-value">$${this.formatNumber(punto.valor_total)}</div>
+      </div>
+      <div class="detail-row">
+        <div class="detail-label">Abonado:</div>
+        <div class="detail-value">$${this.formatNumber(totalAbonado)}</div>
+      </div>
+      <div class="detail-row">
+        <div class="detail-label">Saldo Pendiente:</div>
+        <div class="detail-value"><strong>$${this.formatNumber(punto.saldo_pendiente)}</strong></div>
+      </div>
+      <div class="detail-row">
+        <div class="detail-label">Estado:</div>
+        <div class="detail-value"><span class="badge ${badgeClase}">${punto.estado}</span></div>
+      </div>
+      ${punto.estado === 'Pendiente' ? `
+        <div class="form-actions" style="justify-content: flex-start; margin-top: 12px;">
+          <button class="btn btn-success btn-icon" onclick="App.closeModal(); Pagos.showAbonoConexionModal(${punto.id}, ${cuentaId})">Abonar Conexión</button>
+          <button class="btn btn-warning btn-icon" onclick="App.closeModal(); Pagos.showCancelarConexionModal(${punto.id}, ${cuentaId})">Cancelar Conexión</button>
+        </div>
+      ` : ''}
+    `;
+  },
+
+  async showAgregarConexionModal(cuentaId) {
+    const configResponse = await window.api.config.getAll();
+    const valorDefecto = configResponse.success ? configResponse.data.valor_nuevo_punto : '';
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const content = `
+      <div class="modal-header"><h2>Agregar Cargo de Conexión</h2></div>
+      <div id="formError"></div>
+      <form id="conexionForm">
+        <div class="form-group">
+          <label for="valor_total_conexion">Valor Total <span style="color: #ef4444;">*</span></label>
+          <div class="input-currency">
+            <span class="currency-symbol">$</span>
+            <input type="text" inputmode="numeric" id="valor_total_conexion" name="valor_total_conexion" value="${App.formatMoneyValue(valorDefecto)}" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="fecha_registro_conexion">Fecha de Registro <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_registro_conexion" name="fecha_registro_conexion" value="${hoy}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="observaciones_conexion">Observaciones</label>
+          <textarea id="observaciones_conexion" name="observaciones_conexion"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Registrar</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+    App.attachMoneyInput(document.getElementById('valor_total_conexion'));
+
+    document.getElementById('conexionForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const datos = {
+        cuentaId,
+        valorTotal: App.parseMoneyValue(document.getElementById('valor_total_conexion').value),
+        fechaRegistro: document.getElementById('fecha_registro_conexion').value,
+        observaciones: document.getElementById('observaciones_conexion').value.trim()
+      };
+
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.nuevosPuntos.create(datos);
+        if (response.success) {
+          App.closeModal();
+          App.toast('Cargo de conexión registrado con éxito');
+          this.showDetalleModal(cuentaId);
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar el cargo de conexión</div>`;
+      }
+    });
+  },
+
+  async showAbonoConexionModal(nuevoPuntoId, cuentaId) {
+    const response = await window.api.nuevosPuntos.getById(nuevoPuntoId);
+    if (!response.success) {
+      App.toast('Error al cargar la conexión: ' + response.error, 'error');
+      return;
+    }
+    const punto = response.data;
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const content = `
+      <div class="modal-header"><h2>Abonar Conexión</h2></div>
+
+      <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
+          <strong>Saldo Pendiente de Conexión:</strong> $${this.formatNumber(punto.saldo_pendiente)}
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="abonoConexionForm">
+        <div class="form-group">
+          <label for="monto_abono_conexion">Monto del Abono <span style="color: #ef4444;">*</span></label>
+          <div class="input-currency">
+            <span class="currency-symbol">$</span>
+            <input type="text" inputmode="numeric" id="monto_abono_conexion" name="monto_abono_conexion" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="fecha_abono_conexion">Fecha <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_abono_conexion" name="fecha_abono_conexion" value="${hoy}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="metodo_pago_conexion">Método de Pago <span style="color: #ef4444;">*</span></label>
+          <select id="metodo_pago_conexion" name="metodo_pago_conexion" required>
+            <option value="Efectivo">Efectivo</option>
+            <option value="Transferencia">Transferencia</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="observaciones_abono_conexion">Observaciones</label>
+          <textarea id="observaciones_abono_conexion" name="observaciones_abono_conexion"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Registrar Abono y Generar Recibo</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+    App.attachMoneyInput(document.getElementById('monto_abono_conexion'));
+
+    document.getElementById('abonoConexionForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const payload = {
+        nuevoPuntoId,
+        monto: App.parseMoneyValue(document.getElementById('monto_abono_conexion').value),
+        fechaAbono: document.getElementById('fecha_abono_conexion').value,
+        metodoPago: document.getElementById('metodo_pago_conexion').value,
+        observaciones: document.getElementById('observaciones_abono_conexion').value.trim()
+      };
+
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.nuevosPuntos.registrarAbono(payload);
+        if (response.success) {
+          App.closeModal();
+          App.toast(`Abono de conexión registrado. Recibo No. ${response.data.numeroRecibo}`);
+          this.showDetalleModal(cuentaId);
+          this.loadCuentas();
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar el abono</div>`;
+      }
+    });
+  },
+
+  showCancelarConexionModal(nuevoPuntoId, cuentaId) {
+    const content = `
+      <div class="modal-header"><h2>Cancelar Cargo de Conexión</h2></div>
+
+      <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+          <strong>Nota:</strong> El registro no se elimina, queda marcado como cancelado. Los abonos ya recibidos no se reversan.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="cancelarConexionForm">
+        <div class="form-group">
+          <label for="motivo_cancelacion_conexion">Motivo de la Cancelación <span style="color: #ef4444;">*</span></label>
+          <textarea id="motivo_cancelacion_conexion" name="motivo_cancelacion_conexion" required></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-warning">Confirmar Cancelación</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('cancelarConexionForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const motivo = document.getElementById('motivo_cancelacion_conexion').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.nuevosPuntos.cancelar(nuevoPuntoId, motivo);
+        if (response.success) {
+          App.closeModal();
+          App.toast('Cargo de conexión cancelado con éxito');
+          this.showDetalleModal(cuentaId);
+          this.loadCuentas();
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al cancelar el cargo de conexión</div>`;
+      }
+    });
   },
 
   async showRegistrarPagoModal(cuentaId) {

@@ -59,6 +59,12 @@ class NuevoPuntoRepository {
     `).get(id);
   }
 
+  findByCuentaId(cuentaId) {
+    return this.db.prepare(`
+      SELECT * FROM nuevos_puntos WHERE cuenta_id = ? ORDER BY fecha_registro DESC, id DESC
+    `).all(cuentaId);
+  }
+
   getAbonos(nuevoPuntoId) {
     return this.db.prepare(`
       SELECT npa.*, r.numero_recibo

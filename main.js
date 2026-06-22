@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const DatabaseService = require('./src/database/DatabaseService');
@@ -37,6 +37,10 @@ let excelExportService;
 let devToolsService;
 
 function createWindow() {
+  // Esta es una app administrativa, no un navegador: el menú File/Edit/View de Electron
+  // no aporta nada aquí y solo confunde al usuario final.
+  Menu.setApplicationMenu(null);
+
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
@@ -665,6 +669,14 @@ function setupIpcHandlers() {
       const punto = nuevoPuntoService.getById(id);
       if (!punto) return { success: false, error: 'Punto nuevo no encontrado' };
       return { success: true, data: punto };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  ipcMain.handle('nuevospuntos:getByCuentaId', async (event, cuentaId) => {
+    try {
+      return { success: true, data: nuevoPuntoService.getByCuentaId(cuentaId) };
     } catch (error) {
       return { success: false, error: error.message };
     }

@@ -10,7 +10,7 @@
   <div id="loginScreen" class="login-screen">
     <div class="login-card">
       <div class="login-header">
-        <h1>Acueducto</h1>
+        <h1 id="loginAsociacionNombre">Acueducto</h1>
         <p>Sistema Administrativo</p>
       </div>
 
@@ -35,7 +35,7 @@
   <div class="app-container" id="appContainer" style="display: none;">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h2>Acueducto</h2>
+        <h2 id="sidebarAsociacionNombre">Acueducto</h2>
       </div>
       <nav class="sidebar-nav">
         <a href="#" class="nav-item active" data-page="dashboard">
@@ -70,10 +70,6 @@
           <span class="icon">🏦</span>
           <span>Caja/Banco</span>
         </a>
-        <a href="#" class="nav-item" data-page="nuevospuntos">
-          <span class="icon">🔧</span>
-          <span>Nuevos Puntos</span>
-        </a>
         <a href="#" class="nav-item" data-page="reportes">
           <span class="icon">📑</span>
           <span>Reportes</span>
@@ -104,7 +100,7 @@
 
   <div id="toastContainer" class="toast-container"></div>
 
-  <script src="../../../node_modules/chart.js/dist/chart.umd.js"></script>
+  <script src="../../node_modules/chart.js/dist/chart.umd.js"></script>
   <script src="js/app.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/cuentas.js"></script>
@@ -115,7 +111,6 @@
   <script src="js/gastos.js"></script>
   <script src="js/caja.js"></script>
   <script src="js/configuracion.js"></script>
-  <script src="js/nuevospuntos.js"></script>
   <script src="js/reportes.js"></script>
 </body>
 </html>

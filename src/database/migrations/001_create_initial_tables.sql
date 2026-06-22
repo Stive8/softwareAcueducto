@@ -281,7 +281,7 @@ CREATE INDEX idx_auditoria_tabla ON auditoria(tabla, registro_id);
 
 -- Configuración general
 INSERT INTO configuracion (clave, valor, descripcion) VALUES 
-  ('nombre_asociacion', 'Acueducto Veredal', 'Nombre de la asociación'),
+  ('nombre_asociacion', 'Asociación de Usuarios de Acueducto El Salitere, El Rodeo, El Cural', 'Nombre de la asociación'),
   ('nit', '', 'NIT de la asociación'),
   ('direccion', '', 'Dirección de la asociación'),
   ('telefono', '', 'Teléfono de contacto'),
@@ -301,9 +301,9 @@ INSERT INTO categorias (nombre, descripcion) VALUES
 -- Tarifas iniciales para cada categoría (año actual)
 INSERT INTO categoria_tarifas (categoria_id, tarifa_sostenimiento, fecha_vigencia_desde) VALUES 
   (1, 10000, date('now', 'start of year')),
-  (2, 15000, date('now', 'start of year')),
-  (3, 12000, date('now', 'start of year')),
-  (4, 13000, date('now', 'start of year'));
+  (2, 16000, date('now', 'start of year')),
+  (3, 20000, date('now', 'start of year')),
+  (4, 50000, date('now', 'start of year'));
 
 -- Plan de cuentas básico
 INSERT INTO plan_cuentas (codigo, nombre, tipo, nivel) VALUES 

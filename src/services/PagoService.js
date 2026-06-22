@@ -19,6 +19,14 @@ function decodificarPeriodo(codigo) {
   return { anio: Math.floor(codigo / 12), mes: (codigo % 12) + 1 };
 }
 
+// Extrae año/mes de una fecha 'YYYY-MM-DD' sin pasar por new Date(): un string de solo fecha
+// se interpreta como medianoche UTC, y en una zona horaria negativa (ej. Colombia, UTC-5) eso
+// puede retroceder la fecha un día y, si era el día 1, retroceder el mes entero.
+function anioMesDeFecha(fechaString) {
+  const [anio, mes] = fechaString.split(' ')[0].split('-').map(Number);
+  return { anio, mes };
+}
+
 class PagoService {
   constructor(dbService) {
     this.repository = new PagoRepository(dbService);
@@ -50,8 +58,8 @@ class PagoService {
     if (ultimoPagado) {
       siguiente = this.sumarMeses(ultimoPagado.anio, ultimoPagado.mes, 1);
     } else {
-      const creacion = new Date(cuenta.fecha_creacion);
-      siguiente = { anio: creacion.getFullYear(), mes: creacion.getMonth() + 1 };
+      const fechaInicio = this.repository.getFechaInicioFacturacion(cuentaId) || cuenta.fecha_creacion;
+      siguiente = anioMesDeFecha(fechaInicio);
     }
 
     const mesesMora = Math.max(codificarPeriodo(periodoActual.anio, periodoActual.mes) - codificarPeriodo(siguiente.anio, siguiente.mes) + 1, 0);
@@ -286,8 +294,8 @@ class PagoService {
         pagadoHasta = this.formatPeriodo(periodo.anio, periodo.mes);
         siguienteCod = row.ultimo_periodo_num + 1;
       } else {
-        const creacion = new Date(row.fecha_creacion);
-        siguienteCod = codificarPeriodo(creacion.getFullYear(), creacion.getMonth() + 1);
+        const inicio = anioMesDeFecha(row.fecha_inicio_facturacion || row.fecha_creacion);
+        siguienteCod = codificarPeriodo(inicio.anio, inicio.mes);
       }
 
       const mesesMora = Math.max(periodoActualCod - siguienteCod + 1, 0);

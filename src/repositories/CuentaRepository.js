@@ -27,9 +27,22 @@ class CuentaRepository {
     `;
     const queryParams = [];
 
+    // La búsqueda cubre código, dirección, y el nombre/identificación de CUALQUIER propietario
+    // que haya tenido la cuenta (actual o histórico): en la práctica la gente rara vez recuerda
+    // su código, a veces no sabe si la cuenta sigue a nombre del propietario anterior, y a veces
+    // solo tiene la cédula a mano.
+    const condicionBusqueda = `(
+      c.codigo LIKE ? OR c.direccion LIKE ? OR EXISTS (
+        SELECT 1 FROM cuenta_propietarios cp2
+        INNER JOIN propietarios p2 ON p2.id = cp2.propietario_id
+        WHERE cp2.cuenta_id = c.id
+          AND (p2.nombre_completo LIKE ? OR p2.numero_identificacion LIKE ?)
+      )
+    )`;
+
     if (search) {
-      query += ' AND (c.codigo LIKE ? OR c.direccion LIKE ?)';
-      queryParams.push(`%${search}%`, `%${search}%`);
+      query += ` AND ${condicionBusqueda}`;
+      queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
 
     if (estado) {
@@ -47,8 +60,8 @@ class CuentaRepository {
       FROM cuentas c
       LEFT JOIN cuenta_categorias cc ON cc.cuenta_id = c.id AND cc.fecha_fin IS NULL
       LEFT JOIN categorias cat ON cat.id = cc.categoria_id
-      WHERE 1=1 
-      ${search ? ' AND (c.codigo LIKE ? OR c.direccion LIKE ?)' : ''}
+      WHERE 1=1
+      ${search ? ` AND ${condicionBusqueda}` : ''}
       ${estado ? ' AND c.estado = ?' : ''}
       ${categoria ? ' AND cat.nombre = ?' : ''}
     `;

@@ -30,8 +30,10 @@ body {
 }
 
 .sidebar-header h2 {
-  font-size: 20px;
+  font-size: 15px;
   font-weight: 600;
+  line-height: 1.35;
+  word-wrap: break-word;
 }
 
 .sidebar-nav {
@@ -553,7 +555,8 @@ tr:hover {
 
 .login-header h1 {
   color: #1e40af;
-  font-size: 26px;
+  font-size: 20px;
+  line-height: 1.3;
   margin-bottom: 4px;
 }
 

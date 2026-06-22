@@ -20,6 +20,15 @@ class NuevoPuntoService {
     return punto;
   }
 
+  // Historial de cargos de conexión de una cuenta (normalmente uno solo, pero puede haber
+  // varios si uno fue cancelado y se registró otro después), con sus abonos incluidos.
+  getByCuentaId(cuentaId) {
+    return this.repository.findByCuentaId(cuentaId).map(punto => ({
+      ...punto,
+      abonos: this.repository.getAbonos(punto.id)
+    }));
+  }
+
   create({ cuentaId, valorTotal, fechaRegistro, observaciones }) {
     if (!cuentaId) throw new Error('La cuenta es obligatoria');
     if (!valorTotal || valorTotal <= 0) throw new Error('El valor total debe ser mayor a cero');

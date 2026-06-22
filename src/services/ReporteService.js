@@ -21,6 +21,13 @@ function formatFecha(fechaString) {
 
 const NOMBRES_MES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
+// Extrae año/mes de una fecha 'YYYY-MM-DD' sin pasar por new Date(): evita el desfase de un
+// día (y a veces un mes completo) que ocurre en zonas horarias negativas como Colombia (UTC-5).
+function anioMesDeFecha(fechaString) {
+  const [anio, mes] = fechaString.split(' ')[0].split('-').map(Number);
+  return { anio, mes };
+}
+
 class ReporteService {
   constructor(dbService) {
     this.repository = new ReporteRepository(dbService);
@@ -151,8 +158,8 @@ class ReporteService {
         pagadoHasta = `${NOMBRES_MES[mes - 1]} ${anio}`;
         siguienteCod = c.ultimo_periodo_num + 1;
       } else {
-        const creacion = new Date(c.fecha_creacion);
-        siguienteCod = creacion.getFullYear() * 12 + creacion.getMonth();
+        const inicio = anioMesDeFecha(c.fecha_inicio_facturacion || c.fecha_creacion);
+        siguienteCod = inicio.anio * 12 + (inicio.mes - 1);
       }
 
       const mesesMora = Math.max(periodoActual - siguienteCod + 1, 0);

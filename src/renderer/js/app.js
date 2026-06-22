@@ -6,6 +6,7 @@ const App = {
 
   initLogin() {
     this.setupModal();
+    this.loadNombreAsociacion();
 
     document.getElementById('loginForm').addEventListener('submit', (e) => {
       e.preventDefault();
@@ -13,6 +14,21 @@ const App = {
     });
 
     document.getElementById('loginUsuario').focus();
+  },
+
+  // El nombre real de la asociación (configurable en Configuración) se muestra en el login
+  // y en la barra lateral, en vez del genérico "Acueducto" que queda solo como respaldo.
+  async loadNombreAsociacion() {
+    try {
+      const response = await window.api.config.getAll();
+      if (response.success && response.data.nombre_asociacion) {
+        const nombre = response.data.nombre_asociacion;
+        document.getElementById('loginAsociacionNombre').textContent = nombre;
+        document.getElementById('sidebarAsociacionNombre').textContent = nombre;
+      }
+    } catch (error) {
+      console.error('Error al cargar el nombre de la asociación:', error);
+    }
   },
 
   async handleLogin() {
@@ -109,8 +125,6 @@ const App = {
       Caja.load();
     } else if (page === 'configuracion') {
       Configuracion.load();
-    } else if (page === 'nuevospuntos') {
-      NuevosPuntos.load();
     } else if (page === 'reportes') {
       Reportes.load();
     }

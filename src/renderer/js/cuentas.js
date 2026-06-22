@@ -19,7 +19,7 @@ const Cuentas = {
         <div class="table-header">
           <h2>Listado de Cuentas</h2>
           <div class="table-controls">
-            <input type="text" id="searchInput" class="search-box" placeholder="Buscar por código o dirección...">
+            <input type="text" id="searchInput" class="search-box" placeholder="Buscar por código, dirección, propietario o identificación...">
             <select id="estadoFilter" class="filter-select">
               <option value="">Todos los estados</option>
               <option value="Activo">Activo</option>
@@ -177,6 +177,10 @@ const Cuentas = {
         const historialPropietariosResponse = await window.api.propietarios.getHistorialPropietariosCuenta(id);
         const historialPropietarios = historialPropietariosResponse.success ? historialPropietariosResponse.data : [];
 
+        const conexionesResponse = await window.api.nuevosPuntos.getByCuentaId(id);
+        const conexiones = conexionesResponse.success ? conexionesResponse.data : [];
+        const conexionActiva = conexiones.find(p => p.estado === 'Pendiente') || conexiones[0] || null;
+
         const content = `
           <div class="modal-header">
             <h2>Detalle de Cuenta</h2>
@@ -265,6 +269,23 @@ const Cuentas = {
                 </tbody>
               </table>
             ` : '<p style="color: #64748b; margin-top: 12px;">Sin historial de categorías</p>'}
+          </div>
+
+          <div class="detail-section">
+            <h3>Conexión (Nuevo Punto)</h3>
+            ${conexionActiva ? `
+              <div class="detail-row">
+                <div class="detail-label">Saldo Pendiente:</div>
+                <div class="detail-value">
+                  <strong>$${this.formatNumber(conexionActiva.saldo_pendiente)}</strong>
+                  <span class="badge ${conexionActiva.estado === 'Pagado' ? 'badge-activo' : (conexionActiva.estado === 'Cancelado' ? 'badge-inactivo' : 'badge-mora')}" style="margin-left: 8px;">${conexionActiva.estado}</span>
+                </div>
+              </div>
+              <p style="margin-top: 8px;"><a href="#" onclick="App.closeModal(); Pagos.showDetalleModal(${cuenta.id}); return false;">Ver y gestionar en Estado de Pagos →</a></p>
+            ` : `
+              <p style="color: #64748b; margin-top: 12px;">Sin cargo de conexión registrado.</p>
+              <button class="btn btn-secondary btn-icon" onclick="App.closeModal(); Pagos.showAgregarConexionModal(${cuenta.id})">Agregar Cargo de Conexión</button>
+            `}
           </div>
 
           <div class="form-actions">
@@ -479,6 +500,15 @@ const Cuentas = {
             <input type="date" id="categoria_fecha_inicio" name="categoria_fecha_inicio" value="${new Date().toISOString().split('T')[0]}">
             <small style="color: #64748b; font-size: 0.875rem;">Si esta cuenta ya existía antes de usar el sistema, indique la fecha real desde la cual aplica esta categoría (ej. el año en que se creó el predio), para poder registrar pagos de meses anteriores a hoy.</small>
           </div>
+
+          <div class="form-group">
+            <label for="valor_conexion">Valor de Conexión (opcional)</label>
+            <div class="input-currency">
+              <span class="currency-symbol">$</span>
+              <input type="text" inputmode="numeric" id="valor_conexion" name="valor_conexion">
+            </div>
+            <small style="color: #64748b; font-size: 0.875rem;">Si esta es una conexión nueva con un cargo de conexión a cobrar, indique el valor aquí. Podrá registrar abonos parciales desde "Estado de Pagos" hasta saldarlo.</small>
+          </div>
         ` : ''}
 
         ${id ? `
@@ -506,6 +536,10 @@ const Cuentas = {
 
     App.openModal(content);
 
+    if (!id) {
+      App.attachMoneyInput(document.getElementById('valor_conexion'));
+    }
+
     document.getElementById('cuentaForm').addEventListener('submit', (e) => {
       e.preventDefault();
       this.saveCuenta(id);
@@ -519,19 +553,34 @@ const Cuentas = {
       observaciones: document.getElementById('observaciones').value.trim()
     };
 
+    let valorConexion = 0;
     if (id) {
       formData.estado = document.getElementById('estado').value;
     } else {
       formData.categoria_id = document.getElementById('categoria_id').value;
       formData.categoria_fecha_inicio = document.getElementById('categoria_fecha_inicio').value;
+      valorConexion = App.parseMoneyValue(document.getElementById('valor_conexion').value);
     }
 
     try {
-      const response = id 
+      const response = id
         ? await window.api.cuentas.update(id, formData)
         : await window.api.cuentas.create(formData);
 
       if (response.success) {
+        if (!id && valorConexion > 0) {
+          const cuentaId = response.data.id;
+          const conexionResponse = await window.api.nuevosPuntos.create({
+            cuentaId,
+            valorTotal: valorConexion,
+            fechaRegistro: formData.categoria_fecha_inicio,
+            observaciones: 'Cargo de conexión inicial'
+          });
+          if (!conexionResponse.success) {
+            App.toast('La cuenta se creó, pero no se pudo registrar el cargo de conexión: ' + conexionResponse.error, 'error');
+          }
+        }
+
         App.closeModal();
         this.loadCuentas();
         App.toast(id ? 'Cuenta actualizada con éxito' : 'Cuenta creada con éxito');
@@ -567,12 +616,16 @@ const Cuentas = {
 
   formatDate(dateString) {
     const date = new Date(dateString);
-    return date.toLocaleDateString('es-CO', { 
-      year: 'numeric', 
-      month: 'long', 
+    return date.toLocaleDateString('es-CO', {
+      year: 'numeric',
+      month: 'long',
       day: 'numeric',
       hour: '2-digit',
       minute: '2-digit'
     });
+  },
+
+  formatNumber(num) {
+    return Number(num || 0).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   }
 };
