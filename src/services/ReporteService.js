@@ -78,6 +78,8 @@ class ReporteService {
         return this.reporteLibroMayor(params);
       case 'balance_prueba':
         return this.reporteBalancePrueba(params);
+      case 'balance_prueba_tercero':
+        return this.reporteBalancePruebaPorTercero(params);
       case 'informe_empalme':
         return this.reporteInformeEmpalme(params);
       default:
@@ -118,10 +120,7 @@ class ReporteService {
   }
 
   reporteHistorialPagos({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
-    const filas = this.repository.getHistorialPagos(fechaDesde, fechaHasta, cuentaContableId).map(f => ({
-      ...f,
-      cuenta_contable: f.cuenta_contable_codigo ? `${f.cuenta_contable_codigo} - ${f.cuenta_contable_nombre}` : '-'
-    }));
+    const filas = this.repository.getHistorialPagos(fechaDesde, fechaHasta, cuentaContableId);
 
     return {
       tipo: 'tabla',
@@ -133,7 +132,8 @@ class ReporteService {
         { key: 'valor', label: 'Valor', tipo: 'moneda' },
         { key: 'fecha_pago', label: 'Fecha de Pago', tipo: 'fecha' },
         { key: 'numero_recibo', label: 'No. Recibo' },
-        { key: 'cuenta_contable', label: 'Cuenta Contable' }
+        { key: 'cuenta_contable_codigo', label: 'Código Cuenta Contable' },
+        { key: 'cuenta_contable_nombre', label: 'Nombre Cuenta Contable' }
       ],
       filas,
       totales: { valor: filas.reduce((s, f) => s + f.valor, 0) }
@@ -141,10 +141,7 @@ class ReporteService {
   }
 
   reporteHistorialGastos({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
-    const filas = this.repository.getHistorialGastos(fechaDesde, fechaHasta, cuentaContableId).map(f => ({
-      ...f,
-      cuenta_contable: f.cuenta_contable_codigo ? `${f.cuenta_contable_codigo} - ${f.cuenta_contable_nombre}` : '-'
-    }));
+    const filas = this.repository.getHistorialGastos(fechaDesde, fechaHasta, cuentaContableId);
     return {
       tipo: 'tabla',
       titulo: 'Historial de Gastos',
@@ -156,7 +153,8 @@ class ReporteService {
         { key: 'valor', label: 'Valor', tipo: 'moneda' },
         { key: 'metodo_pago', label: 'Método de Pago' },
         { key: 'estado', label: 'Estado' },
-        { key: 'cuenta_contable', label: 'Cuenta Contable' }
+        { key: 'cuenta_contable_codigo', label: 'Código Cuenta Contable' },
+        { key: 'cuenta_contable_nombre', label: 'Nombre Cuenta Contable' }
       ],
       filas,
       totales: { valor: filas.filter(f => f.estado !== 'Anulado').reduce((s, f) => s + f.valor, 0) }
@@ -271,10 +269,7 @@ class ReporteService {
   }
 
   reporteGastosPeriodo({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
-    const filas = this.repository.getGastosPorPeriodo(fechaDesde, fechaHasta, cuentaContableId).map(f => ({
-      ...f,
-      cuenta_contable: f.cuenta_contable_codigo ? `${f.cuenta_contable_codigo} - ${f.cuenta_contable_nombre}` : '-'
-    }));
+    const filas = this.repository.getGastosPorPeriodo(fechaDesde, fechaHasta, cuentaContableId);
     return {
       tipo: 'tabla',
       titulo: 'Gastos por Período',
@@ -283,7 +278,8 @@ class ReporteService {
         { key: 'concepto', label: 'Concepto' },
         { key: 'tipo_gasto', label: 'Tipo' },
         { key: 'valor', label: 'Valor', tipo: 'moneda' },
-        { key: 'cuenta_contable', label: 'Cuenta Contable' }
+        { key: 'cuenta_contable_codigo', label: 'Código Cuenta Contable' },
+        { key: 'cuenta_contable_nombre', label: 'Nombre Cuenta Contable' }
       ],
       filas,
       totales: { valor: filas.reduce((s, f) => s + f.valor, 0) }
@@ -452,23 +448,51 @@ class ReporteService {
   reporteBalancePrueba({ fechaDesde = '', fechaHasta = '' } = {}) {
     const { filas, totalDebito, totalCredito } = this.asientoContableService.getBalancePrueba(fechaDesde, fechaHasta);
 
-    const filasConCuenta = filas.map(f => ({
-      ...f,
-      cuenta: `${f.codigo} - ${f.nombre}`
-    }));
-
     return {
       tipo: 'tabla',
       titulo: 'Balance de Prueba',
       columnas: [
-        { key: 'cuenta', label: 'Cuenta Contable' },
+        { key: 'codigo', label: 'Código Cuenta Contable' },
+        { key: 'nombre', label: 'Nombre Cuenta Contable' },
         { key: 'tipo', label: 'Tipo' },
         { key: 'total_debito', label: 'Total Débito', tipo: 'moneda' },
         { key: 'total_credito', label: 'Total Crédito', tipo: 'moneda' },
         { key: 'saldo', label: 'Saldo', tipo: 'moneda' }
       ],
-      filas: filasConCuenta,
+      filas,
       totales: { total_debito: totalDebito, total_credito: totalCredito }
+    };
+  }
+
+  // Balance de Prueba por Tercero: el mismo Balance de Prueba pero abierto por propietario o
+  // proveedor (el "tercero" de cada movimiento), con saldo inicial del período además de los
+  // totales movidos. No incluye columna de "Sucursal" (este sistema es para una sola
+  // asociación, sin sedes), a diferencia de software contable multi-sede del que viene la idea.
+  reporteBalancePruebaPorTercero({ fechaDesde, fechaHasta, cuentaCodigoDesde = '', cuentaCodigoHasta = '', terceroQuery = '' } = {}) {
+    const filas = this.asientoContableService.getBalancePruebaPorTercero({ fechaDesde, fechaHasta, cuentaCodigoDesde, cuentaCodigoHasta, terceroQuery });
+
+    return {
+      tipo: 'tabla',
+      titulo: 'Balance de Prueba por Tercero',
+      columnas: [
+        { key: 'nivel', label: 'Nivel' },
+        { key: 'transaccional', label: 'Transaccional' },
+        { key: 'codigo', label: 'Código Cuenta Contable' },
+        { key: 'nombre', label: 'Nombre Cuenta Contable' },
+        { key: 'tercero_identificacion', label: 'Identificación' },
+        { key: 'tercero_nombre', label: 'Nombre Tercero' },
+        { key: 'saldo_inicial', label: 'Saldo Inicial', tipo: 'moneda' },
+        { key: 'movimiento_debito', label: 'Movimiento Débito', tipo: 'moneda' },
+        { key: 'movimiento_credito', label: 'Movimiento Crédito', tipo: 'moneda' },
+        { key: 'saldo_final', label: 'Saldo Final', tipo: 'moneda' }
+      ],
+      filas: filas.map(f => ({ ...f, transaccional: f.transaccional ? 'Sí' : 'No' })),
+      totales: {
+        saldo_inicial: filas.reduce((s, f) => s + f.saldo_inicial, 0),
+        movimiento_debito: filas.reduce((s, f) => s + f.movimiento_debito, 0),
+        movimiento_credito: filas.reduce((s, f) => s + f.movimiento_credito, 0),
+        saldo_final: filas.reduce((s, f) => s + f.saldo_final, 0)
+      }
     };
   }
 

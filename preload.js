@@ -100,6 +100,7 @@ contextBridge.exposeInMainWorld('api', {
     cancelar: (id, motivo) => ipcRenderer.invoke('nuevospuntos:cancelar', id, motivo)
   },
   reportes: {
+    getDatos: (tipoReporte, params) => ipcRenderer.invoke('reportes:getDatos', tipoReporte, params),
     generarPDF: (tipoReporte, params) => ipcRenderer.invoke('reportes:generarPDF', tipoReporte, params),
     generarExcel: (tipoReporte, params) => ipcRenderer.invoke('reportes:generarExcel', tipoReporte, params)
   },

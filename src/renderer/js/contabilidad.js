@@ -28,7 +28,8 @@ const Contabilidad = {
       reportes: [
         { tipo: 'libro_diario', titulo: 'Libro Diario', icon: '📖', rangoFecha: true },
         { tipo: 'libro_mayor', titulo: 'Libro Mayor', icon: '📚', rangoFecha: true, requiereCuentaContable: true },
-        { tipo: 'balance_prueba', titulo: 'Balance de Prueba', icon: '⚖️', rangoFecha: true }
+        { tipo: 'balance_prueba', titulo: 'Balance de Prueba', icon: '⚖️', rangoFecha: true },
+        { tipo: 'balance_prueba_tercero', titulo: 'Balance de Prueba por Tercero', icon: '🧾', rangoFecha: true, rangoCuentaContable: true, filtroTercero: true, previaPantalla: true }
       ]
     },
     {
@@ -621,7 +622,7 @@ const Contabilidad = {
         </div>
 
         <table style="width: 100%;" id="lineasAsientoTable">
-          <thead><tr><th>Cuenta Contable</th><th style="width: 140px;">Débito</th><th style="width: 140px;">Crédito</th><th></th></tr></thead>
+          <thead><tr><th>Cuenta Contable</th><th style="width: 140px;">Débito</th><th style="width: 140px;">Crédito</th><th style="width: 200px;">Tercero (opcional)</th><th></th></tr></thead>
           <tbody id="lineasAsientoBody"></tbody>
         </table>
         <button type="button" class="btn btn-secondary btn-icon" id="btnAgregarLinea" style="margin: 8px 0 16px 0;">+ Agregar línea</button>
@@ -648,7 +649,9 @@ const Contabilidad = {
       const lineas = Array.from(document.querySelectorAll('#lineasAsientoBody tr')).map(fila => ({
         cuentaContableId: parseInt(fila.querySelector('.linea-cuenta').value, 10),
         debito: App.parseMoneyValue(fila.querySelector('.linea-debito').value),
-        credito: App.parseMoneyValue(fila.querySelector('.linea-credito').value)
+        credito: App.parseMoneyValue(fila.querySelector('.linea-credito').value),
+        terceroIdentificacion: fila.querySelector('.linea-tercero-id').value.trim() || null,
+        terceroNombre: fila.querySelector('.linea-tercero-nombre').value.trim() || null
       }));
 
       try {
@@ -694,6 +697,10 @@ const Contabilidad = {
       </td>
       <td><input type="text" inputmode="numeric" class="linea-debito" placeholder="0"></td>
       <td><input type="text" inputmode="numeric" class="linea-credito" placeholder="0"></td>
+      <td>
+        <input type="text" class="linea-tercero-id" placeholder="Identificación" style="width: 100%; margin-bottom: 4px;">
+        <input type="text" class="linea-tercero-nombre" placeholder="Nombre" style="width: 100%;">
+      </td>
       <td><button type="button" class="btn btn-danger btn-icon" onclick="this.closest('tr').remove(); Contabilidad.actualizarBalanceAsiento();">✕</button></td>
     `;
 
@@ -745,7 +752,7 @@ const Contabilidad = {
 
     body.innerHTML = html;
 
-    if (this.gruposReportes.some(g => g.reportes.some(r => r.filtroCuentaContable || r.requiereCuentaContable))) {
+    if (this.gruposReportes.some(g => g.reportes.some(r => r.filtroCuentaContable || r.requiereCuentaContable || r.rangoCuentaContable))) {
       await this.cargarCuentasContables();
     }
   },
@@ -762,7 +769,8 @@ const Contabilidad = {
     }
 
     document.querySelectorAll('[data-select-cuenta-contable]').forEach(select => {
-      const opcionTodas = select.dataset.requerida === 'true' ? '' : '<option value="">Todas las cuentas contables</option>';
+      const textoPlaceholder = select.dataset.placeholder || 'Todas las cuentas contables';
+      const opcionTodas = select.dataset.requerida === 'true' ? '' : `<option value="">${textoPlaceholder}</option>`;
       select.innerHTML = `
         ${opcionTodas}
         ${this.cuentasContables.map(c => `<option value="${c.id}">${c.codigo} - ${c.nombre}</option>`).join('')}
@@ -777,7 +785,7 @@ const Contabilidad = {
     const inicioMesStr = inicioMes.toISOString().split('T')[0];
 
     return `
-      <div class="reporte-card">
+      <div class="reporte-card" ${reporte.previaPantalla ? 'style="grid-column: 1 / -1;"' : ''}>
         <div class="reporte-card-icon">${reporte.icon}</div>
         <div class="reporte-card-titulo">${reporte.titulo}</div>
         ${reporte.rangoFecha ? `
@@ -791,10 +799,25 @@ const Contabilidad = {
             <option value="">Todas las cuentas contables</option>
           </select>
         ` : ''}
+        ${reporte.rangoCuentaContable ? `
+          <div style="display: flex; gap: 8px;">
+            <select id="cuentaDesde_${idSufijo}" data-select-cuenta-contable data-placeholder="Cuenta desde (todas)" style="width: 50%;">
+              <option value="">Cuenta desde (todas)</option>
+            </select>
+            <select id="cuentaHasta_${idSufijo}" data-select-cuenta-contable data-placeholder="Cuenta hasta (todas)" style="width: 50%;">
+              <option value="">Cuenta hasta (todas)</option>
+            </select>
+          </div>
+        ` : ''}
+        ${reporte.filtroTercero ? `
+          <input type="text" id="tercero_${idSufijo}" placeholder="Identificación o nombre del tercero (opcional)" style="width: 100%; padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px;">
+        ` : ''}
         <div class="reporte-card-actions">
+          ${reporte.previaPantalla ? `<button class="btn btn-primary" onclick="Contabilidad.buscarReporte('${idSufijo}')">Buscar</button>` : ''}
           <button class="btn btn-secondary btn-icon" onclick="Contabilidad.exportarReporte('${idSufijo}', 'pdf')">PDF</button>
           <button class="btn btn-success btn-icon" onclick="Contabilidad.exportarReporte('${idSufijo}', 'excel')">Excel</button>
         </div>
+        ${reporte.previaPantalla ? `<div id="resultados_${idSufijo}"></div>` : ''}
       </div>
     `;
   },
@@ -804,8 +827,11 @@ const Contabilidad = {
     return this.gruposReportes[gi].reportes[ri];
   },
 
-  async exportarReporte(idSufijo, formato) {
-    const reporte = this.obtenerReportePorSufijo(idSufijo);
+  // Centraliza la lectura de los filtros de una tarjeta de reporte; la usan tanto la vista
+  // previa en pantalla (Buscar) como la exportación a PDF/Excel, para que ambas manden
+  // exactamente los mismos parámetros. Devuelve null si falta un filtro obligatorio (y ya
+  // mostró el aviso correspondiente).
+  obtenerParametrosReporte(idSufijo, reporte) {
     const params = {};
 
     if (reporte.rangoFecha) {
@@ -817,9 +843,90 @@ const Contabilidad = {
       params.cuentaContableId = document.getElementById(`cuentaContable_${idSufijo}`).value;
       if (reporte.requiereCuentaContable && !params.cuentaContableId) {
         App.toast('Debe seleccionar una cuenta contable', 'error');
-        return;
+        return null;
       }
     }
+
+    if (reporte.rangoCuentaContable) {
+      const idDesde = document.getElementById(`cuentaDesde_${idSufijo}`).value;
+      const idHasta = document.getElementById(`cuentaHasta_${idSufijo}`).value;
+      const cuentaDesde = (this.cuentasContables || []).find(c => String(c.id) === idDesde);
+      const cuentaHasta = (this.cuentasContables || []).find(c => String(c.id) === idHasta);
+      params.cuentaCodigoDesde = cuentaDesde ? cuentaDesde.codigo : '';
+      params.cuentaCodigoHasta = cuentaHasta ? cuentaHasta.codigo : '';
+    }
+
+    if (reporte.filtroTercero) {
+      params.terceroQuery = document.getElementById(`tercero_${idSufijo}`).value.trim();
+    }
+
+    return params;
+  },
+
+  async buscarReporte(idSufijo) {
+    const reporte = this.obtenerReportePorSufijo(idSufijo);
+    const params = this.obtenerParametrosReporte(idSufijo, reporte);
+    if (!params) return;
+
+    const contenedor = document.getElementById(`resultados_${idSufijo}`);
+    contenedor.innerHTML = '<p style="padding: 12px; color: #64748b;">Buscando...</p>';
+
+    try {
+      const response = await window.api.reportes.getDatos(reporte.tipo, params);
+      if (!response.success) {
+        contenedor.innerHTML = `<div class="error-message">${response.error}</div>`;
+        return;
+      }
+      contenedor.innerHTML = this.renderTablaReporte(response.data);
+    } catch (error) {
+      console.error('Error:', error);
+      contenedor.innerHTML = '<div class="error-message">Error al buscar el reporte</div>';
+    }
+  },
+
+  renderTablaReporte(reporte) {
+    if (reporte.filas.length === 0) {
+      return '<p style="padding: 16px; color: #64748b; text-align: center;">No hay datos para mostrar con los filtros seleccionados</p>';
+    }
+
+    const celda = (fila, col) => {
+      const valor = fila[col.key];
+      if (col.tipo === 'moneda') return `<td style="text-align: right;">$${this.formatNumber(valor)}</td>`;
+      if (col.tipo === 'fecha') return `<td>${this.formatDate(valor)}</td>`;
+      return `<td>${valor ?? ''}</td>`;
+    };
+
+    const filaTotales = reporte.totales ? `
+      <tr style="font-weight: 600; background: #eff6ff;">
+        ${reporte.columnas.map((col, i) => {
+          if (i === 0) return '<td>TOTAL</td>';
+          if (reporte.totales[col.key] !== undefined) return `<td style="text-align: right;">$${this.formatNumber(reporte.totales[col.key])}</td>`;
+          return '<td></td>';
+        }).join('')}
+      </tr>
+    ` : '';
+
+    return `
+      <div style="overflow-x: auto; margin-top: 4px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
+          <thead>
+            <tr style="background: #f1f5f9;">
+              ${reporte.columnas.map(c => `<th style="padding: 6px 8px; text-align: left; border: 1px solid #e2e8f0;">${c.label}</th>`).join('')}
+            </tr>
+          </thead>
+          <tbody>
+            ${reporte.filas.map(fila => `<tr>${reporte.columnas.map(col => celda(fila, col)).join('')}</tr>`).join('')}
+            ${filaTotales}
+          </tbody>
+        </table>
+      </div>
+    `;
+  },
+
+  async exportarReporte(idSufijo, formato) {
+    const reporte = this.obtenerReportePorSufijo(idSufijo);
+    const params = this.obtenerParametrosReporte(idSufijo, reporte);
+    if (!params) return;
 
     const tipo = reporte.tipo;
 

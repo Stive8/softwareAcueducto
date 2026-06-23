@@ -19,15 +19,19 @@ class AsientoContableRepository {
 
   obtenerGastoParaAsiento(gastoId) {
     return this.db.prepare(`
-      SELECT id, fecha_gasto as fecha, concepto, valor, metodo_pago, cuenta_contable_id
+      SELECT id, fecha_gasto as fecha, concepto, valor, metodo_pago, cuenta_contable_id,
+        proveedor as tercero_nombre, nit_cedula as tercero_identificacion
       FROM gastos WHERE id = ?
     `).get(gastoId);
   }
 
   obtenerReciboParaAsiento(reciboId) {
     const recibo = this.db.prepare(`
-      SELECT id, fecha_recibo as fecha, numero_recibo, total, metodo_pago
-      FROM recibos WHERE id = ?
+      SELECT r.id, r.fecha_recibo as fecha, r.numero_recibo, r.total, r.metodo_pago,
+        p.nombre_completo as tercero_nombre, p.numero_identificacion as tercero_identificacion
+      FROM recibos r
+      INNER JOIN propietarios p ON p.id = r.propietario_id
+      WHERE r.id = ?
     `).get(reciboId);
     if (!recibo) return null;
 
@@ -93,12 +97,12 @@ class AsientoContableRepository {
     `).run(numero, fecha, concepto, tipoOrigen, referenciaId, referenciaTipo, usuarioId).lastInsertRowid;
 
     const insertarLinea = this.db.prepare(`
-      INSERT INTO movimientos_contables (fecha, cuenta_id, debito, credito, concepto, referencia_id, referencia_tipo, asiento_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO movimientos_contables (fecha, cuenta_id, debito, credito, concepto, referencia_id, referencia_tipo, asiento_id, tercero_identificacion, tercero_nombre)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const linea of lineas) {
-      insertarLinea.run(fecha, linea.cuentaContableId, linea.debito || 0, linea.credito || 0, concepto, referenciaId, referenciaTipo, asientoId);
+      insertarLinea.run(fecha, linea.cuentaContableId, linea.debito || 0, linea.credito || 0, concepto, referenciaId, referenciaTipo, asientoId, linea.terceroIdentificacion || null, linea.terceroNombre || null);
     }
 
     return asientoId;
@@ -190,6 +194,86 @@ class AsientoContableRepository {
     if (fechaHasta) { query += ' AND mc.fecha <= ?'; params.push(fechaHasta); }
     query += ' GROUP BY pc.id ORDER BY pc.codigo ASC';
     return this.db.prepare(query).all(...params);
+  }
+
+  // Igual que getBalancePrueba, pero agrupado también por tercero, y separando lo acumulado
+  // ANTES de fechaDesde (saldo inicial del período) de lo movido DURANTE el período. Solo
+  // incluye líneas que sí tienen un tercero asociado (las de Caja/Banco y traslados no aplican
+  // aquí: no son una cuenta por cobrar/pagar de un tercero en particular).
+  //
+  // claves: el conjunto de combinaciones cuenta+tercero que tuvieron CUALQUIER movimiento hasta
+  // fechaHasta, para que una combinación con saldo inicial pero sin movimiento en el período
+  // (o viceversa) no quede fuera del resultado.
+  getBalancePruebaPorTercero({ fechaDesde, fechaHasta, cuentaCodigoDesde = '', cuentaCodigoHasta = '', terceroQuery = '' } = {}) {
+    let filtroBase = ' AND mc.tercero_nombre IS NOT NULL';
+    const paramsBase = [];
+    if (cuentaCodigoDesde) { filtroBase += ' AND pc.codigo >= ?'; paramsBase.push(cuentaCodigoDesde); }
+    if (cuentaCodigoHasta) { filtroBase += ' AND pc.codigo <= ?'; paramsBase.push(cuentaCodigoHasta); }
+    if (terceroQuery) {
+      filtroBase += ' AND (mc.tercero_identificacion LIKE ? OR mc.tercero_nombre LIKE ?)';
+      paramsBase.push(`%${terceroQuery}%`, `%${terceroQuery}%`);
+    }
+
+    const claves = this.db.prepare(`
+      SELECT DISTINCT pc.id as cuenta_id, mc.tercero_identificacion, mc.tercero_nombre
+      FROM movimientos_contables mc
+      INNER JOIN plan_cuentas pc ON pc.id = mc.cuenta_id
+      WHERE mc.fecha <= ? ${filtroBase}
+    `).all(fechaHasta, ...paramsBase);
+
+    const anteriores = this.db.prepare(`
+      SELECT pc.id as cuenta_id, mc.tercero_identificacion, mc.tercero_nombre,
+        COALESCE(SUM(mc.debito), 0) as debito, COALESCE(SUM(mc.credito), 0) as credito
+      FROM movimientos_contables mc
+      INNER JOIN plan_cuentas pc ON pc.id = mc.cuenta_id
+      WHERE mc.fecha < ? ${filtroBase}
+      GROUP BY pc.id, mc.tercero_identificacion, mc.tercero_nombre
+    `).all(fechaDesde, ...paramsBase);
+
+    const periodo = this.db.prepare(`
+      SELECT pc.id as cuenta_id, mc.tercero_identificacion, mc.tercero_nombre,
+        COALESCE(SUM(mc.debito), 0) as debito, COALESCE(SUM(mc.credito), 0) as credito
+      FROM movimientos_contables mc
+      INNER JOIN plan_cuentas pc ON pc.id = mc.cuenta_id
+      WHERE mc.fecha >= ? AND mc.fecha <= ? ${filtroBase}
+      GROUP BY pc.id, mc.tercero_identificacion, mc.tercero_nombre
+    `).all(fechaDesde, fechaHasta, ...paramsBase);
+
+    const clave = (cuentaId, identificacion, nombre) => `${cuentaId}|${identificacion || ''}|${nombre || ''}`;
+    const anterioresPorClave = new Map(anteriores.map(a => [clave(a.cuenta_id, a.tercero_identificacion, a.tercero_nombre), a]));
+    const periodoPorClave = new Map(periodo.map(p => [clave(p.cuenta_id, p.tercero_identificacion, p.tercero_nombre), p]));
+
+    const cuentasPorId = new Map();
+    const getCuenta = (id) => {
+      if (!cuentasPorId.has(id)) {
+        cuentasPorId.set(id, this.db.prepare(`
+          SELECT id, nivel, codigo, nombre, tipo, naturaleza,
+            NOT EXISTS (SELECT 1 FROM plan_cuentas hijo WHERE hijo.padre_id = plan_cuentas.id) as transaccional
+          FROM plan_cuentas WHERE id = ?
+        `).get(id));
+      }
+      return cuentasPorId.get(id);
+    };
+
+    return claves.map(k => {
+      const cuenta = getCuenta(k.cuenta_id);
+      const a = anterioresPorClave.get(clave(k.cuenta_id, k.tercero_identificacion, k.tercero_nombre)) || { debito: 0, credito: 0 };
+      const p = periodoPorClave.get(clave(k.cuenta_id, k.tercero_identificacion, k.tercero_nombre)) || { debito: 0, credito: 0 };
+      return {
+        nivel: cuenta.nivel,
+        transaccional: !!cuenta.transaccional,
+        codigo: cuenta.codigo,
+        nombre: cuenta.nombre,
+        tipo: cuenta.tipo,
+        naturaleza: cuenta.naturaleza,
+        tercero_identificacion: k.tercero_identificacion,
+        tercero_nombre: k.tercero_nombre,
+        debito_anterior: a.debito,
+        credito_anterior: a.credito,
+        debito_periodo: p.debito,
+        credito_periodo: p.credito
+      };
+    }).sort((a, b) => a.codigo.localeCompare(b.codigo) || (a.tercero_nombre || '').localeCompare(b.tercero_nombre || ''));
   }
 
   // Libro Diario real: una fila por línea de asiento, en orden cronológico/de asiento.

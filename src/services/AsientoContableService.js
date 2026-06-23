@@ -137,6 +137,30 @@ class AsientoContableService {
     return { filas, totalDebito, totalCredito, balanceado: Math.abs(totalDebito - totalCredito) < TOLERANCIA };
   }
 
+  // A diferencia del Balance de Prueba general (que no tiene "saldo inicial", solo totales del
+  // período), aquí sí hace falta: para saber el saldo que trae un tercero al empezar el rango
+  // consultado. Por eso fechaDesde y fechaHasta son obligatorios.
+  getBalancePruebaPorTercero(filtros = {}) {
+    const { fechaDesde, fechaHasta } = filtros;
+    if (!fechaDesde || !fechaHasta) throw new Error('Debe indicar el rango de fechas (año fiscal y meses) para este reporte');
+
+    return this.repository.getBalancePruebaPorTercero(filtros).map(f => {
+      const esDebito = f.naturaleza === 'Debito';
+      const saldoInicial = esDebito ? (f.debito_anterior - f.credito_anterior) : (f.credito_anterior - f.debito_anterior);
+      const saldoFinal = esDebito
+        ? saldoInicial + (f.debito_periodo - f.credito_periodo)
+        : saldoInicial + (f.credito_periodo - f.debito_periodo);
+
+      return {
+        ...f,
+        saldo_inicial: saldoInicial,
+        movimiento_debito: f.debito_periodo,
+        movimiento_credito: f.credito_periodo,
+        saldo_final: saldoFinal
+      };
+    });
+  }
+
   getLibroDiario(fechaDesde = '', fechaHasta = '') {
     return this.repository.getLibroDiario(fechaDesde, fechaHasta);
   }
@@ -248,7 +272,9 @@ class AsientoContableService {
       referenciaTipo: 'Gasto',
       usuarioId,
       lineas: [
-        { cuentaContableId: gasto.cuenta_contable_id, debito: gasto.valor },
+        // El tercero (proveedor) va solo en la línea del gasto, no en Caja/Banco: esa es una
+        // cuenta de disponible, no un saldo por cobrar/pagar de ese proveedor en particular.
+        { cuentaContableId: gasto.cuenta_contable_id, debito: gasto.valor, terceroIdentificacion: gasto.tercero_identificacion, terceroNombre: gasto.tercero_nombre },
         { cuentaContableId: cuentaCajaBanco, credito: gasto.valor }
       ]
     });
@@ -270,9 +296,12 @@ class AsientoContableService {
       throw new Error('Uno de los renglones del recibo no tiene una cuenta contable asignada');
     }
 
+    // El tercero (propietario que paga) va en los renglones de cartera, no en la línea de
+    // Caja/Banco que se agrega abajo: esa es una cuenta de disponible, no un saldo de ESE
+    // propietario en particular.
     const lineas = detallesConValor.map(d => d.valor >= 0
-      ? { cuentaContableId: d.cuenta_contable_id, credito: d.valor }
-      : { cuentaContableId: d.cuenta_contable_id, debito: -d.valor }
+      ? { cuentaContableId: d.cuenta_contable_id, credito: d.valor, terceroIdentificacion: recibo.tercero_identificacion, terceroNombre: recibo.tercero_nombre }
+      : { cuentaContableId: d.cuenta_contable_id, debito: -d.valor, terceroIdentificacion: recibo.tercero_identificacion, terceroNombre: recibo.tercero_nombre }
     );
 
     // El total cobrado en efectivo/banco puede ser menor a la suma de los renglones (si parte
@@ -355,7 +384,9 @@ class AsientoContableService {
         lineas: asiento.lineas.map(l => ({
           cuentaContableId: l.cuenta_id,
           debito: l.credito,
-          credito: l.debito
+          credito: l.debito,
+          terceroIdentificacion: l.tercero_identificacion,
+          terceroNombre: l.tercero_nombre
         }))
       });
 

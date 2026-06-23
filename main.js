@@ -1381,6 +1381,16 @@ function setupIpcHandlers() {
   });
 
   // Reportes
+  // Lectura genérica para mostrar el listado en pantalla antes de exportar (botón "Buscar"),
+  // reutilizable por cualquier reporte que en el futuro quiera el mismo patrón de previsualización.
+  envolverHandle('reportes:getDatos', async (event, tipoReporte, params) => {
+    try {
+      return { success: true, data: reporteService.getReporte(tipoReporte, params) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   envolverHandle('reportes:generarPDF', async (event, tipoReporte, params) => {
     let ventanaImpresion;
     try {
