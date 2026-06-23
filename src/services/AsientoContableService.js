@@ -145,13 +145,22 @@ class AsientoContableService {
   // exactamente un lado, y los totales cuadran) y crea el asiento. Es el único punto de entrada
   // que de verdad inserta un asiento: tanto la generación automática como el asiento manual
   // pasan por aquí.
-  crear({ fecha, concepto, tipoOrigen, referenciaId = null, referenciaTipo = null, usuarioId = null, lineas }) {
+  //
+  // sincronizarLedgerSimple: la generación automática (Gasto/Recibo/Movimiento) ya crea su propia
+  // fila en la tabla `movimientos` (el ledger simple de caja/banco que usan el Dashboard y el
+  // módulo de Caja) ANTES de llegar aquí, así que no hay que duplicarla. Pero una nota contable
+  // manual que afecte Caja o Bancos (p.ej. registrar el saldo inicial al migrar al sistema, o un
+  // ajuste por una comisión bancaria) solo pasa por aquí, y si no se replica en `movimientos` el
+  // saldo de caja/banco que muestra el resto de la app quedaría desincronizado del Balance de
+  // Prueba. Por eso solo se activa para asientos manuales (y sus reversiones).
+  crear({ fecha, concepto, tipoOrigen, referenciaId = null, referenciaTipo = null, usuarioId = null, lineas, sincronizarLedgerSimple = false }) {
     if (!fecha) throw new Error('La fecha del asiento es obligatoria');
     if (!concepto || !concepto.trim()) throw new Error('El concepto del asiento es obligatorio');
     if (!Array.isArray(lineas) || lineas.length < 2) throw new Error('Un asiento debe tener al menos 2 líneas');
 
     let totalDebito = 0;
     let totalCredito = 0;
+    const cuentasPorLinea = [];
 
     for (const linea of lineas) {
       const debito = Number(linea.debito || 0);
@@ -171,6 +180,7 @@ class AsientoContableService {
 
       totalDebito += debito;
       totalCredito += credito;
+      cuentasPorLinea.push(cuenta);
     }
 
     if (Math.abs(totalDebito - totalCredito) >= TOLERANCIA) {
@@ -181,14 +191,40 @@ class AsientoContableService {
       const numero = this.repository.getConsecutivo();
       this.repository.incrementarConsecutivo(numero + 1);
 
-      return this.repository.crear({ numero, fecha, concepto, tipoOrigen, referenciaId, referenciaTipo, usuarioId, lineas });
+      const asientoId = this.repository.crear({ numero, fecha, concepto, tipoOrigen, referenciaId, referenciaTipo, usuarioId, lineas });
+
+      if (sincronizarLedgerSimple) {
+        lineas.forEach((linea, i) => this.sincronizarLineaConCajaBanco(cuentasPorLinea[i], linea, fecha, concepto, asientoId));
+      }
+
+      return asientoId;
+    });
+  }
+
+  // Si la cuenta de una línea es Caja (1105) o Bancos (1110, incluidas sus subcuentas), refleja
+  // ese mismo movimiento en la tabla `movimientos` para que el saldo que ve el resto de la app
+  // (Dashboard, Caja/Banco) coincida con el de la contabilidad de doble partida.
+  sincronizarLineaConCajaBanco(cuenta, linea, fecha, concepto, asientoId) {
+    const esCaja = cuenta.codigo.startsWith('1105');
+    const esBanco = cuenta.codigo.startsWith('1110');
+    if (!esCaja && !esBanco) return;
+
+    const debito = Number(linea.debito || 0);
+    this.repository.crearMovimientoSimple({
+      tipo: debito > 0 ? 'Ingreso' : 'Egreso',
+      origen: esCaja ? 'Caja' : 'Banco',
+      monto: debito > 0 ? debito : Number(linea.credito || 0),
+      concepto,
+      referenciaId: asientoId,
+      referenciaTipo: 'Asiento',
+      fechaMovimiento: fecha
     });
   }
 
   // Asiento manual, para todo lo que la generación automática no cubre (ajustes financieros,
   // depreciaciones, correcciones, partidas de apertura, etc).
   crearManual({ fecha, concepto, lineas, usuarioId = null }) {
-    return this.crear({ fecha, concepto, tipoOrigen: 'Manual', usuarioId, lineas });
+    return this.crear({ fecha, concepto, tipoOrigen: 'Manual', usuarioId, lineas, sincronizarLedgerSimple: true });
   }
 
   // --- Generación automática a partir de procesos existentes ---
@@ -304,6 +340,10 @@ class AsientoContableService {
     if (!motivo || !motivo.trim()) throw new Error('Debe indicar el motivo de la reversión');
 
     return this.repository.transaccion(() => {
+      // Si el asiento original era una nota contable manual que afectaba Caja/Banco, su reversión
+      // también debe reflejarse ahí (ver crear()). Si era de Gasto/Recibo/Movimiento, el Service
+      // que pidió la reversión (GastoService.anular, ReciboService.anular) ya crea su propia
+      // contrapartida en `movimientos`, así que no se duplica aquí.
       const reversionId = this.crear({
         fecha: new Date().toISOString().split('T')[0],
         concepto: `Reversión: ${asiento.concepto}`,
@@ -311,6 +351,7 @@ class AsientoContableService {
         referenciaId: asiento.id,
         referenciaTipo: 'Asiento',
         usuarioId,
+        sincronizarLedgerSimple: asiento.tipo_origen === 'Manual',
         lineas: asiento.lineas.map(l => ({
           cuentaContableId: l.cuenta_id,
           debito: l.credito,

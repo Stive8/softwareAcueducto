@@ -31,6 +31,15 @@ class MapeoContableRepository {
     return porDefecto ? porDefecto.cuenta_contable_id : null;
   }
 
+  // Conceptos que actualmente resuelven a esta cuenta: si hay alguno, la cuenta no se puede
+  // desactivar sin antes reasignar esos conceptos a otra (si no, el próximo gasto/recibo de ese
+  // tipo fallaría al intentar generar su asiento contra una cuenta inactiva).
+  findConceptosQueUsan(cuentaContableId) {
+    return this.db.prepare(`
+      SELECT modulo, concepto FROM mapeo_conceptos_contables WHERE cuenta_contable_id = ?
+    `).all(cuentaContableId);
+  }
+
   upsert(modulo, concepto, cuentaContableId) {
     this.db.prepare(`
       INSERT INTO mapeo_conceptos_contables (modulo, concepto, cuenta_contable_id, fecha_actualizacion)

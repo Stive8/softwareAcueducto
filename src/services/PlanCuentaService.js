@@ -1,4 +1,5 @@
 const PlanCuentaRepository = require('../repositories/PlanCuentaRepository');
+const MapeoContableRepository = require('../repositories/MapeoContableRepository');
 
 const TIPOS_VALIDOS = ['Activo', 'Pasivo', 'Patrimonio', 'Ingreso', 'Gasto', 'Costo'];
 const NATURALEZA_VALIDA = ['Debito', 'Credito'];
@@ -6,6 +7,7 @@ const NATURALEZA_VALIDA = ['Debito', 'Credito'];
 class PlanCuentaService {
   constructor(dbService) {
     this.repository = new PlanCuentaRepository(dbService);
+    this.mapeoContableRepository = new MapeoContableRepository(dbService);
   }
 
   getAll(params = {}) {
@@ -70,6 +72,15 @@ class PlanCuentaService {
 
     if (cuenta.activo && this.repository.tieneHijos(id)) {
       throw new Error('No se puede desactivar una cuenta que tiene subcuentas. Desactive primero las subcuentas.');
+    }
+
+    if (cuenta.activo) {
+      const conceptos = this.mapeoContableRepository.findConceptosQueUsan(id);
+      if (conceptos.length > 0) {
+        throw new Error(
+          `No se puede desactivar: esta cuenta está asignada en el Mapeo de Conceptos (${conceptos.map(c => c.concepto).join(', ')}). Reasigne esos conceptos a otra cuenta antes de desactivarla.`
+        );
+      }
     }
 
     this.repository.toggleActivo(id);

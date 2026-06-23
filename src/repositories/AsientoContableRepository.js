@@ -45,6 +45,16 @@ class AsientoContableRepository {
     `).get(movimientoId);
   }
 
+  // Refleja en el ledger simple (tabla `movimientos`, la que usan Dashboard y Caja/Banco) una
+  // línea de un asiento manual que afecta Caja o Bancos. Ver AsientoContableService.crear().
+  crearMovimientoSimple({ tipo, origen, monto, concepto, referenciaId, referenciaTipo, fechaMovimiento }) {
+    const cuentaContableId = this.resolverCuentaContable('Movimiento', origen);
+    return this.db.prepare(`
+      INSERT INTO movimientos (tipo, origen, monto, concepto, referencia_id, referencia_tipo, fecha_movimiento, cuenta_contable_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(tipo, origen, monto, concepto, referenciaId, referenciaTipo, fechaMovimiento, cuentaContableId).lastInsertRowid;
+  }
+
   resolverCuentaContable(modulo, concepto) {
     const exacto = this.db.prepare(`
       SELECT cuenta_contable_id FROM mapeo_conceptos_contables WHERE modulo = ? AND concepto = ?

@@ -101,6 +101,8 @@ class DevToolsService {
   eliminarDatosOperativos() {
     return this.db.transaction(() => {
       this.db.exec(`
+        DELETE FROM movimientos_contables;
+        DELETE FROM asientos_contables;
         DELETE FROM nuevo_punto_abonos;
         DELETE FROM nuevos_puntos;
         DELETE FROM pago_periodos;
@@ -117,10 +119,12 @@ class DevToolsService {
         DELETE FROM sqlite_sequence WHERE name IN (
           'cuentas', 'propietarios', 'cuenta_propietarios', 'cuenta_categorias',
           'recibos', 'recibo_detalles', 'recibos_anulados_fisicos', 'gastos', 'movimientos',
-          'pago_periodos', 'cuenta_creditos', 'nuevos_puntos', 'nuevo_punto_abonos'
+          'pago_periodos', 'cuenta_creditos', 'nuevos_puntos', 'nuevo_punto_abonos',
+          'asientos_contables', 'movimientos_contables'
         );
       `);
       this.db.prepare("UPDATE configuracion SET valor = '1' WHERE clave = 'consecutivo_recibos'").run();
+      this.db.prepare("UPDATE configuracion SET valor = '1' WHERE clave = 'consecutivo_asientos'").run();
     })();
   }
 }

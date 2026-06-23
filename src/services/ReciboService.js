@@ -63,16 +63,20 @@ class ReciboService {
     return this.repository.transaccion(() => {
       this.repository.anular(id, motivoAnulacion);
 
-      this.repository.crearMovimiento({
-        tipo: 'Egreso',
-        origen: recibo.metodo_pago === 'Efectivo' ? 'Caja' : 'Banco',
-        monto: recibo.total,
-        concepto: `Reversión por anulación de recibo No. ${recibo.numero_recibo}`,
-        referenciaId: id,
-        referenciaTipo: 'Recibo',
-        fechaMovimiento: new Date().toISOString().split('T')[0],
-        observaciones: motivoAnulacion
-      });
+      // Si el recibo se cubrió totalmente con saldo a favor (total = 0), no entró ni salió
+      // efectivo real de caja/banco, así que no hay nada que revertir en ese ledger.
+      if (recibo.total > 0) {
+        this.repository.crearMovimiento({
+          tipo: 'Egreso',
+          origen: recibo.metodo_pago === 'Efectivo' ? 'Caja' : 'Banco',
+          monto: recibo.total,
+          concepto: `Reversión por anulación de recibo No. ${recibo.numero_recibo}`,
+          referenciaId: id,
+          referenciaTipo: 'Recibo',
+          fechaMovimiento: new Date().toISOString().split('T')[0],
+          observaciones: motivoAnulacion
+        });
+      }
 
       this.asientoContableService.revertirPorReferencia('Recibo', id, motivoAnulacion, usuarioId);
     });
