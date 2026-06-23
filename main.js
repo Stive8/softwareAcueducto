@@ -76,7 +76,17 @@ const CANALES_SOLO_ADMIN = new Set([
 // fuera de la app, no con los roles internos. Ver ARQUITECTURA.md, sección de respaldo en la nube.
 const CANALES_PERMITIDOS_CONSULTA = new Set([
   'cloudBackup:conectar', 'cloudBackup:desconectar', 'cloudBackup:actualizarDesdeNube',
-  'cloudBackup:configurarEquipo'
+  'cloudBackup:configurarEquipo', 'cloudBackup:actualizarSiHayNuevo'
+]);
+
+// Canales que funcionan incluso SIN sesión: la pantalla de "Configuración inicial" (un PC nuevo,
+// con la base de datos vacía) necesita poder revisar si hay datos, y conectar/traer el respaldo
+// de la nube, antes de que exista ningún usuario local con el que iniciar sesión. config:getAll
+// también vive aquí porque la propia pantalla de login ya lo usaba para mostrar el nombre de la
+// asociación (sin esto, fallaba en silencio).
+const CANALES_SIN_SESION = new Set([
+  'config:getAll', 'devtools:tieneDatosOperativos',
+  'cloudBackup:getEstado', 'cloudBackup:conectar', 'cloudBackup:actualizarDesdeNube'
 ]);
 
 function esCanalDeLectura(canal) {
@@ -100,6 +110,9 @@ function envolverHandle(canal, fn) {
     }
 
     if (!sesionActual) {
+      if (CANALES_SIN_SESION.has(canal)) {
+        return fn(event, ...args);
+      }
       return { success: false, error: 'Debe iniciar sesión' };
     }
 
@@ -125,11 +138,18 @@ function envolverHandle(canal, fn) {
     const resultado = await fn(event, ...args);
 
     if (!esLectura && resultado && resultado.success) {
-      const [modulo, metodo] = canal.split(':');
-      const registroId = resultado.data?.id ?? resultado.data?.reciboId ?? (typeof args[0] === 'number' ? args[0] : null);
-      let datosNuevos = null;
-      try { datosNuevos = JSON.stringify(args[0] ?? null); } catch { /* no serializable, se omite */ }
-      auditoriaService.registrar({ usuarioId: sesionActual.id, accion: metodo, tabla: modulo, registroId, datosNuevos });
+      try {
+        const [modulo, metodo] = canal.split(':');
+        const registroId = resultado.data?.id ?? resultado.data?.reciboId ?? (typeof args[0] === 'number' ? args[0] : null);
+        let datosNuevos = null;
+        try { datosNuevos = JSON.stringify(args[0] ?? null); } catch { /* no serializable, se omite */ }
+        auditoriaService.registrar({ usuarioId: sesionActual.id, accion: metodo, tabla: modulo, registroId, datosNuevos });
+      } catch (errorAuditoria) {
+        // Pasa, por ejemplo, en canales que cierran la base de datos para reiniciar la app
+        // (restaurar/actualizar desde la nube): la acción ya tuvo éxito, así que esto no debe
+        // hacer fallar la respuesta que el renderer ya recibió.
+        console.error('No se pudo registrar la auditoría:', errorAuditoria.message);
+      }
     }
 
     return resultado;
@@ -1176,15 +1196,39 @@ function setupIpcHandlers() {
     }
   });
 
-  // Descarga el respaldo más reciente de la nube y, tras confirmación del usuario, reemplaza la
-  // base de datos local (mismo patrón que backup:restaurar): cierra la conexión, copia el
-  // archivo, limpia residuales de WAL y reinicia la app.
+  // Reemplaza la base de datos local por un archivo ya descargado y válido, y reinicia la app
+  // (mismo patrón que backup:restaurar). Lo comparten el botón manual "Actualizar desde la nube"
+  // y la actualización silenciosa automática para Consulta.
   //
+  // secuencia es la del respaldo que se está aplicando: hay que guardarla en el estado local
+  // ANTES de reiniciar, porque ese estado vive en un archivo aparte del .db (ver comentario en
+  // CloudBackupOrchestratorService) y no viaja solo con el archivo que se acaba de copiar. Sin
+  // esto, la app seguiría pensando para siempre que hay algo nuevo sin traer, y lo volvería a
+  // descargar y aplicar en cada login.
+  function aplicarRespaldoDescargado(rutaLocal, secuencia) {
+    cloudBackupService.marcarRespaldoTraido(secuencia);
+
+    const dbPath = dbService.getDbPath();
+    dbService.close();
+
+    fs.copyFileSync(rutaLocal, dbPath);
+    for (const ext of ['-wal', '-shm']) {
+      const residual = dbPath + ext;
+      if (fs.existsSync(residual)) fs.unlinkSync(residual);
+    }
+
+    app.relaunch();
+    app.exit();
+  }
+
   // actualizandoDesdeNube evita que dos clics (o una doble invocación por cualquier motivo)
   // entren a la vez: la primera ya cierra la conexión a la base de datos antes de reiniciar la
   // app, y si una segunda llamada alcanza a correr en ese instante, la encuentra cerrada
-  // ("The database connection is not open").
+  // ("The database connection is not open"). La comparten ambos canales de abajo, ya que los dos
+  // terminan en el mismo reemplazo de archivo.
   let actualizandoDesdeNube = false;
+
+  // Descarga el respaldo más reciente de la nube y, tras confirmación del usuario, la reemplaza.
   envolverHandle('cloudBackup:actualizarDesdeNube', async () => {
     if (actualizandoDesdeNube) {
       return { success: false, error: 'Ya hay una actualización desde la nube en curso' };
@@ -1220,23 +1264,66 @@ function setupIpcHandlers() {
         return { success: false, canceled: true };
       }
 
-      const dbPath = dbService.getDbPath();
-      dbService.close();
-
-      fs.copyFileSync(rutaLocal, dbPath);
-      for (const ext of ['-wal', '-shm']) {
-        const residual = dbPath + ext;
-        if (fs.existsSync(residual)) fs.unlinkSync(residual);
-      }
-
-      app.relaunch();
-      app.exit();
+      aplicarRespaldoDescargado(rutaLocal, secuenciaRemota);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
     } finally {
       actualizandoDesdeNube = false;
       if (archivoTemporal && fs.existsSync(archivoTemporal)) fs.unlinkSync(archivoTemporal);
+    }
+  });
+
+  // Chequeo de solo lectura, para que el renderer pueda avisar ANTES de traer y aplicar el
+  // respaldo (la actualización en sí no da tiempo de leer ningún aviso, porque reinicia la app
+  // de inmediato). Mismo criterio que abajo: solo tiene sentido para Consulta.
+  envolverHandle('cloudBackup:getActualizacionPendiente', async () => {
+    try {
+      if (!sesionActual || sesionActual.rol !== 'Consulta' || !cloudBackupService.estaConectado()) {
+        return { success: true, data: { hay: false } };
+      }
+      const estado = cloudBackupService.getEstado();
+      const { hayConflicto } = await cloudBackupService.cloud.detectarConflicto(estado.secuenciaLocal);
+      return { success: true, data: { hay: !!hayConflicto } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Variante silenciosa: solo aplica si hay algo más nuevo en la nube que este equipo no conoce,
+  // y solo se aplica sin pedir confirmación si quien está logueado es Consulta (nunca tiene
+  // cambios locales propios que perder; para cualquier otro rol, solo informa que hay algo nuevo
+  // pero no reemplaza nada por sí sola). Pensada para dispararse sola al iniciar sesión.
+  envolverHandle('cloudBackup:actualizarSiHayNuevo', async () => {
+    if (actualizandoDesdeNube) {
+      return { success: true, data: { actualizado: false } };
+    }
+
+    try {
+      if (!cloudBackupService.estaConectado()) {
+        return { success: true, data: { actualizado: false } };
+      }
+
+      const estado = cloudBackupService.getEstado();
+      const { hayConflicto, ultimo } = await cloudBackupService.cloud.detectarConflicto(estado.secuenciaLocal);
+      if (!hayConflicto || !sesionActual || sesionActual.rol !== 'Consulta') {
+        return { success: true, data: { actualizado: false } };
+      }
+
+      actualizandoDesdeNube = true;
+      const { rutaLocal } = await cloudBackupService.descargarUltimoRespaldo();
+      try {
+        backupService.validarArchivoRestauracion(rutaLocal);
+        const secuenciaRemota = Number(ultimo.properties?.secuencia || 0);
+        aplicarRespaldoDescargado(rutaLocal, secuenciaRemota);
+        return { success: true, data: { actualizado: true } };
+      } finally {
+        if (fs.existsSync(rutaLocal)) fs.unlinkSync(rutaLocal);
+      }
+    } catch (error) {
+      return { success: false, error: error.message };
+    } finally {
+      actualizandoDesdeNube = false;
     }
   });
 

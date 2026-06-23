@@ -137,6 +137,8 @@ contextBridge.exposeInMainWorld('api', {
     desconectar: () => ipcRenderer.invoke('cloudBackup:desconectar'),
     configurarEquipo: (nombreEquipo) => ipcRenderer.invoke('cloudBackup:configurarEquipo', nombreEquipo),
     respaldarAhora: (opciones) => ipcRenderer.invoke('cloudBackup:respaldarAhora', opciones),
-    actualizarDesdeNube: () => ipcRenderer.invoke('cloudBackup:actualizarDesdeNube')
+    actualizarDesdeNube: () => ipcRenderer.invoke('cloudBackup:actualizarDesdeNube'),
+    actualizarSiHayNuevo: () => ipcRenderer.invoke('cloudBackup:actualizarSiHayNuevo'),
+    getActualizacionPendiente: () => ipcRenderer.invoke('cloudBackup:getActualizacionPendiente')
   }
 });

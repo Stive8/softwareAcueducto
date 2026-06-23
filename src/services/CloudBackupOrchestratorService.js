@@ -67,6 +67,17 @@ class CloudBackupOrchestratorService {
     this._guardarEstadoLocal({ nombreEquipo: (nombreEquipo || '').trim() });
   }
 
+  // Al traer un respaldo de la nube se reemplaza solo el .db; este estado local vive en un
+  // archivo aparte (ver comentario de arriba), así que no viaja solo con el archivo descargado.
+  // Sin esto, la secuencia local quedaría vieja y la app pensaría para siempre que sigue
+  // habiendo "algo más nuevo" que ya se trajo, reintentando la actualización en cada login.
+  marcarRespaldoTraido(secuencia) {
+    this._guardarEstadoLocal({
+      secuenciaLocal: Number(secuencia) || 0,
+      ultimaFechaExitosa: new Date().toISOString()
+    });
+  }
+
   getEstado() {
     const config = this.configRepo.getAll();
     const local = this._leerEstadoLocal();

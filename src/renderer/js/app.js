@@ -71,6 +71,39 @@ const App = {
     document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
     document.querySelector('.nav-item[data-page="dashboard"]').classList.add('active');
     this.loadPage('dashboard');
+
+    // Solo para Consulta: si hay algo más nuevo en la nube que este equipo no conoce, se trae
+    // sin pedir confirmación (nunca tiene cambios locales propios que perder) y la app se
+    // reinicia sola. Para cualquier otro rol esto no hace nada (ver cloudBackup:actualizarSiHayNuevo).
+    if (this.currentUser.rol === 'Consulta') {
+      this.verificarActualizacionNubeSilenciosa();
+    }
+  },
+
+  async verificarActualizacionNubeSilenciosa() {
+    try {
+      const chequeo = await window.api.cloudBackup.getActualizacionPendiente();
+      if (!chequeo.success || !chequeo.data.hay) return;
+
+      // Aviso breve antes de aplicar: la actualización en sí reinicia la app casi de inmediato,
+      // así que sin esta pausa nunca se llega a ver el mensaje.
+      this.toast('Hay una versión más reciente en la nube. Actualizando en un momento...');
+
+      setTimeout(async () => {
+        try {
+          const response = await window.api.cloudBackup.actualizarSiHayNuevo();
+          if (!response.success) {
+            console.error('No se pudo actualizar desde la nube automáticamente:', response.error);
+            this.toast('No se pudo traer la versión más reciente de la nube: ' + response.error, 'error');
+          }
+          // Si fue exitoso, la app se reinicia sola desde el proceso principal.
+        } catch (error) {
+          console.error('Error al actualizar desde la nube:', error);
+        }
+      }, 1800);
+    } catch (error) {
+      console.error('Error al verificar actualizaciones en la nube:', error);
+    }
   },
 
   setupLogout() {
@@ -249,10 +282,69 @@ const App = {
         input.setSelectionRange(input.value.length, input.value.length);
       }
     });
+  },
+
+  // Pantalla previa al login, solo cuando la base de datos local está completamente vacía (un
+  // PC nuevo): permite traer los datos desde Google Drive antes de que exista ningún usuario
+  // local con el que iniciar sesión (ver cloudBackup en main.js, canales sin sesión).
+  initSetup() {
+    document.getElementById('setupScreen').style.display = 'flex';
+    document.getElementById('btnSetupTraerNube').addEventListener('click', () => this.setupTraerDesdeNube());
+    document.getElementById('btnSetupContinuar').addEventListener('click', () => this.setupContinuarSinNube());
+  },
+
+  async setupTraerDesdeNube() {
+    const boton = document.getElementById('btnSetupTraerNube');
+    const errorDiv = document.getElementById('setupError');
+    errorDiv.innerHTML = '';
+    boton.disabled = true;
+
+    try {
+      const estado = await window.api.cloudBackup.getEstado();
+      if (!estado.success || !estado.data.conectado) {
+        boton.textContent = 'Conectando con Google...';
+        const conexion = await window.api.cloudBackup.conectar();
+        if (!conexion.success) {
+          errorDiv.innerHTML = `<div class="error-message">${conexion.error}</div>`;
+          return;
+        }
+      }
+
+      boton.textContent = 'Descargando el respaldo más reciente...';
+      const resultado = await window.api.cloudBackup.actualizarDesdeNube();
+      if (resultado.canceled) return;
+      if (!resultado.success) {
+        errorDiv.innerHTML = `<div class="error-message">${resultado.error}</div>`;
+      }
+      // Si fue exitoso, la app se reinicia sola desde el proceso principal.
+    } catch (error) {
+      console.error('Error:', error);
+      errorDiv.innerHTML = '<div class="error-message">No se pudo conectar con Google Drive</div>';
+    } finally {
+      boton.disabled = false;
+      boton.textContent = 'Traer datos desde Google Drive';
+    }
+  },
+
+  setupContinuarSinNube() {
+    document.getElementById('setupScreen').style.display = 'none';
+    this.initLogin();
   }
 };
 
-// Al iniciar la app siempre se exige login, sin sesión persistida entre ejecuciones
-document.addEventListener('DOMContentLoaded', () => {
+// Al iniciar la app: si la base de datos local está vacía (un PC nuevo), se ofrece traer los
+// datos desde la nube antes que nada; si no, siempre se exige login, sin sesión persistida entre
+// ejecuciones.
+document.addEventListener('DOMContentLoaded', async () => {
+  try {
+    const response = await window.api.devtools.tieneDatosOperativos();
+    if (response.success && !response.data) {
+      App.initSetup();
+      return;
+    }
+  } catch (error) {
+    console.error('Error al verificar si hay datos operativos:', error);
+  }
+
   App.initLogin();
 });

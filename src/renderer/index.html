@@ -7,6 +7,26 @@
   <link rel="stylesheet" href="css/styles.css">
 </head>
 <body>
+  <div id="setupScreen" class="login-screen" style="display: none;">
+    <div class="login-card">
+      <div class="login-header">
+        <h1>Configuración Inicial</h1>
+        <p>Este equipo todavía no tiene datos</p>
+      </div>
+
+      <div id="setupError"></div>
+
+      <p style="font-size: 0.875rem; color: #64748b; margin-bottom: 20px;">
+        Si esta asociación ya usa el sistema en otro equipo y tiene un respaldo en Google Drive,
+        tráelo ahora para no perder ningún dato. Si es la primera vez que se usa el sistema, puedes
+        continuar directamente.
+      </p>
+
+      <button type="button" class="btn btn-primary" id="btnSetupTraerNube" style="width: 100%; margin-bottom: 12px;">Traer datos desde Google Drive</button>
+      <button type="button" class="btn btn-secondary" id="btnSetupContinuar" style="width: 100%;">Continuar sin la nube</button>
+    </div>
+  </div>
+
   <div id="loginScreen" class="login-screen">
     <div class="login-card">
       <div class="login-header">
