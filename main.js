@@ -562,6 +562,63 @@ function setupIpcHandlers() {
     }
   });
 
+  envolverHandle('asientos:imprimir', async (event, id) => {
+    let ventanaImpresion;
+    try {
+      const html = asientoContableService.generarHTML(id);
+      ventanaImpresion = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+      await ventanaImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+      return await new Promise((resolve) => {
+        ventanaImpresion.webContents.print({ silent: false }, (success, errorType) => {
+          ventanaImpresion.close();
+          if (mainWindow) mainWindow.focus();
+          if (success) {
+            resolve({ success: true });
+          } else {
+            resolve({ success: false, error: errorType || 'No se pudo imprimir el registro contable' });
+          }
+        });
+      });
+    } catch (error) {
+      if (ventanaImpresion) ventanaImpresion.close();
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('asientos:exportarPDF', async (event, id) => {
+    let ventanaImpresion;
+    try {
+      const asiento = asientoContableService.getById(id);
+      if (!asiento) {
+        return { success: false, error: 'Asiento no encontrado' };
+      }
+
+      const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
+        title: 'Guardar Registro Contable como PDF',
+        defaultPath: `RegistroContable_${asiento.numero}.pdf`,
+        filters: [{ name: 'PDF', extensions: ['pdf'] }]
+      });
+
+      if (canceled || !filePath) {
+        return { success: false, canceled: true };
+      }
+
+      const html = asientoContableService.generarHTML(id);
+      ventanaImpresion = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+      await ventanaImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+      const pdfBuffer = await ventanaImpresion.webContents.printToPDF({});
+      fs.writeFileSync(filePath, pdfBuffer);
+      ventanaImpresion.close();
+
+      return { success: true, filePath };
+    } catch (error) {
+      if (ventanaImpresion) ventanaImpresion.close();
+      return { success: false, error: error.message };
+    }
+  });
+
   // Pagos
   envolverHandle('pagos:getCuentasConEstado', async (event, params) => {
     try {

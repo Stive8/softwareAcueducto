@@ -512,6 +512,8 @@ const Contabilidad = {
 
         <div class="form-actions">
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+          <button class="btn btn-secondary" onclick="Contabilidad.imprimirAsiento(${asiento.id})">Imprimir</button>
+          <button class="btn btn-success" onclick="Contabilidad.exportarAsientoPDF(${asiento.id})">Exportar PDF</button>
           ${asiento.estado === 'Activo' ? `<button class="btn btn-warning" onclick="App.closeModal(); Contabilidad.showRevertirAsientoModal(${asiento.id})">Revertir</button>` : ''}
         </div>
       `;
@@ -520,6 +522,33 @@ const Contabilidad = {
     } catch (error) {
       console.error('Error:', error);
       App.toast('Error al cargar el asiento', 'error');
+    }
+  },
+
+  async imprimirAsiento(id) {
+    try {
+      const response = await window.api.asientos.imprimir(id);
+      if (!response.success && !response.canceled) {
+        App.toast('Error al imprimir: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al imprimir el registro contable', 'error');
+    }
+  },
+
+  async exportarAsientoPDF(id) {
+    try {
+      const response = await window.api.asientos.exportarPDF(id);
+      if (response.canceled) return;
+      if (response.success) {
+        App.toast(`Registro contable generado en: ${response.filePath}`);
+      } else {
+        App.toast('Error al exportar: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al exportar el registro contable', 'error');
     }
   },
 

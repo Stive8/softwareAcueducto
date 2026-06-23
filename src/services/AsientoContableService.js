@@ -5,6 +5,24 @@ const PlanCuentaRepository = require('../repositories/PlanCuentaRepository');
 // colombianos sin decimales en este sistema, pero se deja margen por seguridad ante redondeos).
 const TOLERANCIA = 0.01;
 
+function escapeHtml(value) {
+  if (value === null || value === undefined) return '';
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+function formatNumber(num) {
+  return Number(num || 0).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+}
+
+function formatFecha(fechaString) {
+  const fecha = new Date(fechaString);
+  return fecha.toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
 class AsientoContableService {
   constructor(dbService) {
     this.repository = new AsientoContableRepository(dbService);
@@ -17,6 +35,79 @@ class AsientoContableService {
 
   getById(id) {
     return this.repository.findById(id);
+  }
+
+  // Documento imprimible de un asiento individual ("Registro Contable"), en el orden que maneja
+  // la contadora: nombre de la cuenta, código, débito, crédito.
+  generarHTML(id) {
+    const asiento = this.repository.findById(id);
+    if (!asiento) throw new Error('Asiento no encontrado');
+
+    const config = this.repository.getConfiguracionAsociacion();
+    const totalDebito = asiento.lineas.reduce((s, l) => s + l.debito, 0);
+    const totalCredito = asiento.lineas.reduce((s, l) => s + l.credito, 0);
+
+    const filasLineas = asiento.lineas.map(l => `
+      <tr>
+        <td>${escapeHtml(l.cuenta_nombre)}</td>
+        <td>${escapeHtml(l.cuenta_codigo)}</td>
+        <td class="text-right">${l.debito > 0 ? '$' + formatNumber(l.debito) : ''}</td>
+        <td class="text-right">${l.credito > 0 ? '$' + formatNumber(l.credito) : ''}</td>
+      </tr>
+    `).join('');
+
+    return `
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Registro Contable No. ${asiento.numero}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: Arial, Helvetica, sans-serif; padding: 32px; color: #1f2937; }
+  .header { text-align: center; margin-bottom: 24px; border-bottom: 2px solid #1e40af; padding-bottom: 16px; }
+  .header h1 { color: #1e40af; font-size: 22px; margin: 0 0 6px 0; }
+  .header p { font-size: 12px; color: #475569; margin: 2px 0; }
+  .registro-numero { text-align: right; font-size: 18px; font-weight: bold; color: #1e40af; margin-bottom: 20px; }
+  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 24px; font-size: 13px; }
+  .info-grid div span { font-weight: bold; color: #334155; }
+  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
+  th, td { border: 1px solid #cbd5e1; padding: 10px 12px; font-size: 13px; text-align: left; }
+  th { background: #f1f5f9; color: #334155; }
+  .total-row td { font-weight: bold; font-size: 14px; background: #eff6ff; }
+  .text-right { text-align: right; }
+  .footer { margin-top: 32px; font-size: 11px; color: #64748b; text-align: center; }
+</style>
+</head>
+<body>
+  <div class="header">
+    <h1>${escapeHtml(config.nombre_asociacion || 'Acueducto Veredal')}</h1>
+    ${config.nit ? `<p>NIT: ${escapeHtml(config.nit)}</p>` : ''}
+  </div>
+
+  <div class="registro-numero">Registro Contable No. ${asiento.numero}${asiento.estado === 'Anulado' ? ' <span style="color:#dc2626;">— ANULADO</span>' : ''}</div>
+  ${asiento.estado === 'Anulado' ? `<p style="color:#dc2626; font-size: 12px; text-align: center; margin: -12px 0 16px 0;">Este registro fue revertido${asiento.motivo_anulacion ? ': ' + escapeHtml(asiento.motivo_anulacion) : ''}</p>` : ''}
+
+  <div class="info-grid">
+    <div>Fecha: <span>${formatFecha(asiento.fecha)}</span></div>
+    <div>Origen: <span>${escapeHtml(asiento.tipo_origen)}</span></div>
+    <div style="grid-column: 1 / -1;">Concepto: <span>${escapeHtml(asiento.concepto)}</span></div>
+  </div>
+
+  <table>
+    <thead>
+      <tr><th>Nombre de la Cuenta Contable</th><th>Código</th><th class="text-right">Débito</th><th class="text-right">Crédito</th></tr>
+    </thead>
+    <tbody>
+      ${filasLineas}
+      <tr class="total-row"><td colspan="2">TOTAL</td><td class="text-right">$${formatNumber(totalDebito)}</td><td class="text-right">$${formatNumber(totalCredito)}</td></tr>
+    </tbody>
+  </table>
+
+  <div class="footer">Documento generado por el sistema administrativo del acueducto.</div>
+</body>
+</html>
+    `;
   }
 
   getLibroMayor(cuentaContableId, fechaDesde = '', fechaHasta = '') {

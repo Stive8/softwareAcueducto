@@ -121,7 +121,9 @@ contextBridge.exposeInMainWorld('api', {
     crearManual: (datos) => ipcRenderer.invoke('asientos:crearManual', datos),
     revertir: (id, motivo) => ipcRenderer.invoke('asientos:revertir', id, motivo),
     getLibroMayor: (cuentaContableId, fechaDesde, fechaHasta) => ipcRenderer.invoke('asientos:getLibroMayor', cuentaContableId, fechaDesde, fechaHasta),
-    getBalancePrueba: (fechaDesde, fechaHasta) => ipcRenderer.invoke('asientos:getBalancePrueba', fechaDesde, fechaHasta)
+    getBalancePrueba: (fechaDesde, fechaHasta) => ipcRenderer.invoke('asientos:getBalancePrueba', fechaDesde, fechaHasta),
+    imprimir: (id) => ipcRenderer.invoke('asientos:imprimir', id),
+    exportarPDF: (id) => ipcRenderer.invoke('asientos:exportarPDF', id)
   },
   devtools: {
     tieneDatosOperativos: () => ipcRenderer.invoke('devtools:tieneDatosOperativos'),

@@ -3,6 +3,17 @@ class AsientoContableRepository {
     this.db = dbService.getDb();
   }
 
+  getConfiguracionAsociacion() {
+    const rows = this.db.prepare(`
+      SELECT clave, valor FROM configuracion
+      WHERE clave IN ('nombre_asociacion', 'nit', 'direccion', 'telefono', 'email')
+    `).all();
+
+    const config = {};
+    rows.forEach(r => { config[r.clave] = r.valor; });
+    return config;
+  }
+
   // --- Datos fuente para generar asientos automáticos (la cuenta_contable_id ya quedó
   // resuelta al crear el gasto/recibo/movimiento, vía el mapeo configurable de la migración 006) ---
 
