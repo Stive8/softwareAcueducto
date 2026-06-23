@@ -16,18 +16,31 @@ const ConfiguracionRepository = require('../repositories/ConfiguracionRepository
 //     que esto corrige.
 class CloudBackupOrchestratorService {
   constructor(dbService, baseDir) {
+    this.dbService = dbService;
     this.cloud = new CloudBackupService(baseDir);
     this.configRepo = new ConfiguracionRepository(dbService);
     this.estadoLocalPath = path.join(baseDir, 'data', 'cloud-backup-estado.json');
   }
 
   _leerEstadoLocal() {
-    if (!fs.existsSync(this.estadoLocalPath)) return { nombreEquipo: '', secuenciaLocal: 0, ultimaFechaExitosa: null };
+    if (!fs.existsSync(this.estadoLocalPath)) return { nombreEquipo: '', secuenciaLocal: 0, ultimaFechaExitosa: null, ultimoMtimeRespaldado: null };
     try {
       return JSON.parse(fs.readFileSync(this.estadoLocalPath, 'utf-8'));
     } catch {
-      return { nombreEquipo: '', secuenciaLocal: 0, ultimaFechaExitosa: null };
+      return { nombreEquipo: '', secuenciaLocal: 0, ultimaFechaExitosa: null, ultimoMtimeRespaldado: null };
     }
+  }
+
+  // Para no acumular respaldos idénticos si la app se abre y cierra varias veces sin que se
+  // registre nada nuevo (p. ej. solo se entró a consultar algo): compara la fecha de
+  // modificación del .db contra la que tenía la última vez que se subió con éxito.
+  hayCambiosSinRespaldar() {
+    const dbPath = this.dbService.getDbPath();
+    if (!fs.existsSync(dbPath)) return false;
+
+    const mtimeActual = fs.statSync(dbPath).mtimeMs;
+    const { ultimoMtimeRespaldado } = this._leerEstadoLocal();
+    return mtimeActual !== ultimoMtimeRespaldado;
   }
 
   _guardarEstadoLocal(parcial) {
@@ -101,7 +114,10 @@ class CloudBackupOrchestratorService {
     try {
       const subido = await this.cloud.subirRespaldo(tempPath, { nombreEquipo, secuencia: nuevaSecuencia });
 
-      this._guardarEstadoLocal({ ultimaFechaExitosa: new Date().toISOString() });
+      const dbPath = this.dbService.getDbPath();
+      const ultimoMtimeRespaldado = fs.existsSync(dbPath) ? fs.statSync(dbPath).mtimeMs : null;
+      this._guardarEstadoLocal({ ultimaFechaExitosa: new Date().toISOString(), ultimoMtimeRespaldado });
+
       await this.cloud.podarRespaldosAntiguos({ diasConservarTodos: estado.diasRetencion });
 
       return { conflicto: false, subido };

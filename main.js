@@ -195,6 +195,34 @@ app.whenReady().then(() => {
   backupService.ejecutarSiCorresponde();
 });
 
+// Respaldo automático en la nube al cerrar la app (no a una hora fija: esta es una app de
+// escritorio que puede estar apagada días enteros, así que "el final del día de trabajo" en la
+// práctica es "cuando se cierra la app"). Solo si hay una cuenta conectada y hubo cambios reales
+// desde el último respaldo exitoso (evita subir copias idénticas si solo se abrió a consultar
+// algo). Se fuerza (forzar=true) porque aquí no hay nadie para decidir sobre un aviso de
+// conflicto; mejor que el trabajo de hoy quede respaldado igual, y revisar el conflicto después
+// manualmente. Un límite de tiempo evita que una conexión lenta retrase cerrar la app.
+let yaIntentoRespaldoAlCerrar = false;
+app.on('before-quit', async (event) => {
+  if (yaIntentoRespaldoAlCerrar) return;
+  if (!cloudBackupService || !cloudBackupService.estaConectado()) return;
+  if (!cloudBackupService.hayCambiosSinRespaldar()) return;
+
+  event.preventDefault();
+  yaIntentoRespaldoAlCerrar = true;
+
+  try {
+    await Promise.race([
+      cloudBackupService.respaldarAhora(backupService, { forzar: true }),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Tiempo de espera agotado')), 20000))
+    ]);
+  } catch (error) {
+    console.error('No se pudo respaldar en la nube al cerrar la app:', error.message);
+  } finally {
+    app.quit();
+  }
+});
+
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') {
     app.quit();
@@ -211,7 +239,18 @@ function setupIpcHandlers() {
   // Dashboard
   envolverHandle('dashboard:getStats', async () => {
     try {
-      return { success: true, data: dashboardService.getStats() };
+      const stats = dashboardService.getStats();
+      const estadoNube = cloudBackupService.getEstado();
+
+      let diasSinRespaldar = null;
+      if (estadoNube.ultimaFechaExitosa) {
+        diasSinRespaldar = Math.floor((Date.now() - new Date(estadoNube.ultimaFechaExitosa).getTime()) / 86400000);
+      }
+
+      return {
+        success: true,
+        data: { ...stats, respaldoNube: { conectado: estadoNube.conectado, diasSinRespaldar } }
+      };
     } catch (error) {
       return { success: false, error: error.message };
     }

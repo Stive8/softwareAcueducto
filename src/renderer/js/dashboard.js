@@ -49,23 +49,43 @@ const Dashboard = {
 
   renderAlertas(stats) {
     const container = document.getElementById('alertasContainer');
-    const sinTarifa = stats.categoriasSinTarifa || [];
+    const alertas = [];
 
-    if (sinTarifa.length === 0) {
+    const sinTarifa = stats.categoriasSinTarifa || [];
+    if (sinTarifa.length > 0) {
+      alertas.push(`
+        <strong>⚠️ Categorías sin tarifa configurada:</strong>
+        ${sinTarifa.map(c => c.nombre).join(', ')}.
+        No se podrán registrar pagos de sostenimiento para cuentas de estas categorías hasta que les asigne una tarifa
+        (Categorías → Ver Historial de Tarifas → Nueva Tarifa).
+      `);
+    }
+
+    // Umbral de 15 días: con un uso semanal típico, esto da margen de sobra antes de avisar,
+    // pero sigue detectando a tiempo una cuenta de Google desconectada o sin internet por mucho tiempo.
+    const UMBRAL_DIAS_RESPALDO = 15;
+    const respaldoNube = stats.respaldoNube || {};
+    if (respaldoNube.conectado && (respaldoNube.diasSinRespaldar === null || respaldoNube.diasSinRespaldar >= UMBRAL_DIAS_RESPALDO)) {
+      const detalle = respaldoNube.diasSinRespaldar === null
+        ? 'todavía no se ha subido ningún respaldo a la nube'
+        : `lleva ${respaldoNube.diasSinRespaldar} días sin subir un respaldo a la nube`;
+      alertas.push(`
+        <strong>☁️ Respaldo en la nube desactualizado:</strong>
+        este equipo está conectado a Google Drive, pero ${detalle}.
+        Revise su conexión a internet o la cuenta conectada (Configuración → Respaldo en la Nube).
+      `);
+    }
+
+    if (alertas.length === 0) {
       container.innerHTML = '';
       return;
     }
 
-    container.innerHTML = `
-      <div style="padding: 14px 18px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 6px; margin-bottom: 24px;">
-        <p style="margin: 0; font-size: 0.9rem; color: #92400e;">
-          <strong>⚠️ Categorías sin tarifa configurada:</strong>
-          ${sinTarifa.map(c => c.nombre).join(', ')}.
-          No se podrán registrar pagos de sostenimiento para cuentas de estas categorías hasta que les asigne una tarifa
-          (Categorías → Ver Historial de Tarifas → Nueva Tarifa).
-        </p>
+    container.innerHTML = alertas.map(texto => `
+      <div style="padding: 14px 18px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 6px; margin-bottom: 12px;">
+        <p style="margin: 0; font-size: 0.9rem; color: #92400e;">${texto}</p>
       </div>
-    `;
+    `).join('');
   },
 
   renderStats(stats) {
