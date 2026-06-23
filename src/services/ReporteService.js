@@ -398,10 +398,7 @@ class ReporteService {
   // anterior (que solo listaba ingresos y egresos en una columna) ahora que cada gasto, recibo
   // y traslado de caja/banco genera su asiento automáticamente.
   reporteLibroDiario({ fechaDesde = '', fechaHasta = '' } = {}) {
-    const filas = this.asientoContableService.getLibroDiario(fechaDesde, fechaHasta).map(f => ({
-      ...f,
-      cuenta: `${f.cuenta_codigo} - ${f.cuenta_nombre}`
-    }));
+    const filas = this.asientoContableService.getLibroDiario(fechaDesde, fechaHasta);
 
     return {
       tipo: 'tabla',
@@ -410,7 +407,8 @@ class ReporteService {
         { key: 'numero_asiento', label: 'Asiento No.' },
         { key: 'fecha', label: 'Fecha', tipo: 'fecha' },
         { key: 'concepto_asiento', label: 'Concepto' },
-        { key: 'cuenta', label: 'Cuenta Contable' },
+        { key: 'cuenta_nombre', label: 'Nombre de la Cuenta Contable' },
+        { key: 'cuenta_codigo', label: 'Código' },
         { key: 'debito', label: 'Débito', tipo: 'moneda' },
         { key: 'credito', label: 'Crédito', tipo: 'moneda' }
       ],

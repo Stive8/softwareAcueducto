@@ -405,7 +405,7 @@ const Contabilidad = {
           <input type="date" id="asientosHasta" value="${hoy}">
           <button class="btn btn-secondary" id="btnFiltrarAsientos">Filtrar</button>
         </div>
-        <button class="btn btn-primary" id="btnNuevoAsientoManual">+ Nuevo Asiento Manual</button>
+        <button class="btn btn-primary" id="btnNuevoAsientoManual">+ Nueva Nota Contable</button>
       </div>
       <div id="asientosTableContent"><p style="padding: 24px; text-align: center;">Cargando...</p></div>
     `;
@@ -435,7 +435,7 @@ const Contabilidad = {
   renderAsientos(asientos) {
     const tableContent = document.getElementById('asientosTableContent');
 
-    const nombresOrigen = { Gasto: 'Gasto', Recibo: 'Recibo', Movimiento: 'Traslado Caja/Banco', Manual: 'Manual (Ajuste)', Reversion: 'Reversión' };
+    const nombresOrigen = { Gasto: 'Gasto', Recibo: 'Recibo', Movimiento: 'Traslado Caja/Banco', Manual: 'Nota Contable', Reversion: 'Reversión' };
 
     if (asientos.length === 0) {
       tableContent.innerHTML = '<p style="padding: 24px; text-align: center; color: #64748b;">No hay asientos en el período seleccionado</p>';
@@ -487,7 +487,7 @@ const Contabilidad = {
       const asiento = response.data;
 
       const content = `
-        <div class="modal-header"><h2>Asiento No. ${asiento.numero}</h2></div>
+        <div class="modal-header"><h2>Registro Contable No. ${asiento.numero}</h2></div>
 
         <div class="detail-section">
           <div class="detail-row"><div class="detail-label">Fecha:</div><div class="detail-value">${this.formatDate(asiento.fecha)}</div></div>
@@ -497,11 +497,12 @@ const Contabilidad = {
         </div>
 
         <table style="width: 100%; margin-top: 12px;">
-          <thead><tr><th>Cuenta Contable</th><th>Débito</th><th>Crédito</th></tr></thead>
+          <thead><tr><th>Nombre de la Cuenta Contable</th><th>Código</th><th>Débito</th><th>Crédito</th></tr></thead>
           <tbody>
             ${asiento.lineas.map(l => `
               <tr>
-                <td><code>${l.cuenta_codigo}</code> - ${l.cuenta_nombre}</td>
+                <td>${l.cuenta_nombre}</td>
+                <td><code>${l.cuenta_codigo}</code></td>
                 <td>${l.debito > 0 ? '$' + this.formatNumber(l.debito) : ''}</td>
                 <td>${l.credito > 0 ? '$' + this.formatNumber(l.credito) : ''}</td>
               </tr>
@@ -578,7 +579,7 @@ const Contabilidad = {
     const hoy = new Date().toISOString().split('T')[0];
 
     const content = `
-      <div class="modal-header"><h2>Nuevo Asiento Manual</h2></div>
+      <div class="modal-header"><h2>Nueva Nota Contable</h2></div>
       <div id="formError"></div>
       <form id="asientoManualForm">
         <div class="form-group">
