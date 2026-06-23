@@ -3,7 +3,7 @@ const ConfiguracionRepository = require('../repositories/ConfiguracionRepository
 const CLAVES_EDITABLES = [
   'nombre_asociacion', 'nit', 'direccion', 'telefono', 'email',
   'consecutivo_recibos', 'valor_nuevo_punto', 'saldo_caja_inicial', 'saldo_banco_inicial',
-  'respaldo_nube_nombre_equipo', 'respaldo_nube_dias_retencion'
+  'respaldo_nube_dias_retencion'
 ];
 
 class ConfiguracionService {
@@ -15,8 +15,11 @@ class ConfiguracionService {
     return this.repository.getAll();
   }
 
+  // datos no siempre trae el formulario completo (p. ej. la sección de respaldo en la nube solo
+  // envía sus propios 2 campos), así que cada validación solo aplica si esa clave en particular
+  // viene incluida en esta actualización.
   actualizar(datos) {
-    if (!datos.nombre_asociacion || !datos.nombre_asociacion.trim()) {
+    if (datos.nombre_asociacion !== undefined && !datos.nombre_asociacion.trim()) {
       throw new Error('El nombre de la asociación es obligatorio');
     }
 

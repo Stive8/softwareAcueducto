@@ -135,6 +135,7 @@ contextBridge.exposeInMainWorld('api', {
     getRespaldosDisponibles: () => ipcRenderer.invoke('cloudBackup:getRespaldosDisponibles'),
     conectar: () => ipcRenderer.invoke('cloudBackup:conectar'),
     desconectar: () => ipcRenderer.invoke('cloudBackup:desconectar'),
+    configurarEquipo: (nombreEquipo) => ipcRenderer.invoke('cloudBackup:configurarEquipo', nombreEquipo),
     respaldarAhora: (opciones) => ipcRenderer.invoke('cloudBackup:respaldarAhora', opciones),
     actualizarDesdeNube: () => ipcRenderer.invoke('cloudBackup:actualizarDesdeNube')
   }

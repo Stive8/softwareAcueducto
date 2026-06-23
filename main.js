@@ -75,7 +75,8 @@ const CANALES_SOLO_ADMIN = new Set([
 // si esa cuenta de Google tiene permiso sobre la carpeta de Drive — algo que se administra desde
 // fuera de la app, no con los roles internos. Ver ARQUITECTURA.md, sección de respaldo en la nube.
 const CANALES_PERMITIDOS_CONSULTA = new Set([
-  'cloudBackup:conectar', 'cloudBackup:desconectar', 'cloudBackup:actualizarDesdeNube'
+  'cloudBackup:conectar', 'cloudBackup:desconectar', 'cloudBackup:actualizarDesdeNube',
+  'cloudBackup:configurarEquipo'
 ]);
 
 function esCanalDeLectura(canal) {
@@ -1109,6 +1110,15 @@ function setupIpcHandlers() {
     }
   });
 
+  envolverHandle('cloudBackup:configurarEquipo', async (event, nombreEquipo) => {
+    try {
+      cloudBackupService.configurarNombreEquipo(nombreEquipo);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   envolverHandle('cloudBackup:desconectar', async () => {
     try {
       cloudBackupService.desconectar();
@@ -1130,7 +1140,18 @@ function setupIpcHandlers() {
   // Descarga el respaldo más reciente de la nube y, tras confirmación del usuario, reemplaza la
   // base de datos local (mismo patrón que backup:restaurar): cierra la conexión, copia el
   // archivo, limpia residuales de WAL y reinicia la app.
+  //
+  // actualizandoDesdeNube evita que dos clics (o una doble invocación por cualquier motivo)
+  // entren a la vez: la primera ya cierra la conexión a la base de datos antes de reiniciar la
+  // app, y si una segunda llamada alcanza a correr en ese instante, la encuentra cerrada
+  // ("The database connection is not open").
+  let actualizandoDesdeNube = false;
   envolverHandle('cloudBackup:actualizarDesdeNube', async () => {
+    if (actualizandoDesdeNube) {
+      return { success: false, error: 'Ya hay una actualización desde la nube en curso' };
+    }
+    actualizandoDesdeNube = true;
+
     let archivoTemporal;
     try {
       const { archivo, rutaLocal } = await cloudBackupService.descargarUltimoRespaldo();
@@ -1143,13 +1164,17 @@ function setupIpcHandlers() {
         ? '\n\nAviso: este respaldo de la nube parece ser MÁS VIEJO que los datos que ya tienes en este equipo. Si continúas, podrías perder información reciente.'
         : '';
 
+      const fechaLegible = new Date(archivo.createdTime).toLocaleString('es-CO', {
+        dateStyle: 'long', timeStyle: 'short'
+      });
+
       const confirmacion = await dialog.showMessageBox(mainWindow, {
         type: 'warning',
         buttons: ['Cancelar', 'Actualizar y reiniciar'],
         defaultId: 0,
         cancelId: 0,
         title: 'Confirmar actualización desde la nube',
-        message: `Esto reemplazará todos los datos actuales con el respaldo más reciente de Google Drive (subido desde "${archivo.properties?.nombreEquipo || 'otro equipo'}" el ${archivo.createdTime}). La aplicación se reiniciará.${advertenciaConflicto}\n\n¿Desea continuar?`
+        message: `Esto reemplazará todos los datos actuales con el respaldo más reciente de Google Drive (subido desde "${archivo.properties?.nombreEquipo || 'otro equipo'}" el ${fechaLegible}). La aplicación se reiniciará.${advertenciaConflicto}\n\n¿Desea continuar?`
       });
 
       if (confirmacion.response !== 1) {
@@ -1171,6 +1196,7 @@ function setupIpcHandlers() {
     } catch (error) {
       return { success: false, error: error.message };
     } finally {
+      actualizandoDesdeNube = false;
       if (archivoTemporal && fs.existsSync(archivoTemporal)) fs.unlinkSync(archivoTemporal);
     }
   });

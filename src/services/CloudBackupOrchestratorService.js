@@ -4,13 +4,38 @@ const os = require('os');
 const CloudBackupService = require('./CloudBackupService');
 const ConfiguracionRepository = require('../repositories/ConfiguracionRepository');
 
-// Conecta el motor de Drive (CloudBackupService, que no sabe nada de esta app) con la
-// configuración local (nombre del equipo, secuencia, retención) y el BackupService existente
-// (que ya sabe generar un .db consistente desde la conexión activa).
+// Conecta el motor de Drive (CloudBackupService, que no sabe nada de esta app) con el
+// BackupService existente (que genera el .db a subir) y con dos fuentes de configuración
+// DELIBERADAMENTE separadas:
+//   - La política de retención vive en la base de datos compartida (configuracion): es una
+//     decisión de la asociación, igual para cualquier equipo.
+//   - El nombre de este equipo, la secuencia local y la fecha del último respaldo exitoso viven
+//     en un archivo JSON local (junto al token de Google, fuera del .db): son datos PROPIOS de
+//     esta instalación. Si vivieran dentro del .db, un "Actualizar desde la nube" los
+//     resetearía sin sentido (porque ese .db viene de OTRO momento/equipo), que es justo el bug
+//     que esto corrige.
 class CloudBackupOrchestratorService {
   constructor(dbService, baseDir) {
     this.cloud = new CloudBackupService(baseDir);
     this.configRepo = new ConfiguracionRepository(dbService);
+    this.estadoLocalPath = path.join(baseDir, 'data', 'cloud-backup-estado.json');
+  }
+
+  _leerEstadoLocal() {
+    if (!fs.existsSync(this.estadoLocalPath)) return { nombreEquipo: '', secuenciaLocal: 0, ultimaFechaExitosa: null };
+    try {
+      return JSON.parse(fs.readFileSync(this.estadoLocalPath, 'utf-8'));
+    } catch {
+      return { nombreEquipo: '', secuenciaLocal: 0, ultimaFechaExitosa: null };
+    }
+  }
+
+  _guardarEstadoLocal(parcial) {
+    const actual = this._leerEstadoLocal();
+    const nuevo = { ...actual, ...parcial };
+    fs.mkdirSync(path.dirname(this.estadoLocalPath), { recursive: true });
+    fs.writeFileSync(this.estadoLocalPath, JSON.stringify(nuevo, null, 2));
+    return nuevo;
   }
 
   estaConectado() {
@@ -25,14 +50,19 @@ class CloudBackupOrchestratorService {
     this.cloud.desconectar();
   }
 
+  configurarNombreEquipo(nombreEquipo) {
+    this._guardarEstadoLocal({ nombreEquipo: (nombreEquipo || '').trim() });
+  }
+
   getEstado() {
     const config = this.configRepo.getAll();
+    const local = this._leerEstadoLocal();
     return {
       conectado: this.cloud.estaConectado(),
-      nombreEquipo: config.respaldo_nube_nombre_equipo || '',
+      nombreEquipo: local.nombreEquipo || '',
       diasRetencion: parseInt(config.respaldo_nube_dias_retencion || '30', 10),
-      ultimaFechaExitosa: config.respaldo_nube_ultima_fecha_exitosa || null,
-      secuenciaLocal: parseInt(config.respaldo_nube_secuencia_local || '0', 10)
+      ultimaFechaExitosa: local.ultimaFechaExitosa || null,
+      secuenciaLocal: parseInt(local.secuenciaLocal || 0, 10)
     };
   }
 
@@ -57,19 +87,21 @@ class CloudBackupOrchestratorService {
       }
     }
 
+    // La nueva secuencia se guarda ANTES de generar el archivo a subir, para que lo que viaja a
+    // Drive como metadato (properties.secuencia) y lo que queda registrado localmente coincidan
+    // siempre — si se hiciera al revés, un "Actualizar desde la nube" posterior de este mismo
+    // respaldo dejaría una secuencia local más vieja que la del propio archivo que se subió.
+    const nuevaSecuencia = estado.secuenciaLocal + 1;
+    const nombreEquipo = estado.nombreEquipo || os.hostname();
+    this._guardarEstadoLocal({ secuenciaLocal: nuevaSecuencia });
+
     const tempPath = path.join(os.tmpdir(), `acueducto_respaldo_${Date.now()}.db`);
     await backupService.crearBackup(tempPath);
 
     try {
-      const nuevaSecuencia = estado.secuenciaLocal + 1;
-      const subido = await this.cloud.subirRespaldo(tempPath, {
-        nombreEquipo: estado.nombreEquipo || os.hostname(),
-        secuencia: nuevaSecuencia
-      });
+      const subido = await this.cloud.subirRespaldo(tempPath, { nombreEquipo, secuencia: nuevaSecuencia });
 
-      this.configRepo.actualizar('respaldo_nube_secuencia_local', nuevaSecuencia);
-      this.configRepo.actualizar('respaldo_nube_ultima_fecha_exitosa', new Date().toISOString());
-
+      this._guardarEstadoLocal({ ultimaFechaExitosa: new Date().toISOString() });
       await this.cloud.podarRespaldosAntiguos({ diasConservarTodos: estado.diasRetencion });
 
       return { conflicto: false, subido };

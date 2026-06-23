@@ -136,6 +136,8 @@ const Configuracion = {
 
       <div id="backupAutomaticoContainer" style="margin-bottom: 24px;"></div>
 
+      <div id="respaldoNubeContainer" style="margin-bottom: 24px;"></div>
+
       ${esAdmin ? `
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header">
@@ -194,6 +196,7 @@ const Configuracion = {
     document.getElementById('btnCrearBackup').addEventListener('click', () => this.crearBackup());
 
     await this.renderBackupAutomatico();
+    await this.renderRespaldoNube();
   },
 
   formatMoney(value) {
@@ -561,6 +564,196 @@ const Configuracion = {
     } catch (error) {
       console.error('Error:', error);
       container.innerHTML = '';
+    }
+  },
+
+  // --- Respaldo en la nube (Google Drive) ---
+
+  async renderRespaldoNube() {
+    const container = document.getElementById('respaldoNubeContainer');
+    const esAdmin = App.currentUser.rol === 'Administrador';
+
+    try {
+      const response = await window.api.cloudBackup.getEstado();
+      const estado = response.success ? response.data : { conectado: false };
+
+      container.innerHTML = `
+        <div class="table-container">
+          <div class="table-header"><h2>Respaldo en la Nube</h2></div>
+          <div style="padding: 24px;">
+            <p style="color: #64748b; font-size: 14px; margin-bottom: 16px;">
+              Copia de los respaldos en Google Drive, para poder recuperarlos si este equipo se
+              pierde o se daña, o para abrirlos desde otro. Es un complemento a la copia local de
+              arriba, no un remplazo.
+            </p>
+            ${estado.conectado ? `
+              <p style="font-size: 14px; margin-bottom: 16px;">
+                <strong>Cuenta de Google conectada</strong> en este equipo.<br>
+                Último respaldo subido a la nube: ${estado.ultimaFechaExitosa ? this.formatDateTime(estado.ultimaFechaExitosa.replace('T', ' ').slice(0, 19)) : 'Todavía no se ha subido ninguno'}
+                ${esAdmin ? `<br>Retención: últimos ${estado.diasRetencion} días + uno por mes` : ''}
+              </p>
+              <div class="form-actions" style="justify-content: flex-start;">
+                <button type="button" class="btn btn-primary" id="btnActualizarNube">Actualizar desde la nube</button>
+                ${esAdmin ? '<button type="button" class="btn btn-success" id="btnRespaldarNubeAhora">Respaldar ahora</button>' : ''}
+                <button type="button" class="btn btn-secondary" id="btnDesconectarNube">Desconectar cuenta</button>
+              </div>
+              <div style="margin-top: 20px; padding-top: 16px; border-top: 1px solid #e2e8f0;">
+                <div class="form-group">
+                  <label for="respaldoNubeNombreEquipo">Nombre de este equipo</label>
+                  <input type="text" id="respaldoNubeNombreEquipo" value="${estado.nombreEquipo || ''}" placeholder="Ej: PC de la asociación">
+                  <small style="color: #64748b; font-size: 0.875rem;">Para identificar este equipo en la lista de respaldos. Es un dato propio de este equipo: no viaja con los respaldos que se suben/bajan.</small>
+                </div>
+                <div class="form-actions" style="justify-content: flex-start;">
+                  <button type="button" class="btn btn-primary" id="btnGuardarNombreEquipo">Guardar nombre</button>
+                </div>
+                ${esAdmin ? `
+                  <div class="form-group" style="margin-top: 16px;">
+                    <label for="respaldoNubeDiasRetencion">Días de respaldos diarios a conservar</label>
+                    <input type="number" id="respaldoNubeDiasRetencion" min="1" step="1" value="${estado.diasRetencion}">
+                    <small style="color: #64748b; font-size: 0.875rem;">Más allá de estos días, se conserva solo un respaldo por mes, indefinidamente. Aplica para toda la asociación.</small>
+                  </div>
+                  <div class="form-actions">
+                    <button type="button" class="btn btn-primary" id="btnGuardarRetencion">Guardar retención</button>
+                  </div>
+                ` : ''}
+              </div>
+            ` : `
+              <p style="font-size: 14px; color: #64748b; margin-bottom: 16px;">No hay ninguna cuenta de Google conectada en este equipo.</p>
+              <div class="form-actions" style="justify-content: flex-start;">
+                <button type="button" class="btn btn-primary" id="btnConectarNube">Conectar con Google Drive</button>
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+
+      if (estado.conectado) {
+        document.getElementById('btnActualizarNube').addEventListener('click', () => this.actualizarDesdeNube());
+        document.getElementById('btnDesconectarNube').addEventListener('click', () => this.desconectarNube());
+        document.getElementById('btnGuardarNombreEquipo').addEventListener('click', () => this.guardarNombreEquipoNube());
+        if (esAdmin) {
+          document.getElementById('btnRespaldarNubeAhora').addEventListener('click', () => this.respaldarNubeAhora());
+          document.getElementById('btnGuardarRetencion').addEventListener('click', () => this.guardarRetencionNube());
+        }
+      } else {
+        document.getElementById('btnConectarNube').addEventListener('click', () => this.conectarNube());
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      container.innerHTML = '';
+    }
+  },
+
+  async conectarNube() {
+    App.toast('Se abrió tu navegador. Inicia sesión con la cuenta de Google y acepta el acceso.');
+    try {
+      const response = await window.api.cloudBackup.conectar();
+      if (response.success) {
+        App.toast('Cuenta de Google conectada correctamente.');
+        await this.renderRespaldoNube();
+      } else {
+        App.toast('No se pudo conectar: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('No se pudo conectar con Google Drive', 'error');
+    }
+  },
+
+  async desconectarNube() {
+    const confirmado = await App.confirmDialog(
+      'Esto desconecta la cuenta de Google de este equipo. Los respaldos que ya están en Drive no se borran. ¿Desea continuar?',
+      { titulo: 'Desconectar cuenta de Google', textoConfirmar: 'Sí, desconectar' }
+    );
+    if (!confirmado) return;
+
+    try {
+      const response = await window.api.cloudBackup.desconectar();
+      if (response.success) {
+        App.toast('Cuenta desconectada.');
+        await this.renderRespaldoNube();
+      } else {
+        App.toast('Error al desconectar: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al desconectar la cuenta', 'error');
+    }
+  },
+
+  async respaldarNubeAhora(forzar = false) {
+    try {
+      const response = await window.api.cloudBackup.respaldarAhora({ forzar });
+      if (!response.success) {
+        App.toast('Error al respaldar: ' + response.error, 'error');
+        return;
+      }
+
+      if (response.data.conflicto) {
+        const confirmado = await App.confirmDialog(
+          response.data.mensaje,
+          { titulo: 'Posible respaldo cruzado', textoConfirmar: 'Subir igual' }
+        );
+        if (confirmado) await this.respaldarNubeAhora(true);
+        return;
+      }
+
+      App.toast('Respaldo subido a la nube correctamente.');
+      await this.renderRespaldoNube();
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al respaldar en la nube', 'error');
+    }
+  },
+
+  async actualizarDesdeNube() {
+    const boton = document.getElementById('btnActualizarNube');
+    if (boton) boton.disabled = true;
+
+    try {
+      const response = await window.api.cloudBackup.actualizarDesdeNube();
+      if (response.canceled) return;
+      if (!response.success) {
+        App.toast('Error al actualizar desde la nube: ' + response.error, 'error');
+      }
+      // Si fue exitoso, la aplicación se reinicia automáticamente desde el proceso principal.
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al actualizar desde la nube', 'error');
+    } finally {
+      if (boton) boton.disabled = false;
+    }
+  },
+
+  async guardarNombreEquipoNube() {
+    try {
+      const nombre = document.getElementById('respaldoNubeNombreEquipo').value.trim();
+      const response = await window.api.cloudBackup.configurarEquipo(nombre);
+      if (response.success) {
+        App.toast('Nombre del equipo guardado.');
+        await this.renderRespaldoNube();
+      } else {
+        App.toast('Error al guardar: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al guardar el nombre del equipo', 'error');
+    }
+  },
+
+  async guardarRetencionNube() {
+    try {
+      const dias = document.getElementById('respaldoNubeDiasRetencion').value;
+      const response = await window.api.config.actualizar({ respaldo_nube_dias_retencion: dias });
+      if (response.success) {
+        App.toast('Política de retención guardada.');
+        await this.renderRespaldoNube();
+      } else {
+        App.toast('Error al guardar: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al guardar la retención', 'error');
     }
   },
 
