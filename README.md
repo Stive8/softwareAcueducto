@@ -1,8 +1,8 @@
 # Sistema Administrativo - Acueducto Veredal
 
-Aplicación de escritorio 100% offline para la administración de acueductos veredales en Colombia: cuentas/predios, propietarios, categorías y tarifas históricas, pagos y recibos, gastos, caja y bancos, nuevos puntos de conexión, reportes y configuración con seguridad básica.
+Aplicación de escritorio 100% offline para la administración de acueductos veredales en Colombia: cuentas/predios, propietarios, categorías y tarifas históricas, pagos y recibos, gastos, caja y bancos, nuevos puntos de conexión, contabilidad de doble partida (Plan Único de Cuentas, asientos contables, notas contables), reportes y configuración con seguridad básica.
 
-No es un ERP: el sistema está deliberadamente acotado a lo que necesita una junta de acueducto veredal, sin contabilidad de doble partida ni módulos que no se usan en este contexto.
+No es un ERP completo: el sistema está acotado a lo que necesita una junta de acueducto veredal. Sí incluye contabilidad de doble partida (débito/crédito) porque la asociación la requiere para sus informes ante la junta y la contadora, pero no maneja módulos que no se usan en este contexto (inventarios, facturación electrónica, nómina detallada, etc.).
 
 ## Stack Tecnológico
 
@@ -19,8 +19,9 @@ No es un ERP: el sistema está deliberadamente acotado a lo que necesita una jun
 - Los pagos son siempre por **mes calendario completo** (nunca por cortes ni rangos de días), y un solo pago puede cubrir varios meses atrasados o futuros.
 - Las **tarifas son históricas por categoría y año**: nunca se sobrescriben, así que una deuda vieja se cobra al precio vigente en esa fecha, no al precio actual.
 - La numeración de recibos es **global y consecutiva**, configurable pero nunca reiniciable libremente.
-- **Nada se elimina**, solo se desactiva/anula/cancela (cuentas, gastos, nuevos puntos, etc.).
+- **Nada se elimina**, solo se desactiva/anula/cancela (cuentas, gastos, nuevos puntos, cuentas contables, etc.). Anular un gasto o recibo no borra su asiento contable: se crea un asiento de **reversión** que lo neutraliza, y el original queda marcado pero intacto como constancia.
 - El sistema **no genera facturación automática**: todo pago o gasto se registra manualmente.
+- Cada gasto, recibo y traslado de caja a banco genera **automáticamente su asiento contable** (débito/crédito), según un mapeo configurable de conceptos a cuentas del Plan Único de Cuentas — nadie tiene que llevar la contabilidad "a mano" aparte.
 
 ## Módulos
 
@@ -35,8 +36,9 @@ No es un ERP: el sistema está deliberadamente acotado a lo que necesita una jun
 | Gastos | Egresos del acueducto (proveedor, NIT/cédula, categoría del gasto) |
 | Caja y Bancos | Saldos, movimientos, consignaciones, resumen de flujo del período |
 | Nuevos Puntos | Conexiones nuevas con valor total y abonos parciales hasta saldarse |
-| Reportes | Cartera, ingresos/gastos por período, y contabilidad simplificada (Estado de Resultados, Balance General, Flujo de Caja) exportables a PDF y Excel |
-| Configuración | Datos de la asociación, parámetros, cambio de contraseña, copia de seguridad/restauración |
+| Contabilidad | Plan Único de Cuentas (catálogo jerárquico), Mapeo de Conceptos (qué cuenta usa cada tipo de gasto/recibo), Asientos Contables (automáticos + Notas Contables manuales, con reversión), y sus reportes: Libro Diario, Libro Mayor, Balance de Prueba, Balance General, Estado de Resultados, Flujo de Caja, Historial de Pagos/Gastos, e Informe de Empalme (para entrega de junta) |
+| Reportes | Cuentas y Propietarios, y Estado de Cuentas (al día, en mora, saldo a favor, nuevos puntos) |
+| Configuración | Datos de la asociación, parámetros, cambio de contraseña, copia de seguridad/restauración, Modo de Pruebas |
 
 ## Arquitectura
 
@@ -45,6 +47,14 @@ No es un ERP: el sistema está deliberadamente acotado a lo que necesita una jun
 - **Servicios** (`src/services/`): lógica de negocio y validaciones, componen uno o más repositorios.
 - **Repositorios** (`src/repositories/`): acceso directo a SQLite vía `better-sqlite3`.
 - **Migraciones** (`src/database/migrations/`): archivos `.sql` numerados, ejecutados una sola vez y registrados en la tabla `migrations`.
+
+### Contabilidad de doble partida
+
+- **Plan Único de Cuentas** (`plan_cuentas`): catálogo jerárquico (Clase → Grupo → Cuenta → Subcuenta → Auxiliar). Solo las cuentas "imputables" (sin subcuentas debajo) pueden recibir movimientos; las cuentas de agrupación nunca admiten un valor directo.
+- **Mapeo de Conceptos** (`mapeo_conceptos_contables`): asocia cada concepto de gasto/recibo/movimiento con una cuenta imputable del PUC, con un `__default__` por módulo como respaldo. Editable desde Contabilidad → Mapeo de Conceptos, sin tocar datos históricos ya registrados.
+- **Asientos Contables** (`asientos_contables` + `movimientos_contables`): cada gasto, recibo (incluye meses de sostenimiento, abono a conexión y aplicación de saldo a favor en un solo asiento) y traslado Caja→Banco genera su asiento automáticamente, usando la cuenta ya resuelta por el mapeo. Anular el origen no borra el asiento: genera un asiento de **reversión** con las líneas invertidas, y dos asientos enlazados quedan en el histórico.
+- **Notas Contables**: asientos manuales para lo que la generación automática no cubre (ajustes, partidas de apertura, correcciones). Si una nota afecta Caja o Bancos, también se refleja en el saldo simple de Caja/Banco que usa el Dashboard, para que ambos siempre coincidan.
+- Reportes de doble partida: **Libro Diario** (todas las líneas, en orden cronológico), **Libro Mayor** (movimientos de una cuenta con saldo corriente) y **Balance de Prueba** (totales débito/crédito por cuenta, debe cuadrar siempre).
 
 ## Instalación y ejecución (desarrollo)
 
@@ -59,7 +69,7 @@ En desarrollo la base de datos vive en `data/acueducto.db` dentro del proyecto (
 
 ### Modo de Pruebas
 
-Desde **Configuración → Modo de Pruebas** puedes cargar o eliminar datos de ejemplo (cuentas, propietarios, pagos, gastos) mientras pruebas el sistema, sin afectar categorías, configuración ni el usuario administrador. Nunca se ejecuta automáticamente.
+Desde **Configuración → Modo de Pruebas** puedes cargar o eliminar datos de ejemplo (cuentas, propietarios, pagos, gastos, y sus asientos contables) mientras pruebas el sistema, sin afectar el Plan de Cuentas, el Mapeo de Conceptos, la configuración ni el usuario administrador. Eliminar datos operativos limpia también los asientos contables y reinicia su numeración, para no dejar registros huérfanos. Nunca se ejecuta automáticamente.
 
 ## Generar el instalador de Windows
 
