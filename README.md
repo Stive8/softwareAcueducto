@@ -42,6 +42,8 @@ No es un ERP completo: el sistema está acotado a lo que necesita una junta de a
 
 ## Arquitectura
 
+> Para el detalle técnico completo (stack, flujo de datos, modelo de seguridad/IPC, base de datos, patrón Repository/Service y el motor de contabilidad de doble partida), ver **[ARQUITECTURA.md](ARQUITECTURA.md)**.
+
 - **Renderer** (`src/renderer/`): HTML/CSS/JS vanilla, un archivo por módulo, sin acceso directo a Node — todo pasa por `window.api` (expuesto en `preload.js` vía `contextBridge`).
 - **Proceso principal** (`main.js`): registra los manejadores `ipcMain.handle(...)`, cada uno devuelve `{ success, data }` o `{ success, error }`.
 - **Servicios** (`src/services/`): lógica de negocio y validaciones, componen uno o más repositorios.
