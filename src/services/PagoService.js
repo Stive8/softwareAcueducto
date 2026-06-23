@@ -2,6 +2,7 @@ const PagoRepository = require('../repositories/PagoRepository');
 const CuentaRepository = require('../repositories/CuentaRepository');
 const PropietarioRepository = require('../repositories/PropietarioRepository');
 const NuevoPuntoRepository = require('../repositories/NuevoPuntoRepository');
+const AsientoContableService = require('./AsientoContableService');
 
 const NOMBRES_MES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -54,6 +55,7 @@ class PagoService {
     this.cuentaRepository = new CuentaRepository(dbService);
     this.propietarioRepository = new PropietarioRepository(dbService);
     this.nuevoPuntoRepository = new NuevoPuntoRepository(dbService);
+    this.asientoContableService = new AsientoContableService(dbService);
   }
 
   formatPeriodo(anio, mes) {
@@ -183,7 +185,7 @@ class PagoService {
   // recibo. Opcionalmente, en el MISMO recibo (mismo número, mismo movimiento de caja) puede incluir un abono
   // al cargo de conexión pendiente de la cuenta (nuevoPuntoId + abonoConexion), para el caso real de que la
   // persona pague meses y conexión juntos en un solo recibo físico.
-  registrarPagoSostenimiento({ cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones, usarSaldoAFavor = true, nuevoPuntoId = null, abonoConexion = 0 }) {
+  registrarPagoSostenimiento({ cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones, usarSaldoAFavor = true, nuevoPuntoId = null, abonoConexion = 0 }, usuarioId = null) {
     this.validarDatosComunes({ cuentaId, fechaPago, metodoPago });
     if (!anioInicio || !mesInicio) throw new Error('El período inicial es obligatorio');
     if (!cantidadMeses || cantidadMeses < 1) throw new Error('La cantidad de meses debe ser al menos 1');
@@ -275,6 +277,8 @@ class PagoService {
           fechaMovimiento: fechaPago
         });
       }
+
+      this.asientoContableService.generarDesdeRecibo(reciboId, usuarioId);
 
       return { reciboId, numeroRecibo, total: totalACobrar, creditoAplicado, estadoConexion };
     });

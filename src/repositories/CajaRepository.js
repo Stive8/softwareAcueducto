@@ -3,6 +3,10 @@ class CajaRepository {
     this.db = dbService.getDb();
   }
 
+  transaccion(fn) {
+    return this.db.transaction(fn)();
+  }
+
   getSaldoInicial(clave) {
     const config = this.db.prepare('SELECT valor FROM configuracion WHERE clave = ?').get(clave);
     return parseFloat(config?.valor || 0);

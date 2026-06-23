@@ -20,6 +20,7 @@ const DevToolsService = require('./src/services/DevToolsService');
 const AuditoriaService = require('./src/services/AuditoriaService');
 const PlanCuentaService = require('./src/services/PlanCuentaService');
 const MapeoContableService = require('./src/services/MapeoContableService');
+const AsientoContableService = require('./src/services/AsientoContableService');
 
 let mainWindow;
 let dbService;
@@ -41,6 +42,7 @@ let devToolsService;
 let auditoriaService;
 let planCuentaService;
 let mapeoContableService;
+let asientoContableService;
 
 // Sesión activa del único usuario que puede estar usando esta app de escritorio a la vez.
 // No es solo un dato de UI: la capa de permisos de abajo (envolverHandle) la usa para decidir
@@ -59,7 +61,8 @@ const CANALES_SOLO_ADMIN = new Set([
   'devtools:cargarDatosEjemplo', 'devtools:eliminarDatosOperativos',
   'auditoria:getAll',
   'plancuentas:create', 'plancuentas:update', 'plancuentas:toggleActivo',
-  'mapeocontable:actualizar'
+  'mapeocontable:actualizar',
+  'asientos:crearManual', 'asientos:revertir'
 ]);
 
 function esCanalDeLectura(canal) {
@@ -168,6 +171,7 @@ app.whenReady().then(() => {
   auditoriaService = new AuditoriaService(dbService);
   planCuentaService = new PlanCuentaService(dbService);
   mapeoContableService = new MapeoContableService(dbService);
+  asientoContableService = new AsientoContableService(dbService);
 
   setupIpcHandlers();
   createWindow();
@@ -504,6 +508,60 @@ function setupIpcHandlers() {
     }
   });
 
+  // Asientos contables (doble partida). La generación automática ocurre dentro de los servicios
+  // de gastos/pagos/caja; aquí solo se exponen consulta, el asiento manual (ajustes) y reversión.
+  envolverHandle('asientos:getAll', async (event, params) => {
+    try {
+      return { success: true, data: asientoContableService.getAll(params) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('asientos:getById', async (event, id) => {
+    try {
+      const asiento = asientoContableService.getById(id);
+      if (!asiento) return { success: false, error: 'Asiento no encontrado' };
+      return { success: true, data: asiento };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('asientos:crearManual', async (event, datos) => {
+    try {
+      const id = asientoContableService.crearManual({ ...datos, usuarioId: sesionActual.id });
+      return { success: true, data: { id } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('asientos:revertir', async (event, id, motivo) => {
+    try {
+      const reversionId = asientoContableService.revertir(id, motivo, sesionActual.id);
+      return { success: true, data: { id: reversionId } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('asientos:getLibroMayor', async (event, cuentaContableId, fechaDesde, fechaHasta) => {
+    try {
+      return { success: true, data: asientoContableService.getLibroMayor(cuentaContableId, fechaDesde, fechaHasta) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('asientos:getBalancePrueba', async (event, fechaDesde, fechaHasta) => {
+    try {
+      return { success: true, data: asientoContableService.getBalancePrueba(fechaDesde, fechaHasta) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Pagos
   envolverHandle('pagos:getCuentasConEstado', async (event, params) => {
     try {
@@ -531,7 +589,7 @@ function setupIpcHandlers() {
 
   envolverHandle('pagos:registrarPagoSostenimiento', async (event, payload) => {
     try {
-      return { success: true, data: pagoService.registrarPagoSostenimiento(payload) };
+      return { success: true, data: pagoService.registrarPagoSostenimiento(payload, sesionActual.id) };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -568,7 +626,7 @@ function setupIpcHandlers() {
 
   envolverHandle('recibos:anular', async (event, id, motivo) => {
     try {
-      reciboService.anular(id, motivo);
+      reciboService.anular(id, motivo, sesionActual.id);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -747,7 +805,7 @@ function setupIpcHandlers() {
 
   envolverHandle('gastos:create', async (event, gastoData) => {
     try {
-      const id = gastoService.create(gastoData);
+      const id = gastoService.create(gastoData, sesionActual.id);
       return { success: true, data: { id } };
     } catch (error) {
       return { success: false, error: error.message };
@@ -756,7 +814,7 @@ function setupIpcHandlers() {
 
   envolverHandle('gastos:anular', async (event, id, motivo) => {
     try {
-      gastoService.anular(id, motivo);
+      gastoService.anular(id, motivo, sesionActual.id);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -782,7 +840,7 @@ function setupIpcHandlers() {
 
   envolverHandle('caja:registrarConsignacion', async (event, payload) => {
     try {
-      cajaService.registrarConsignacion(payload);
+      cajaService.registrarConsignacion(payload, sesionActual.id);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -992,7 +1050,7 @@ function setupIpcHandlers() {
 
   envolverHandle('nuevospuntos:registrarAbono', async (event, payload) => {
     try {
-      return { success: true, data: nuevoPuntoService.registrarAbono(payload) };
+      return { success: true, data: nuevoPuntoService.registrarAbono(payload, sesionActual.id) };
     } catch (error) {
       return { success: false, error: error.message };
     }

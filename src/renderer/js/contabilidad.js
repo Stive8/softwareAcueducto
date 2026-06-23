@@ -20,8 +20,15 @@ const Contabilidad = {
       reportes: [
         { tipo: 'balance_general', titulo: 'Balance General', icon: '📊' },
         { tipo: 'estado_resultados', titulo: 'Estado de Resultados', icon: '📋', rangoFecha: true },
-        { tipo: 'flujo_caja', titulo: 'Flujo de Caja', icon: '💧', rangoFecha: true },
-        { tipo: 'libro_diario', titulo: 'Libro Diario', icon: '📖', rangoFecha: true }
+        { tipo: 'flujo_caja', titulo: 'Flujo de Caja', icon: '💧', rangoFecha: true }
+      ]
+    },
+    {
+      titulo: 'Doble Partida',
+      reportes: [
+        { tipo: 'libro_diario', titulo: 'Libro Diario', icon: '📖', rangoFecha: true },
+        { tipo: 'libro_mayor', titulo: 'Libro Mayor', icon: '📚', rangoFecha: true, requiereCuentaContable: true },
+        { tipo: 'balance_prueba', titulo: 'Balance de Prueba', icon: '⚖️', rangoFecha: true }
       ]
     },
     {
@@ -45,6 +52,7 @@ const Contabilidad = {
           <div class="table-controls" style="gap: 8px;">
             <button class="btn btn-secondary" id="tabPlanCuentasBtn">Plan de Cuentas</button>
             <button class="btn btn-secondary" id="tabMapeoBtn">Mapeo de Conceptos</button>
+            <button class="btn btn-secondary" id="tabAsientosBtn">Asientos Contables</button>
             <button class="btn btn-secondary" id="tabReportesContablesBtn">Reportes Contables</button>
           </div>
         </div>
@@ -54,6 +62,7 @@ const Contabilidad = {
 
     document.getElementById('tabPlanCuentasBtn').addEventListener('click', () => this.mostrarTab('plancuentas'));
     document.getElementById('tabMapeoBtn').addEventListener('click', () => this.mostrarTab('mapeo'));
+    document.getElementById('tabAsientosBtn').addEventListener('click', () => this.mostrarTab('asientos'));
     document.getElementById('tabReportesContablesBtn').addEventListener('click', () => this.mostrarTab('reportes'));
 
     await this.mostrarTab('plancuentas');
@@ -63,12 +72,15 @@ const Contabilidad = {
     this.tabActual = tab;
     document.getElementById('tabPlanCuentasBtn').className = tab === 'plancuentas' ? 'btn btn-primary' : 'btn btn-secondary';
     document.getElementById('tabMapeoBtn').className = tab === 'mapeo' ? 'btn btn-primary' : 'btn btn-secondary';
+    document.getElementById('tabAsientosBtn').className = tab === 'asientos' ? 'btn btn-primary' : 'btn btn-secondary';
     document.getElementById('tabReportesContablesBtn').className = tab === 'reportes' ? 'btn btn-primary' : 'btn btn-secondary';
 
     if (tab === 'plancuentas') {
       await this.loadCatalogo();
     } else if (tab === 'mapeo') {
       await this.loadMapeo();
+    } else if (tab === 'asientos') {
+      await this.loadAsientos();
     } else {
       await this.loadReportesContables();
     }
@@ -377,6 +389,313 @@ const Contabilidad = {
     });
   },
 
+  // --- Asientos Contables ---
+
+  async loadAsientos() {
+    const body = document.getElementById('contabilidadBody');
+    const hoy = new Date().toISOString().split('T')[0];
+    const inicioMes = new Date();
+    inicioMes.setDate(1);
+    const inicioMesStr = inicioMes.toISOString().split('T')[0];
+
+    body.innerHTML = `
+      <div style="padding: 16px 20px; display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap;">
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <input type="date" id="asientosDesde" value="${inicioMesStr}">
+          <input type="date" id="asientosHasta" value="${hoy}">
+          <button class="btn btn-secondary" id="btnFiltrarAsientos">Filtrar</button>
+        </div>
+        <button class="btn btn-primary" id="btnNuevoAsientoManual">+ Nuevo Asiento Manual</button>
+      </div>
+      <div id="asientosTableContent"><p style="padding: 24px; text-align: center;">Cargando...</p></div>
+    `;
+
+    document.getElementById('btnFiltrarAsientos').addEventListener('click', () => this.loadListaAsientos());
+    document.getElementById('btnNuevoAsientoManual').addEventListener('click', () => this.showNuevoAsientoManualModal());
+
+    await this.loadListaAsientos();
+  },
+
+  async loadListaAsientos() {
+    const fechaDesde = document.getElementById('asientosDesde').value;
+    const fechaHasta = document.getElementById('asientosHasta').value;
+
+    try {
+      const response = await window.api.asientos.getAll({ fechaDesde, fechaHasta, limit: 100 });
+      if (response.success) {
+        this.renderAsientos(response.data.data);
+      } else {
+        App.toast('Error al cargar los asientos: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  },
+
+  renderAsientos(asientos) {
+    const tableContent = document.getElementById('asientosTableContent');
+
+    const nombresOrigen = { Gasto: 'Gasto', Recibo: 'Recibo', Movimiento: 'Traslado Caja/Banco', Manual: 'Manual (Ajuste)', Reversion: 'Reversión' };
+
+    if (asientos.length === 0) {
+      tableContent.innerHTML = '<p style="padding: 24px; text-align: center; color: #64748b;">No hay asientos en el período seleccionado</p>';
+      return;
+    }
+
+    tableContent.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>No.</th>
+            <th>Fecha</th>
+            <th>Concepto</th>
+            <th>Origen</th>
+            <th>Total</th>
+            <th>Estado</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${asientos.map(a => `
+            <tr>
+              <td>${a.numero}</td>
+              <td>${this.formatDate(a.fecha)}</td>
+              <td>${a.concepto}</td>
+              <td>${nombresOrigen[a.tipo_origen] || a.tipo_origen}</td>
+              <td>$${this.formatNumber(a.total_debito)}</td>
+              <td><span class="badge badge-${a.estado === 'Activo' ? 'activo' : 'inactivo'}">${a.estado}</span></td>
+              <td>
+                <div class="table-actions">
+                  <button class="btn btn-secondary btn-icon" onclick="Contabilidad.showDetalleAsiento(${a.id})">Ver</button>
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  },
+
+  async showDetalleAsiento(id) {
+    try {
+      const response = await window.api.asientos.getById(id);
+      if (!response.success) {
+        App.toast('Error al cargar el asiento: ' + response.error, 'error');
+        return;
+      }
+
+      const asiento = response.data;
+
+      const content = `
+        <div class="modal-header"><h2>Asiento No. ${asiento.numero}</h2></div>
+
+        <div class="detail-section">
+          <div class="detail-row"><div class="detail-label">Fecha:</div><div class="detail-value">${this.formatDate(asiento.fecha)}</div></div>
+          <div class="detail-row"><div class="detail-label">Concepto:</div><div class="detail-value">${asiento.concepto}</div></div>
+          <div class="detail-row"><div class="detail-label">Estado:</div><div class="detail-value"><span class="badge badge-${asiento.estado === 'Activo' ? 'activo' : 'inactivo'}">${asiento.estado}</span></div></div>
+          ${asiento.estado === 'Anulado' ? `<div class="detail-row"><div class="detail-label">Motivo reversión:</div><div class="detail-value">${asiento.motivo_anulacion || '-'}</div></div>` : ''}
+        </div>
+
+        <table style="width: 100%; margin-top: 12px;">
+          <thead><tr><th>Cuenta Contable</th><th>Débito</th><th>Crédito</th></tr></thead>
+          <tbody>
+            ${asiento.lineas.map(l => `
+              <tr>
+                <td><code>${l.cuenta_codigo}</code> - ${l.cuenta_nombre}</td>
+                <td>${l.debito > 0 ? '$' + this.formatNumber(l.debito) : ''}</td>
+                <td>${l.credito > 0 ? '$' + this.formatNumber(l.credito) : ''}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+
+        <div class="form-actions">
+          <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+          ${asiento.estado === 'Activo' ? `<button class="btn btn-warning" onclick="App.closeModal(); Contabilidad.showRevertirAsientoModal(${asiento.id})">Revertir</button>` : ''}
+        </div>
+      `;
+
+      App.openModal(content, 'large');
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al cargar el asiento', 'error');
+    }
+  },
+
+  showRevertirAsientoModal(id) {
+    const content = `
+      <div class="modal-header"><h2>Revertir Asiento</h2></div>
+
+      <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+          <strong>Nota:</strong> El asiento original no se borra ni se modifica; queda marcado como anulado y se crea un nuevo asiento con las líneas invertidas para neutralizar su efecto.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="revertirAsientoForm">
+        <div class="form-group">
+          <label for="motivo_reversion">Motivo de la Reversión <span style="color: #ef4444;">*</span></label>
+          <textarea id="motivo_reversion" name="motivo_reversion" required></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-warning">Confirmar Reversión</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('revertirAsientoForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const motivo = document.getElementById('motivo_reversion').value.trim();
+
+      try {
+        const response = await window.api.asientos.revertir(id, motivo);
+        if (response.success) {
+          App.closeModal();
+          this.loadListaAsientos();
+          App.toast('Asiento revertido con éxito');
+        } else {
+          document.getElementById('formError').innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('formError').innerHTML = '<div class="error-message">Error al revertir el asiento</div>';
+      }
+    });
+  },
+
+  // Asiento manual: para todo lo que la generación automática no cubre (ajustes financieros,
+  // depreciaciones, partidas de apertura, correcciones). El usuario agrega líneas libremente;
+  // la validación de que cuadre débito = crédito ocurre al guardar, tanto aquí como en el backend.
+  async showNuevoAsientoManualModal() {
+    const imputablesResponse = await window.api.planCuentas.getImputables({});
+    this.imputablesCache = imputablesResponse.success ? imputablesResponse.data : [];
+
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const content = `
+      <div class="modal-header"><h2>Nuevo Asiento Manual</h2></div>
+      <div id="formError"></div>
+      <form id="asientoManualForm">
+        <div class="form-group">
+          <label for="am_fecha">Fecha <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="am_fecha" name="am_fecha" value="${hoy}" required>
+        </div>
+        <div class="form-group">
+          <label for="am_concepto">Concepto <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="am_concepto" name="am_concepto" placeholder="Ej: Ajuste por depreciación de equipo de bombeo" required>
+        </div>
+
+        <table style="width: 100%;" id="lineasAsientoTable">
+          <thead><tr><th>Cuenta Contable</th><th style="width: 140px;">Débito</th><th style="width: 140px;">Crédito</th><th></th></tr></thead>
+          <tbody id="lineasAsientoBody"></tbody>
+        </table>
+        <button type="button" class="btn btn-secondary btn-icon" id="btnAgregarLinea" style="margin: 8px 0 16px 0;">+ Agregar línea</button>
+
+        <div id="balanceAsientoInfo" style="padding: 10px 12px; background: #f1f5f9; border-radius: 6px; font-size: 0.875rem; margin-bottom: 16px;"></div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar Asiento</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content, 'large');
+
+    this.agregarLineaAsiento();
+    this.agregarLineaAsiento();
+
+    document.getElementById('btnAgregarLinea').addEventListener('click', () => this.agregarLineaAsiento());
+
+    document.getElementById('asientoManualForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const lineas = Array.from(document.querySelectorAll('#lineasAsientoBody tr')).map(fila => ({
+        cuentaContableId: parseInt(fila.querySelector('.linea-cuenta').value, 10),
+        debito: App.parseMoneyValue(fila.querySelector('.linea-debito').value),
+        credito: App.parseMoneyValue(fila.querySelector('.linea-credito').value)
+      }));
+
+      try {
+        const response = await window.api.asientos.crearManual({
+          fecha: document.getElementById('am_fecha').value,
+          concepto: document.getElementById('am_concepto').value.trim(),
+          lineas
+        });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadListaAsientos();
+          App.toast('Asiento manual creado con éxito');
+        } else {
+          document.getElementById('formError').innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('formError').innerHTML = '<div class="error-message">Error al guardar el asiento</div>';
+      }
+    });
+  },
+
+  agregarLineaAsiento() {
+    const tbody = document.getElementById('lineasAsientoBody');
+    const fila = document.createElement('tr');
+
+    const porTipo = {};
+    (this.imputablesCache || []).forEach(c => {
+      if (!porTipo[c.tipo]) porTipo[c.tipo] = [];
+      porTipo[c.tipo].push(c);
+    });
+
+    fila.innerHTML = `
+      <td>
+        <select class="linea-cuenta" style="width: 100%;">
+          ${Object.keys(porTipo).map(tipo => `
+            <optgroup label="${tipo}">
+              ${porTipo[tipo].map(c => `<option value="${c.id}">${c.codigo} - ${c.nombre}</option>`).join('')}
+            </optgroup>
+          `).join('')}
+        </select>
+      </td>
+      <td><input type="text" inputmode="numeric" class="linea-debito" placeholder="0"></td>
+      <td><input type="text" inputmode="numeric" class="linea-credito" placeholder="0"></td>
+      <td><button type="button" class="btn btn-danger btn-icon" onclick="this.closest('tr').remove(); Contabilidad.actualizarBalanceAsiento();">✕</button></td>
+    `;
+
+    tbody.appendChild(fila);
+
+    const inputDebito = fila.querySelector('.linea-debito');
+    const inputCredito = fila.querySelector('.linea-credito');
+    App.attachMoneyInput(inputDebito);
+    App.attachMoneyInput(inputCredito);
+    inputDebito.addEventListener('input', () => this.actualizarBalanceAsiento());
+    inputCredito.addEventListener('input', () => this.actualizarBalanceAsiento());
+
+    this.actualizarBalanceAsiento();
+  },
+
+  actualizarBalanceAsiento() {
+    const totalDebito = Array.from(document.querySelectorAll('.linea-debito')).reduce((s, i) => s + App.parseMoneyValue(i.value), 0);
+    const totalCredito = Array.from(document.querySelectorAll('.linea-credito')).reduce((s, i) => s + App.parseMoneyValue(i.value), 0);
+    const diferencia = totalDebito - totalCredito;
+
+    const info = document.getElementById('balanceAsientoInfo');
+    if (!info) return;
+
+    info.innerHTML = `
+      Total Débito: <strong>$${this.formatNumber(totalDebito)}</strong> &nbsp;|&nbsp;
+      Total Crédito: <strong>$${this.formatNumber(totalCredito)}</strong> &nbsp;|&nbsp;
+      ${diferencia === 0
+        ? '<span style="color: #16a34a;">✓ Balanceado</span>'
+        : `<span style="color: #dc2626;">Diferencia: $${this.formatNumber(Math.abs(diferencia))}</span>`}
+    `;
+  },
+
   // --- Reportes Contables ---
 
   async loadReportesContables() {
@@ -396,7 +715,7 @@ const Contabilidad = {
 
     body.innerHTML = html;
 
-    if (this.gruposReportes.some(g => g.reportes.some(r => r.filtroCuentaContable))) {
+    if (this.gruposReportes.some(g => g.reportes.some(r => r.filtroCuentaContable || r.requiereCuentaContable))) {
       await this.cargarCuentasContables();
     }
   },
@@ -413,8 +732,9 @@ const Contabilidad = {
     }
 
     document.querySelectorAll('[data-select-cuenta-contable]').forEach(select => {
+      const opcionTodas = select.dataset.requerida === 'true' ? '' : '<option value="">Todas las cuentas contables</option>';
       select.innerHTML = `
-        <option value="">Todas las cuentas contables</option>
+        ${opcionTodas}
         ${this.cuentasContables.map(c => `<option value="${c.id}">${c.codigo} - ${c.nombre}</option>`).join('')}
       `;
     });
@@ -436,8 +756,8 @@ const Contabilidad = {
             <input type="date" id="hasta_${idSufijo}" value="${hoy}">
           </div>
         ` : ''}
-        ${reporte.filtroCuentaContable ? `
-          <select id="cuentaContable_${idSufijo}" data-select-cuenta-contable style="width: 100%; margin-bottom: 8px;">
+        ${reporte.filtroCuentaContable || reporte.requiereCuentaContable ? `
+          <select id="cuentaContable_${idSufijo}" data-select-cuenta-contable data-requerida="${!!reporte.requiereCuentaContable}" style="width: 100%; margin-bottom: 8px;" ${reporte.requiereCuentaContable ? 'required' : ''}>
             <option value="">Todas las cuentas contables</option>
           </select>
         ` : ''}
@@ -463,8 +783,12 @@ const Contabilidad = {
       params.fechaHasta = document.getElementById(`hasta_${idSufijo}`).value;
     }
 
-    if (reporte.filtroCuentaContable) {
+    if (reporte.filtroCuentaContable || reporte.requiereCuentaContable) {
       params.cuentaContableId = document.getElementById(`cuentaContable_${idSufijo}`).value;
+      if (reporte.requiereCuentaContable && !params.cuentaContableId) {
+        App.toast('Debe seleccionar una cuenta contable', 'error');
+        return;
+      }
     }
 
     const tipo = reporte.tipo;
@@ -485,5 +809,15 @@ const Contabilidad = {
       console.error('Error:', error);
       App.toast('Error al generar el reporte', 'error');
     }
+  },
+
+  formatNumber(num) {
+    return Number(num || 0).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  },
+
+  formatDate(dateString) {
+    if (!dateString) return '-';
+    const [anio, mes, dia] = dateString.split(' ')[0].split('-');
+    return `${dia}/${mes}/${anio}`;
   }
 };

@@ -1,10 +1,12 @@
 const GastoRepository = require('../repositories/GastoRepository');
+const AsientoContableService = require('./AsientoContableService');
 
 const METODOS_PAGO_VALIDOS = ['Efectivo', 'Transferencia'];
 
 class GastoService {
   constructor(dbService) {
     this.repository = new GastoRepository(dbService);
+    this.asientoContableService = new AsientoContableService(dbService);
   }
 
   getAll(params) {
@@ -19,7 +21,7 @@ class GastoService {
     return this.repository.getTiposGasto();
   }
 
-  create(gastoData) {
+  create(gastoData, usuarioId = null) {
     if (!gastoData.fechaGasto) throw new Error('La fecha del gasto es obligatoria');
     if (!gastoData.concepto || !gastoData.concepto.trim()) throw new Error('El concepto es obligatorio');
     if (!gastoData.valor || gastoData.valor <= 0) throw new Error('El valor debe ser mayor a cero');
@@ -39,13 +41,15 @@ class GastoService {
         observaciones: gastoData.observaciones
       });
 
+      this.asientoContableService.generarDesdeGasto(gastoId, usuarioId);
+
       return gastoId;
     });
   }
 
-  // Nunca se elimina un gasto: se anula y se registra un movimiento que revierte
-  // el efecto en caja/banco, dejando ambos eventos visibles en el historial.
-  anular(id, motivoAnulacion) {
+  // Nunca se elimina un gasto: se anula y se registra un movimiento (y un asiento de reversión)
+  // que revierte el efecto en caja/banco, dejando ambos eventos visibles en el historial.
+  anular(id, motivoAnulacion, usuarioId = null) {
     const gasto = this.repository.findById(id);
     if (!gasto) throw new Error('Gasto no encontrado');
     if (gasto.estado === 'Anulado') throw new Error('El gasto ya está anulado');
@@ -64,6 +68,8 @@ class GastoService {
         fechaMovimiento: new Date().toISOString().split('T')[0],
         observaciones: motivoAnulacion
       });
+
+      this.asientoContableService.revertirPorReferencia('Gasto', id, motivoAnulacion, usuarioId);
     });
   }
 }

@@ -21,6 +21,9 @@ class MapeoContableService {
     const cuenta = this.planCuentaRepository.findById(cuentaContableId);
     if (!cuenta) throw new Error('La cuenta contable seleccionada no existe');
     if (!cuenta.activo) throw new Error('No se puede asignar una cuenta contable inactiva');
+    if (this.planCuentaRepository.tieneHijos(cuentaContableId)) {
+      throw new Error(`La cuenta "${cuenta.nombre}" es de agrupación (tiene subcuentas); seleccione una subcuenta imputable`);
+    }
 
     this.repository.upsert(modulo, concepto, cuentaContableId);
   }

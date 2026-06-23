@@ -1,4 +1,5 @@
 const ReciboRepository = require('../repositories/ReciboRepository');
+const AsientoContableService = require('./AsientoContableService');
 
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -21,6 +22,7 @@ function formatFecha(fechaString) {
 class ReciboService {
   constructor(dbService) {
     this.repository = new ReciboRepository(dbService);
+    this.asientoContableService = new AsientoContableService(dbService);
   }
 
   getAll(params) {
@@ -52,7 +54,7 @@ class ReciboService {
     return this.repository.getAnuladosFisicos();
   }
 
-  anular(id, motivoAnulacion) {
+  anular(id, motivoAnulacion, usuarioId = null) {
     const recibo = this.repository.findById(id);
     if (!recibo) throw new Error('Recibo no encontrado');
     if (recibo.estado === 'Anulado') throw new Error('El recibo ya está anulado');
@@ -71,6 +73,8 @@ class ReciboService {
         fechaMovimiento: new Date().toISOString().split('T')[0],
         observaciones: motivoAnulacion
       });
+
+      this.asientoContableService.revertirPorReferencia('Recibo', id, motivoAnulacion, usuarioId);
     });
   }
 

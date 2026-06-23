@@ -1,6 +1,7 @@
 const ReporteRepository = require('../repositories/ReporteRepository');
 const CajaRepository = require('../repositories/CajaRepository');
 const AuditoriaRepository = require('../repositories/AuditoriaRepository');
+const AsientoContableService = require('./AsientoContableService');
 
 function formatValorResumen(item) {
   return item.tipo === 'numero' ? String(item.valor) : `$${formatNumber(item.valor)}`;
@@ -38,6 +39,7 @@ class ReporteService {
     this.repository = new ReporteRepository(dbService);
     this.cajaRepository = new CajaRepository(dbService);
     this.auditoriaRepository = new AuditoriaRepository(dbService);
+    this.asientoContableService = new AsientoContableService(dbService);
   }
 
   // Devuelve un objeto estructurado { tipo: 'tabla'|'resumen', titulo, columnas, filas, secciones }
@@ -72,6 +74,10 @@ class ReporteService {
         return this.reporteFlujoCaja(params);
       case 'libro_diario':
         return this.reporteLibroDiario(params);
+      case 'libro_mayor':
+        return this.reporteLibroMayor(params);
+      case 'balance_prueba':
+        return this.reporteBalancePrueba(params);
       case 'informe_empalme':
         return this.reporteInformeEmpalme(params);
       default:
@@ -387,18 +393,84 @@ class ReporteService {
     };
   }
 
+  // Libro Diario real, de doble partida: una fila por línea de asiento (débito/crédito a una
+  // cuenta), agrupadas visualmente por número de asiento. Reemplaza la versión simplificada
+  // anterior (que solo listaba ingresos y egresos en una columna) ahora que cada gasto, recibo
+  // y traslado de caja/banco genera su asiento automáticamente.
   reporteLibroDiario({ fechaDesde = '', fechaHasta = '' } = {}) {
-    const filas = this.repository.getLibroDiario(fechaDesde, fechaHasta);
+    const filas = this.asientoContableService.getLibroDiario(fechaDesde, fechaHasta).map(f => ({
+      ...f,
+      cuenta: `${f.cuenta_codigo} - ${f.cuenta_nombre}`
+    }));
+
     return {
       tipo: 'tabla',
-      titulo: 'Libro Diario Simplificado',
+      titulo: 'Libro Diario',
+      columnas: [
+        { key: 'numero_asiento', label: 'Asiento No.' },
+        { key: 'fecha', label: 'Fecha', tipo: 'fecha' },
+        { key: 'concepto_asiento', label: 'Concepto' },
+        { key: 'cuenta', label: 'Cuenta Contable' },
+        { key: 'debito', label: 'Débito', tipo: 'moneda' },
+        { key: 'credito', label: 'Crédito', tipo: 'moneda' }
+      ],
+      filas,
+      totales: {
+        debito: filas.reduce((s, f) => s + f.debito, 0),
+        credito: filas.reduce((s, f) => s + f.credito, 0)
+      }
+    };
+  }
+
+  // Libro Mayor: el movimiento de UNA cuenta contable a lo largo del tiempo, con saldo corriente.
+  reporteLibroMayor({ cuentaContableId, fechaDesde = '', fechaHasta = '' } = {}) {
+    if (!cuentaContableId) throw new Error('Debe seleccionar una cuenta contable');
+
+    const { cuenta, movimientos, saldoFinal } = this.asientoContableService.getLibroMayor(cuentaContableId, fechaDesde, fechaHasta);
+
+    return {
+      tipo: 'tabla',
+      titulo: `Libro Mayor - ${cuenta.codigo} ${cuenta.nombre}`,
       columnas: [
         { key: 'fecha', label: 'Fecha', tipo: 'fecha' },
+        { key: 'numero_asiento', label: 'Asiento No.' },
         { key: 'concepto', label: 'Concepto' },
-        { key: 'tipo', label: 'Tipo' },
-        { key: 'valor', label: 'Valor', tipo: 'moneda' }
+        { key: 'debito', label: 'Débito', tipo: 'moneda' },
+        { key: 'credito', label: 'Crédito', tipo: 'moneda' },
+        { key: 'saldo', label: 'Saldo', tipo: 'moneda' }
       ],
-      filas
+      filas: movimientos,
+      totales: {
+        debito: movimientos.reduce((s, m) => s + m.debito, 0),
+        credito: movimientos.reduce((s, m) => s + m.credito, 0),
+        saldo: saldoFinal
+      }
+    };
+  }
+
+  // Balance de Prueba: por cada cuenta con movimiento, total débito/crédito y saldo según su
+  // naturaleza. Si el sistema de doble partida está bien construido, el total débito siempre
+  // debe coincidir con el total crédito (columna "Diferencia" en 0).
+  reporteBalancePrueba({ fechaDesde = '', fechaHasta = '' } = {}) {
+    const { filas, totalDebito, totalCredito } = this.asientoContableService.getBalancePrueba(fechaDesde, fechaHasta);
+
+    const filasConCuenta = filas.map(f => ({
+      ...f,
+      cuenta: `${f.codigo} - ${f.nombre}`
+    }));
+
+    return {
+      tipo: 'tabla',
+      titulo: 'Balance de Prueba',
+      columnas: [
+        { key: 'cuenta', label: 'Cuenta Contable' },
+        { key: 'tipo', label: 'Tipo' },
+        { key: 'total_debito', label: 'Total Débito', tipo: 'moneda' },
+        { key: 'total_credito', label: 'Total Crédito', tipo: 'moneda' },
+        { key: 'saldo', label: 'Saldo', tipo: 'moneda' }
+      ],
+      filas: filasConCuenta,
+      totales: { total_debito: totalDebito, total_credito: totalCredito }
     };
   }
 

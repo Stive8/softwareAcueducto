@@ -1,5 +1,6 @@
 const NuevoPuntoRepository = require('../repositories/NuevoPuntoRepository');
 const PropietarioRepository = require('../repositories/PropietarioRepository');
+const AsientoContableService = require('./AsientoContableService');
 
 const METODOS_PAGO_VALIDOS = ['Efectivo', 'Transferencia'];
 
@@ -7,6 +8,7 @@ class NuevoPuntoService {
   constructor(dbService) {
     this.repository = new NuevoPuntoRepository(dbService);
     this.propietarioRepository = new PropietarioRepository(dbService);
+    this.asientoContableService = new AsientoContableService(dbService);
   }
 
   getAll(params) {
@@ -40,7 +42,7 @@ class NuevoPuntoService {
   // Registra un abono a un punto nuevo: genera recibo (con la numeración consecutiva global)
   // y movimiento de caja/banco, igual que un pago de sostenimiento, según lo describe el negocio
   // ("Recibo 6500 - Detalle: Abono Punto Nuevo - Valor: 100.000").
-  registrarAbono({ nuevoPuntoId, monto, fechaAbono, metodoPago, observaciones }) {
+  registrarAbono({ nuevoPuntoId, monto, fechaAbono, metodoPago, observaciones }, usuarioId = null) {
     if (!nuevoPuntoId) throw new Error('El punto nuevo es obligatorio');
     if (!monto || monto <= 0) throw new Error('El monto del abono debe ser mayor a cero');
     if (!fechaAbono) throw new Error('La fecha del abono es obligatoria');
@@ -91,6 +93,8 @@ class NuevoPuntoService {
         referenciaTipo: 'Recibo',
         fechaMovimiento: fechaAbono
       });
+
+      this.asientoContableService.generarDesdeRecibo(reciboId, usuarioId);
 
       return { reciboId, numeroRecibo, ...estadoActualizado };
     });

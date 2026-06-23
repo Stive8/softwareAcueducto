@@ -232,30 +232,6 @@ class ReporteRepository {
     return total;
   }
 
-  getLibroDiario(fechaDesde = '', fechaHasta = '') {
-    let queryIngresos = `
-      SELECT r.fecha_recibo as fecha, ('Recibo No. ' || r.numero_recibo || ' - ' || c.codigo) as concepto,
-             'Ingreso' as tipo, r.total as valor
-      FROM recibos r
-      INNER JOIN cuentas c ON c.id = r.cuenta_id
-      WHERE r.estado != 'Anulado'
-    `;
-    let queryGastos = `
-      SELECT fecha_gasto as fecha, concepto, 'Egreso' as tipo, valor
-      FROM gastos
-      WHERE estado != 'Anulado'
-    `;
-    const paramsIngresos = [];
-    const paramsGastos = [];
-
-    if (fechaDesde) { queryIngresos += ' AND r.fecha_recibo >= ?'; paramsIngresos.push(fechaDesde); queryGastos += ' AND fecha_gasto >= ?'; paramsGastos.push(fechaDesde); }
-    if (fechaHasta) { queryIngresos += ' AND r.fecha_recibo <= ?'; paramsIngresos.push(fechaHasta); queryGastos += ' AND fecha_gasto <= ?'; paramsGastos.push(fechaHasta); }
-
-    const ingresos = this.db.prepare(queryIngresos).all(...paramsIngresos);
-    const gastos = this.db.prepare(queryGastos).all(...paramsGastos);
-
-    return [...ingresos, ...gastos].sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
-  }
 }
 
 module.exports = ReporteRepository;

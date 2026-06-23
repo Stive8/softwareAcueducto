@@ -115,6 +115,14 @@ contextBridge.exposeInMainWorld('api', {
     getAll: (modulo) => ipcRenderer.invoke('mapeocontable:getAll', modulo),
     actualizar: (modulo, concepto, cuentaContableId) => ipcRenderer.invoke('mapeocontable:actualizar', modulo, concepto, cuentaContableId)
   },
+  asientos: {
+    getAll: (params) => ipcRenderer.invoke('asientos:getAll', params),
+    getById: (id) => ipcRenderer.invoke('asientos:getById', id),
+    crearManual: (datos) => ipcRenderer.invoke('asientos:crearManual', datos),
+    revertir: (id, motivo) => ipcRenderer.invoke('asientos:revertir', id, motivo),
+    getLibroMayor: (cuentaContableId, fechaDesde, fechaHasta) => ipcRenderer.invoke('asientos:getLibroMayor', cuentaContableId, fechaDesde, fechaHasta),
+    getBalancePrueba: (fechaDesde, fechaHasta) => ipcRenderer.invoke('asientos:getBalancePrueba', fechaDesde, fechaHasta)
+  },
   devtools: {
     tieneDatosOperativos: () => ipcRenderer.invoke('devtools:tieneDatosOperativos'),
     cargarDatosEjemplo: () => ipcRenderer.invoke('devtools:cargarDatosEjemplo'),
