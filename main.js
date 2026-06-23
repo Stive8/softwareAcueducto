@@ -21,6 +21,7 @@ const AuditoriaService = require('./src/services/AuditoriaService');
 const PlanCuentaService = require('./src/services/PlanCuentaService');
 const MapeoContableService = require('./src/services/MapeoContableService');
 const AsientoContableService = require('./src/services/AsientoContableService');
+const CloudBackupOrchestratorService = require('./src/services/CloudBackupOrchestratorService');
 
 let mainWindow;
 let dbService;
@@ -43,6 +44,7 @@ let auditoriaService;
 let planCuentaService;
 let mapeoContableService;
 let asientoContableService;
+let cloudBackupService;
 
 // Sesión activa del único usuario que puede estar usando esta app de escritorio a la vez.
 // No es solo un dato de UI: la capa de permisos de abajo (envolverHandle) la usa para decidir
@@ -62,7 +64,18 @@ const CANALES_SOLO_ADMIN = new Set([
   'auditoria:getAll',
   'plancuentas:create', 'plancuentas:update', 'plancuentas:toggleActivo',
   'mapeocontable:actualizar',
-  'asientos:crearManual', 'asientos:revertir'
+  'asientos:crearManual', 'asientos:revertir',
+  'cloudBackup:respaldarAhora'
+]);
+
+// Excepciones puntuales a "Consulta no puede escribir": acciones que, aunque cambian estado
+// local, su verdadera barrera de seguridad es otra. Conectar/desconectar una cuenta de Google es
+// un dato de ESTE equipo (no algo compartido que requiera ser Administrador), y "traer/actualizar
+// desde la nube" está deliberadamente abierto a cualquier rol porque el control real de acceso es
+// si esa cuenta de Google tiene permiso sobre la carpeta de Drive — algo que se administra desde
+// fuera de la app, no con los roles internos. Ver ARQUITECTURA.md, sección de respaldo en la nube.
+const CANALES_PERMITIDOS_CONSULTA = new Set([
+  'cloudBackup:conectar', 'cloudBackup:desconectar', 'cloudBackup:actualizarDesdeNube'
 ]);
 
 function esCanalDeLectura(canal) {
@@ -104,7 +117,7 @@ function envolverHandle(canal, fn) {
     }
 
     const esLectura = esCanalDeLectura(canal);
-    if (!esLectura && sesionActual.rol === 'Consulta') {
+    if (!esLectura && !CANALES_PERMITIDOS_CONSULTA.has(canal) && sesionActual.rol === 'Consulta') {
       return { success: false, error: 'Su rol de Consulta solo permite ver información, no modificarla' };
     }
 
@@ -172,6 +185,7 @@ app.whenReady().then(() => {
   planCuentaService = new PlanCuentaService(dbService);
   mapeoContableService = new MapeoContableService(dbService);
   asientoContableService = new AsientoContableService(dbService);
+  cloudBackupService = new CloudBackupOrchestratorService(dbService, baseDirDb);
 
   setupIpcHandlers();
   createWindow();
@@ -1066,6 +1080,98 @@ function setupIpcHandlers() {
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
+    }
+  });
+
+  // Respaldo en la Nube (Google Drive)
+  envolverHandle('cloudBackup:getEstado', async () => {
+    try {
+      return { success: true, data: cloudBackupService.getEstado() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cloudBackup:getRespaldosDisponibles', async () => {
+    try {
+      return { success: true, data: await cloudBackupService.getRespaldosDisponibles() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cloudBackup:conectar', async () => {
+    try {
+      await cloudBackupService.conectar();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cloudBackup:desconectar', async () => {
+    try {
+      cloudBackupService.desconectar();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cloudBackup:respaldarAhora', async (event, { forzar = false } = {}) => {
+    try {
+      const resultado = await cloudBackupService.respaldarAhora(backupService, { forzar });
+      return { success: true, data: resultado };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Descarga el respaldo más reciente de la nube y, tras confirmación del usuario, reemplaza la
+  // base de datos local (mismo patrón que backup:restaurar): cierra la conexión, copia el
+  // archivo, limpia residuales de WAL y reinicia la app.
+  envolverHandle('cloudBackup:actualizarDesdeNube', async () => {
+    let archivoTemporal;
+    try {
+      const { archivo, rutaLocal } = await cloudBackupService.descargarUltimoRespaldo();
+      archivoTemporal = rutaLocal;
+      backupService.validarArchivoRestauracion(rutaLocal);
+
+      const secuenciaRemota = Number(archivo.properties?.secuencia || 0);
+      const secuenciaLocal = cloudBackupService.getEstado().secuenciaLocal;
+      const advertenciaConflicto = secuenciaRemota < secuenciaLocal
+        ? '\n\nAviso: este respaldo de la nube parece ser MÁS VIEJO que los datos que ya tienes en este equipo. Si continúas, podrías perder información reciente.'
+        : '';
+
+      const confirmacion = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['Cancelar', 'Actualizar y reiniciar'],
+        defaultId: 0,
+        cancelId: 0,
+        title: 'Confirmar actualización desde la nube',
+        message: `Esto reemplazará todos los datos actuales con el respaldo más reciente de Google Drive (subido desde "${archivo.properties?.nombreEquipo || 'otro equipo'}" el ${archivo.createdTime}). La aplicación se reiniciará.${advertenciaConflicto}\n\n¿Desea continuar?`
+      });
+
+      if (confirmacion.response !== 1) {
+        return { success: false, canceled: true };
+      }
+
+      const dbPath = dbService.getDbPath();
+      dbService.close();
+
+      fs.copyFileSync(rutaLocal, dbPath);
+      for (const ext of ['-wal', '-shm']) {
+        const residual = dbPath + ext;
+        if (fs.existsSync(residual)) fs.unlinkSync(residual);
+      }
+
+      app.relaunch();
+      app.exit();
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    } finally {
+      if (archivoTemporal && fs.existsSync(archivoTemporal)) fs.unlinkSync(archivoTemporal);
     }
   });
 

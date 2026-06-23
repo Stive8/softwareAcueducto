@@ -2,7 +2,8 @@ const ConfiguracionRepository = require('../repositories/ConfiguracionRepository
 
 const CLAVES_EDITABLES = [
   'nombre_asociacion', 'nit', 'direccion', 'telefono', 'email',
-  'consecutivo_recibos', 'valor_nuevo_punto', 'saldo_caja_inicial', 'saldo_banco_inicial'
+  'consecutivo_recibos', 'valor_nuevo_punto', 'saldo_caja_inicial', 'saldo_banco_inicial',
+  'respaldo_nube_nombre_equipo', 'respaldo_nube_dias_retencion'
 ];
 
 class ConfiguracionService {

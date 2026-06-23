@@ -6,3 +6,4 @@ dist/
 *.db-wal
 .env
 .claude/settings.local.json
+config/google-credentials.json

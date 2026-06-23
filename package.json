@@ -21,7 +21,8 @@
   "dependencies": {
     "better-sqlite3": "^12.11.1",
     "chart.js": "^4.4.1",
-    "exceljs": "^4.4.0"
+    "exceljs": "^4.4.0",
+    "googleapis": "^173.0.0"
   },
   "build": {
     "appId": "com.acueducto.admin",
@@ -47,7 +48,9 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ],
       "icon": "assets/icon.ico"

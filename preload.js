@@ -129,5 +129,13 @@ contextBridge.exposeInMainWorld('api', {
     tieneDatosOperativos: () => ipcRenderer.invoke('devtools:tieneDatosOperativos'),
     cargarDatosEjemplo: () => ipcRenderer.invoke('devtools:cargarDatosEjemplo'),
     eliminarDatosOperativos: () => ipcRenderer.invoke('devtools:eliminarDatosOperativos')
+  },
+  cloudBackup: {
+    getEstado: () => ipcRenderer.invoke('cloudBackup:getEstado'),
+    getRespaldosDisponibles: () => ipcRenderer.invoke('cloudBackup:getRespaldosDisponibles'),
+    conectar: () => ipcRenderer.invoke('cloudBackup:conectar'),
+    desconectar: () => ipcRenderer.invoke('cloudBackup:desconectar'),
+    respaldarAhora: (opciones) => ipcRenderer.invoke('cloudBackup:respaldarAhora', opciones),
+    actualizarDesdeNube: () => ipcRenderer.invoke('cloudBackup:actualizarDesdeNube')
   }
 });
