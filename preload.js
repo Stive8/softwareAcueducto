@@ -121,7 +121,8 @@ contextBridge.exposeInMainWorld('api', {
   },
   mapeoContable: {
     getAll: (modulo) => ipcRenderer.invoke('mapeocontable:getAll', modulo),
-    actualizar: (modulo, concepto, cuentaContableId) => ipcRenderer.invoke('mapeocontable:actualizar', modulo, concepto, cuentaContableId)
+    actualizar: (modulo, concepto, cuentaContableId) => ipcRenderer.invoke('mapeocontable:actualizar', modulo, concepto, cuentaContableId),
+    crear: (modulo, concepto, cuentaContableId) => ipcRenderer.invoke('mapeocontable:crear', modulo, concepto, cuentaContableId)
   },
   asientos: {
     getAll: (params) => ipcRenderer.invoke('asientos:getAll', params),

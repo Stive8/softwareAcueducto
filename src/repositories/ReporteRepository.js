@@ -72,10 +72,13 @@ class ReporteRepository {
 
   getHistorialGastos(fechaDesde = '', fechaHasta = '', cuentaContableId = '') {
     let query = `
-      SELECT g.fecha_gasto, g.concepto, g.tipo_gasto, g.proveedor, g.valor, g.metodo_pago, g.estado,
+      SELECT g.fecha_gasto, g.concepto, g.tipo_gasto,
+             COALESCE(t.nombre_razon_social, g.proveedor) as proveedor,
+             g.valor, g.metodo_pago, g.estado,
              pc.codigo as cuenta_contable_codigo, pc.nombre as cuenta_contable_nombre
       FROM gastos g
       LEFT JOIN plan_cuentas pc ON pc.id = g.cuenta_contable_id
+      LEFT JOIN terceros t ON t.id = g.tercero_id
       WHERE 1=1
     `;
     const params = [];

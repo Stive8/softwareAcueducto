@@ -277,7 +277,11 @@ const Gastos = {
   // crear un proveedor nuevo desde aquí mismo sin perder el resto de los datos del gasto.
   async showFormModal(prefill = null) {
     const hoy = new Date().toISOString().split('T')[0];
-    const tipos = await this.getTiposGasto();
+
+    const mapeoResponse = await window.api.mapeoContable.getAll('Gasto');
+    const tiposDisponibles = mapeoResponse.success
+      ? mapeoResponse.data.filter(m => m.concepto !== '__default__').sort((a, b) => a.concepto.localeCompare(b.concepto))
+      : [];
 
     const proveedoresResponse = await window.api.terceros.getAll({ soloActivos: true, soloProveedores: true });
     const proveedores = proveedoresResponse.success ? proveedoresResponse.data : [];
@@ -301,11 +305,12 @@ const Gastos = {
         </div>
 
         <div class="form-group">
-          <label for="tipo_gasto">Tipo de Gasto</label>
-          <input type="text" id="tipo_gasto" name="tipo_gasto" list="tiposGastoSugeridos" value="${prefill?.tipo_gasto || ''}" placeholder="Ej: Administración, Fontanero, Mantenimiento">
-          <datalist id="tiposGastoSugeridos">
-            ${['Administración', 'Fontanero', 'Mantenimiento', ...tipos].filter((v, i, arr) => arr.indexOf(v) === i).map(t => `<option value="${t}">`).join('')}
-          </datalist>
+          <label for="tipo_gasto">Tipo de Gasto <span style="color: #ef4444;">*</span></label>
+          <select id="tipo_gasto" name="tipo_gasto" required>
+            <option value="">Seleccione...</option>
+            ${tiposDisponibles.map(t => `<option value="${t.concepto}" ${prefill?.tipo_gasto === t.concepto ? 'selected' : ''}>${t.concepto} (${t.cuenta_codigo} - ${t.cuenta_nombre})</option>`).join('')}
+          </select>
+          <small style="color: #64748b; font-size: 0.875rem;">¿No encuentras el tipo que necesitas? Agrégalo en Contabilidad → Mapeo de Conceptos.</small>
         </div>
 
         <div class="form-group">

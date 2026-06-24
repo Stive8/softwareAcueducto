@@ -65,7 +65,7 @@ const CANALES_SOLO_ADMIN = new Set([
   'devtools:cargarDatosEjemplo', 'devtools:eliminarDatosOperativos',
   'auditoria:getAll',
   'plancuentas:create', 'plancuentas:update', 'plancuentas:toggleActivo',
-  'mapeocontable:actualizar',
+  'mapeocontable:actualizar', 'mapeocontable:crear',
   'asientos:crearManual', 'asientos:revertir',
   'cloudBackup:respaldarAhora'
 ]);
@@ -627,6 +627,15 @@ function setupIpcHandlers() {
   envolverHandle('mapeocontable:actualizar', async (event, modulo, concepto, cuentaContableId) => {
     try {
       mapeoContableService.actualizar(modulo, concepto, cuentaContableId);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('mapeocontable:crear', async (event, modulo, concepto, cuentaContableId) => {
+    try {
+      mapeoContableService.crear(modulo, concepto, cuentaContableId);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };

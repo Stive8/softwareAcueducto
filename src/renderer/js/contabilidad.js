@@ -281,14 +281,18 @@ const Contabilidad = {
   async loadMapeo() {
     const body = document.getElementById('contabilidadBody');
     body.innerHTML = `
-      <div style="padding: 16px 20px;">
+      <div style="padding: 16px 20px; display: flex; justify-content: space-between; align-items: flex-start; gap: 16px;">
         <p style="color: #64748b; font-size: 0.875rem; margin: 0;">
           Define a qué cuenta contable corresponde cada tipo de gasto, concepto de recibo y origen de movimiento de caja/banco.
-          Esto es lo que más adelante permitirá generar asientos contables automáticos.
+          Esto es lo que permite generar los asientos contables automáticos. El "Tipo de Gasto" del formulario de Gastos solo
+          ofrece para elegir los que aparecen aquí.
         </p>
+        <button class="btn btn-primary" id="btnAgregarTipoGasto" style="white-space: nowrap;">+ Agregar Tipo de Gasto</button>
       </div>
       <div id="mapeoTableContent"><p style="padding: 24px; text-align: center;">Cargando...</p></div>
     `;
+
+    document.getElementById('btnAgregarTipoGasto').addEventListener('click', () => this.showAgregarTipoGastoModal());
 
     try {
       const [mapeoResponse, imputablesResponse] = await Promise.all([
@@ -386,6 +390,65 @@ const Contabilidad = {
       } catch (error) {
         console.error('Error:', error);
         document.getElementById('formError').innerHTML = '<div class="error-message">Error al guardar el mapeo</div>';
+      }
+    });
+  },
+
+  // Por ahora solo para módulo "Gasto": los otros dos (RecibosDetalle, Movimiento) tienen una
+  // lista fija y pequeña de conceptos que ya cubre todos los casos reales, no hace falta poder
+  // agregarles más desde aquí.
+  showAgregarTipoGastoModal() {
+    const imputables = this.imputablesCache || [];
+    const porTipo = {};
+    imputables.forEach(c => {
+      if (!porTipo[c.tipo]) porTipo[c.tipo] = [];
+      porTipo[c.tipo].push(c);
+    });
+
+    const content = `
+      <div class="modal-header"><h2>Agregar Tipo de Gasto</h2></div>
+      <div id="formError"></div>
+      <form id="agregarTipoGastoForm">
+        <div class="form-group">
+          <label for="nuevoConcepto">Nombre del Tipo de Gasto <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="nuevoConcepto" placeholder="Ej: Seguros, Capacitaciones" required>
+        </div>
+        <div class="form-group">
+          <label for="nuevaCuentaContableId">Cuenta Contable <span style="color: #ef4444;">*</span></label>
+          <select id="nuevaCuentaContableId" required>
+            ${Object.keys(porTipo).map(tipo => `
+              <optgroup label="${tipo}">
+                ${porTipo[tipo].map(c => `<option value="${c.id}">${c.codigo} - ${c.nombre}</option>`).join('')}
+              </optgroup>
+            `).join('')}
+          </select>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Agregar</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('agregarTipoGastoForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const concepto = document.getElementById('nuevoConcepto').value.trim();
+      const cuentaContableId = parseInt(document.getElementById('nuevaCuentaContableId').value, 10);
+
+      try {
+        const response = await window.api.mapeoContable.crear('Gasto', concepto, cuentaContableId);
+        if (response.success) {
+          App.closeModal();
+          this.loadMapeo();
+          App.toast('Tipo de gasto agregado con éxito');
+        } else {
+          document.getElementById('formError').innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('formError').innerHTML = '<div class="error-message">Error al agregar el tipo de gasto</div>';
       }
     });
   },
@@ -755,6 +818,27 @@ const Contabilidad = {
     if (this.gruposReportes.some(g => g.reportes.some(r => r.filtroCuentaContable || r.requiereCuentaContable || r.rangoCuentaContable))) {
       await this.cargarCuentasContables();
     }
+
+    if (this.gruposReportes.some(g => g.reportes.some(r => r.filtroTercero))) {
+      await this.cargarTercerosParaFiltro();
+    }
+  },
+
+  // Sugerencias (datalist) para el filtro de tercero de los reportes que lo soportan: sigue
+  // siendo texto libre (el backend busca por coincidencia parcial de nombre o identificación,
+  // ver AsientoContableRepository.getBalancePruebaPorTercero), pero así se evitan errores de
+  // tipeo al escribir el nombre o identificación de un tercero que ya está en el catálogo.
+  async cargarTercerosParaFiltro() {
+    try {
+      const response = await window.api.terceros.getAll({});
+      const terceros = response.success ? response.data : [];
+      const datalist = document.getElementById('tercerosSugeridos');
+      if (datalist) {
+        datalist.innerHTML = terceros.map(t => `<option value="${t.nombre_razon_social}">${t.numero_identificacion}</option>`).join('');
+      }
+    } catch (error) {
+      console.error('Error al cargar terceros para el filtro:', error);
+    }
   },
 
   // Cuentas contables imputables, para los selects de filtro "Cuenta Contable" de los reportes
@@ -810,7 +894,8 @@ const Contabilidad = {
           </div>
         ` : ''}
         ${reporte.filtroTercero ? `
-          <input type="text" id="tercero_${idSufijo}" placeholder="Identificación o nombre del tercero (opcional)" style="width: 100%; padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px;">
+          <input type="text" id="tercero_${idSufijo}" list="tercerosSugeridos" placeholder="Identificación o nombre del tercero (opcional)" style="width: 100%; padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px;">
+          <datalist id="tercerosSugeridos"></datalist>
         ` : ''}
         <div class="reporte-card-actions">
           ${reporte.previaPantalla ? `<button class="btn btn-primary" onclick="Contabilidad.buscarReporte('${idSufijo}')">Buscar</button>` : ''}

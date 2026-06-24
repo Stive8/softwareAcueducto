@@ -79,6 +79,13 @@ class GastoRepository {
     `).all().map(r => r.tipo_gasto);
   }
 
+  // El formulario ya solo ofrece elegir de esta lista, pero se valida también del lado del
+  // servidor (defensa en profundidad) para que un gasto nunca quede con un tipo inventado que
+  // caería en "Gastos Diversos" sin que nadie se dé cuenta.
+  tipoGastoEsValido(tipoGasto) {
+    return !!this.db.prepare(`SELECT 1 FROM mapeo_conceptos_contables WHERE modulo = 'Gasto' AND concepto = ?`).get(tipoGasto);
+  }
+
   // Resuelve a qué cuenta contable corresponde un concepto, según el mapeo configurable
   // (mapeo_conceptos_contables). Si no hay un mapeo específico, usa el "__default__" del módulo.
   // Preparación para una futura contabilidad de doble partida: por ahora solo se guarda el dato,

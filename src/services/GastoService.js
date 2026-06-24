@@ -24,6 +24,8 @@ class GastoService {
   create(gastoData, usuarioId = null) {
     if (!gastoData.fechaGasto) throw new Error('La fecha del gasto es obligatoria');
     if (!gastoData.concepto || !gastoData.concepto.trim()) throw new Error('El concepto es obligatorio');
+    if (!gastoData.tipoGasto || !gastoData.tipoGasto.trim()) throw new Error('El tipo de gasto es obligatorio (define la cuenta contable)');
+    if (!this.repository.tipoGastoEsValido(gastoData.tipoGasto)) throw new Error('El tipo de gasto no es válido; selecciónelo de la lista');
     if (!gastoData.valor || gastoData.valor <= 0) throw new Error('El valor debe ser mayor a cero');
     if (!METODOS_PAGO_VALIDOS.includes(gastoData.metodoPago)) throw new Error('Método de pago inválido');
 
