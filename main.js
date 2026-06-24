@@ -22,6 +22,7 @@ const PlanCuentaService = require('./src/services/PlanCuentaService');
 const MapeoContableService = require('./src/services/MapeoContableService');
 const AsientoContableService = require('./src/services/AsientoContableService');
 const CloudBackupOrchestratorService = require('./src/services/CloudBackupOrchestratorService');
+const TerceroService = require('./src/services/TerceroService');
 
 let mainWindow;
 let dbService;
@@ -29,6 +30,7 @@ let cuentaService;
 let dashboardService;
 let propietarioService;
 let categoriaService;
+let terceroService;
 let pagoService;
 let reciboService;
 let gastoService;
@@ -191,6 +193,7 @@ app.whenReady().then(() => {
   dashboardService = new DashboardService(dbService);
   propietarioService = new PropietarioService(dbService);
   categoriaService = new CategoriaService(dbService);
+  terceroService = new TerceroService(dbService);
   pagoService = new PagoService(dbService);
   reciboService = new ReciboService(dbService);
   gastoService = new GastoService(dbService);
@@ -463,6 +466,54 @@ function setupIpcHandlers() {
   envolverHandle('categorias:getTarifaVigente', async (event, categoriaId, fecha) => {
     try {
       return { success: true, data: categoriaService.getTarifaVigente(categoriaId, fecha) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Terceros (proveedores y otros aliados; los clientes siguen siendo Propietarios)
+  envolverHandle('terceros:getAll', async (event, params) => {
+    try {
+      return { success: true, data: terceroService.getAll(params) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('terceros:getById', async (event, id) => {
+    try {
+      const tercero = terceroService.getById(id);
+      if (!tercero) {
+        return { success: false, error: 'Tercero no encontrado' };
+      }
+      return { success: true, data: tercero };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('terceros:create', async (event, terceroData) => {
+    try {
+      const id = terceroService.create(terceroData);
+      return { success: true, data: { id } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('terceros:update', async (event, id, terceroData) => {
+    try {
+      terceroService.update(id, terceroData);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('terceros:toggleActivo', async (event, id) => {
+    try {
+      terceroService.toggleActivo(id);
+      return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
     }

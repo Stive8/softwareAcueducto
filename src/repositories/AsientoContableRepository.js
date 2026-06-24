@@ -19,9 +19,12 @@ class AsientoContableRepository {
 
   obtenerGastoParaAsiento(gastoId) {
     return this.db.prepare(`
-      SELECT id, fecha_gasto as fecha, concepto, valor, metodo_pago, cuenta_contable_id,
-        proveedor as tercero_nombre, nit_cedula as tercero_identificacion
-      FROM gastos WHERE id = ?
+      SELECT g.id, g.fecha_gasto as fecha, g.concepto, g.valor, g.metodo_pago, g.cuenta_contable_id,
+        COALESCE(t.nombre_razon_social, g.proveedor) as tercero_nombre,
+        COALESCE(t.numero_identificacion, g.nit_cedula) as tercero_identificacion
+      FROM gastos g
+      LEFT JOIN terceros t ON t.id = g.tercero_id
+      WHERE g.id = ?
     `).get(gastoId);
   }
 

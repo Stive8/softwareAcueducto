@@ -3,47 +3,62 @@ class GastoRepository {
     this.db = dbService.getDb();
   }
 
+  // proveedor/nit_cedula: COALESCE entre el tercero enlazado (gastos nuevos) y el texto libre
+  // histórico (gastos de antes del catálogo de Terceros), para que la pantalla no tenga que
+  // saber cuál de los dos aplica.
+  _selectConTercero() {
+    return `
+      SELECT g.id, g.fecha_gasto, g.concepto, g.tipo_gasto,
+        COALESCE(t.nombre_razon_social, g.proveedor) as proveedor,
+        COALESCE(t.numero_identificacion, g.nit_cedula) as nit_cedula,
+        g.valor, g.metodo_pago, g.observaciones, g.ruta_soporte, g.fecha_creacion,
+        g.estado, g.fecha_anulacion, g.motivo_anulacion, g.cuenta_contable_id, g.tercero_id
+      FROM gastos g
+      LEFT JOIN terceros t ON t.id = g.tercero_id
+    `;
+  }
+
   findAll(params = {}) {
     const { page = 1, limit = 10, search = '', tipoGasto = '', proveedor = '', fechaDesde = '', fechaHasta = '', estado = '' } = params;
     const offset = (page - 1) * limit;
 
-    let query = 'SELECT * FROM gastos WHERE 1=1';
+    let query = this._selectConTercero() + ' WHERE 1=1';
     const queryParams = [];
 
     if (search) {
-      query += ' AND (concepto LIKE ? OR proveedor LIKE ?)';
-      queryParams.push(`%${search}%`, `%${search}%`);
+      query += ' AND (g.concepto LIKE ? OR g.proveedor LIKE ? OR t.nombre_razon_social LIKE ?)';
+      queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
     }
 
     if (tipoGasto) {
-      query += ' AND tipo_gasto = ?';
+      query += ' AND g.tipo_gasto = ?';
       queryParams.push(tipoGasto);
     }
 
     if (proveedor) {
-      query += ' AND proveedor LIKE ?';
-      queryParams.push(`%${proveedor}%`);
+      query += ' AND (g.proveedor LIKE ? OR t.nombre_razon_social LIKE ?)';
+      queryParams.push(`%${proveedor}%`, `%${proveedor}%`);
     }
 
     if (fechaDesde) {
-      query += ' AND fecha_gasto >= ?';
+      query += ' AND g.fecha_gasto >= ?';
       queryParams.push(fechaDesde);
     }
 
     if (fechaHasta) {
-      query += ' AND fecha_gasto <= ?';
+      query += ' AND g.fecha_gasto <= ?';
       queryParams.push(fechaHasta);
     }
 
     if (estado) {
-      query += ' AND estado = ?';
+      query += ' AND g.estado = ?';
       queryParams.push(estado);
     }
 
-    const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');
+    const countQuery = `SELECT COUNT(*) as total FROM (${query})`;
     const total = this.db.prepare(countQuery).get(...queryParams).total;
 
-    query += ' ORDER BY fecha_gasto DESC, id DESC LIMIT ? OFFSET ?';
+    query += ' ORDER BY g.fecha_gasto DESC, g.id DESC LIMIT ? OFFSET ?';
     queryParams.push(limit, offset);
 
     const data = this.db.prepare(query).all(...queryParams);
@@ -55,7 +70,7 @@ class GastoRepository {
   }
 
   findById(id) {
-    return this.db.prepare('SELECT * FROM gastos WHERE id = ?').get(id);
+    return this.db.prepare(this._selectConTercero() + ' WHERE g.id = ?').get(id);
   }
 
   getTiposGasto() {
@@ -84,14 +99,13 @@ class GastoRepository {
     const cuentaContableId = this.resolverCuentaContable('Gasto', gasto.tipoGasto || '__default__');
 
     const result = this.db.prepare(`
-      INSERT INTO gastos (fecha_gasto, concepto, tipo_gasto, proveedor, nit_cedula, valor, metodo_pago, observaciones, ruta_soporte, cuenta_contable_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO gastos (fecha_gasto, concepto, tipo_gasto, tercero_id, valor, metodo_pago, observaciones, ruta_soporte, cuenta_contable_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       gasto.fechaGasto,
       gasto.concepto,
       gasto.tipoGasto || null,
-      gasto.proveedor || null,
-      gasto.nitCedula || null,
+      gasto.terceroId || null,
       gasto.valor,
       gasto.metodoPago,
       gasto.observaciones || null,

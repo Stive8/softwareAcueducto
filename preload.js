@@ -36,6 +36,13 @@ contextBridge.exposeInMainWorld('api', {
     asignarACuenta: (cuentaId, categoriaId, fechaInicio, observaciones) => ipcRenderer.invoke('categorias:asignarACuenta', cuentaId, categoriaId, fechaInicio, observaciones),
     getHistorialCategoriasCuenta: (cuentaId) => ipcRenderer.invoke('categorias:getHistorialCategoriasCuenta', cuentaId)
   },
+  terceros: {
+    getAll: (params) => ipcRenderer.invoke('terceros:getAll', params),
+    getById: (id) => ipcRenderer.invoke('terceros:getById', id),
+    create: (terceroData) => ipcRenderer.invoke('terceros:create', terceroData),
+    update: (id, terceroData) => ipcRenderer.invoke('terceros:update', id, terceroData),
+    toggleActivo: (id) => ipcRenderer.invoke('terceros:toggleActivo', id)
+  },
   pagos: {
     getCuentasConEstado: (params) => ipcRenderer.invoke('pagos:getCuentasConEstado', params),
     getEstadoCuenta: (cuentaId) => ipcRenderer.invoke('pagos:getEstadoCuenta', cuentaId),
