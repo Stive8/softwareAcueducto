@@ -61,7 +61,10 @@ class PlanCuentaRepository {
     const enGastos = this.db.prepare('SELECT COUNT(*) as c FROM gastos WHERE cuenta_contable_id = ?').get(id).c;
     const enRecibos = this.db.prepare('SELECT COUNT(*) as c FROM recibo_detalles WHERE cuenta_contable_id = ?').get(id).c;
     const enMovimientos = this.db.prepare('SELECT COUNT(*) as c FROM movimientos WHERE cuenta_contable_id = ?').get(id).c;
-    return (enGastos + enRecibos + enMovimientos) > 0;
+    // movimientos_contables además de los tres anteriores: una Nota Contable manual puede tocar
+    // esta cuenta sin pasar por gastos/recibos/movimientos (p.ej. un ajuste que no toca Caja/Banco).
+    const enMovimientosContables = this.db.prepare('SELECT COUNT(*) as c FROM movimientos_contables WHERE cuenta_id = ?').get(id).c;
+    return (enGastos + enRecibos + enMovimientos + enMovimientosContables) > 0;
   }
 
   create(cuenta) {

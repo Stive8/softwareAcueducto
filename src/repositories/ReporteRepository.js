@@ -49,7 +49,7 @@ class ReporteRepository {
   // recibo que cobró varios meses sale en una sola fila, y se incluyen también los renglones que
   // no son meses de sostenimiento (abono a conexión, aplicación de saldo a favor), que antes no
   // aparecían en este reporte porque la consulta solo miraba pago_periodos.
-  getHistorialPagos(fechaDesde = '', fechaHasta = '', cuentaContableId = '') {
+  getHistorialPagos(fechaDesde = '', fechaHasta = '', cuentaContableId = '', tipoCuenta = '') {
     let query = `
       SELECT c.codigo as cuenta, c.direccion, p.nombre_completo as propietario,
              rd.concepto, rd.valor, r.fecha_recibo as fecha_pago, r.numero_recibo,
@@ -66,11 +66,12 @@ class ReporteRepository {
     if (fechaDesde) { query += ' AND r.fecha_recibo >= ?'; params.push(fechaDesde); }
     if (fechaHasta) { query += ' AND r.fecha_recibo <= ?'; params.push(fechaHasta); }
     if (cuentaContableId) { query += ' AND rd.cuenta_contable_id = ?'; params.push(cuentaContableId); }
+    if (tipoCuenta) { query += ' AND pc.tipo = ?'; params.push(tipoCuenta); }
     query += ' ORDER BY r.fecha_recibo DESC, r.numero_recibo DESC';
     return this.db.prepare(query).all(...params);
   }
 
-  getHistorialGastos(fechaDesde = '', fechaHasta = '', cuentaContableId = '') {
+  getHistorialGastos(fechaDesde = '', fechaHasta = '', cuentaContableId = '', tipoCuenta = '') {
     let query = `
       SELECT g.fecha_gasto, g.concepto, g.tipo_gasto,
              COALESCE(t.nombre_razon_social, g.proveedor) as proveedor,
@@ -85,6 +86,7 @@ class ReporteRepository {
     if (fechaDesde) { query += ' AND g.fecha_gasto >= ?'; params.push(fechaDesde); }
     if (fechaHasta) { query += ' AND g.fecha_gasto <= ?'; params.push(fechaHasta); }
     if (cuentaContableId) { query += ' AND g.cuenta_contable_id = ?'; params.push(cuentaContableId); }
+    if (tipoCuenta) { query += ' AND pc.tipo = ?'; params.push(tipoCuenta); }
     query += ' ORDER BY g.fecha_gasto DESC';
     return this.db.prepare(query).all(...params);
   }
@@ -132,7 +134,7 @@ class ReporteRepository {
     `).all();
   }
 
-  getIngresosPorPeriodo(fechaDesde = '', fechaHasta = '', cuentaContableId = '') {
+  getIngresosPorPeriodo(fechaDesde = '', fechaHasta = '', cuentaContableId = '', tipoCuenta = '') {
     let query = `
       SELECT r.fecha_recibo, r.numero_recibo, c.codigo as cuenta,
         (SELECT GROUP_CONCAT(concepto, ' | ') FROM recibo_detalles WHERE recibo_id = r.id) as conceptos,
@@ -150,50 +152,23 @@ class ReporteRepository {
       query += ' AND EXISTS (SELECT 1 FROM recibo_detalles rd3 WHERE rd3.recibo_id = r.id AND rd3.cuenta_contable_id = ?)';
       params.push(cuentaContableId);
     }
+    if (tipoCuenta) {
+      query += ` AND EXISTS (
+        SELECT 1 FROM recibo_detalles rd4
+        INNER JOIN plan_cuentas pc4 ON pc4.id = rd4.cuenta_contable_id
+        WHERE rd4.recibo_id = r.id AND pc4.tipo = ?
+      )`;
+      params.push(tipoCuenta);
+    }
     query += ' ORDER BY r.fecha_recibo DESC, r.numero_recibo DESC';
     return this.db.prepare(query).all(...params);
   }
 
-  getGastosPorPeriodo(fechaDesde = '', fechaHasta = '', cuentaContableId = '') {
-    return this.getHistorialGastos(fechaDesde, fechaHasta, cuentaContableId).filter(g => g.estado !== 'Anulado');
+  getGastosPorPeriodo(fechaDesde = '', fechaHasta = '', cuentaContableId = '', tipoCuenta = '') {
+    return this.getHistorialGastos(fechaDesde, fechaHasta, cuentaContableId, tipoCuenta).filter(g => g.estado !== 'Anulado');
   }
 
   // --- Datos base para los reportes contables simplificados ---
-
-  getTotalIngresosPorConcepto(fechaDesde = '', fechaHasta = '') {
-    let query = `
-      SELECT
-        CASE
-          WHEN rd.concepto LIKE 'Sostenimiento%' THEN 'Sostenimiento'
-          WHEN rd.concepto LIKE 'Abono Punto Nuevo%' THEN 'Nuevos Puntos'
-          WHEN rd.concepto LIKE 'Aplicación de saldo a favor%' THEN 'Aplicación saldo a favor'
-          WHEN rd.concepto LIKE 'Abono a saldo a favor%' THEN 'Abonos a saldo a favor'
-          ELSE 'Otros'
-        END as categoria,
-        SUM(rd.valor) as total
-      FROM recibo_detalles rd
-      INNER JOIN recibos r ON r.id = rd.recibo_id
-      WHERE r.estado != 'Anulado'
-    `;
-    const params = [];
-    if (fechaDesde) { query += ' AND r.fecha_recibo >= ?'; params.push(fechaDesde); }
-    if (fechaHasta) { query += ' AND r.fecha_recibo <= ?'; params.push(fechaHasta); }
-    query += ' GROUP BY categoria';
-    return this.db.prepare(query).all(...params);
-  }
-
-  getTotalGastosPorTipo(fechaDesde = '', fechaHasta = '') {
-    let query = `
-      SELECT COALESCE(tipo_gasto, 'Sin clasificar') as tipo_gasto, SUM(valor) as total
-      FROM gastos
-      WHERE estado != 'Anulado'
-    `;
-    const params = [];
-    if (fechaDesde) { query += ' AND fecha_gasto >= ?'; params.push(fechaDesde); }
-    if (fechaHasta) { query += ' AND fecha_gasto <= ?'; params.push(fechaHasta); }
-    query += ' GROUP BY tipo_gasto ORDER BY total DESC';
-    return this.db.prepare(query).all(...params);
-  }
 
   // Estimado de cuentas por cobrar: meses en mora de cada cuenta activa, valorados a la
   // tarifa vigente HOY de su categoría actual (aproximación simple, no histórica mes a mes,

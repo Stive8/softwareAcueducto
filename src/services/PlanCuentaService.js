@@ -83,6 +83,10 @@ class PlanCuentaService {
       }
     }
 
+    if (cuenta.activo && this.repository.tieneMovimientos(id)) {
+      throw new Error('No se puede desactivar: esta cuenta ya tiene gastos, recibos o movimientos contables registrados. El histórico debe poder seguir consultándose con la cuenta activa.');
+    }
+
     this.repository.toggleActivo(id);
   }
 }

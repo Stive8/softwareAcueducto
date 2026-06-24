@@ -125,8 +125,8 @@ class AsientoContableService {
     return { cuenta, movimientos: conSaldo, saldoFinal: saldo };
   }
 
-  getBalancePrueba(fechaDesde = '', fechaHasta = '') {
-    const filas = this.repository.getBalancePrueba(fechaDesde, fechaHasta).map(c => ({
+  getBalancePrueba(fechaDesde = '', fechaHasta = '', tipoCuenta = '') {
+    const filas = this.repository.getBalancePrueba(fechaDesde, fechaHasta, tipoCuenta).map(c => ({
       ...c,
       saldo: c.naturaleza === 'Debito' ? (c.total_debito - c.total_credito) : (c.total_credito - c.total_debito)
     }));
@@ -161,8 +161,8 @@ class AsientoContableService {
     });
   }
 
-  getLibroDiario(fechaDesde = '', fechaHasta = '') {
-    return this.repository.getLibroDiario(fechaDesde, fechaHasta);
+  getLibroDiario(fechaDesde = '', fechaHasta = '', tipoCuenta = '') {
+    return this.repository.getLibroDiario(fechaDesde, fechaHasta, tipoCuenta);
   }
 
   // Valida que las líneas sean correctas (cuentas imputables y activas, cada línea tiene

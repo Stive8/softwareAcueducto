@@ -183,7 +183,7 @@ class AsientoContableRepository {
   }
 
   // Balance de Prueba: para cada cuenta con movimiento en el período, total débito y crédito.
-  getBalancePrueba(fechaDesde = '', fechaHasta = '') {
+  getBalancePrueba(fechaDesde = '', fechaHasta = '', tipoCuenta = '') {
     let query = `
       SELECT pc.id, pc.codigo, pc.nombre, pc.tipo, pc.naturaleza,
         COALESCE(SUM(mc.debito), 0) as total_debito,
@@ -195,6 +195,7 @@ class AsientoContableRepository {
     const params = [];
     if (fechaDesde) { query += ' AND mc.fecha >= ?'; params.push(fechaDesde); }
     if (fechaHasta) { query += ' AND mc.fecha <= ?'; params.push(fechaHasta); }
+    if (tipoCuenta) { query += ' AND pc.tipo = ?'; params.push(tipoCuenta); }
     query += ' GROUP BY pc.id ORDER BY pc.codigo ASC';
     return this.db.prepare(query).all(...params);
   }
@@ -280,7 +281,7 @@ class AsientoContableRepository {
   }
 
   // Libro Diario real: una fila por línea de asiento, en orden cronológico/de asiento.
-  getLibroDiario(fechaDesde = '', fechaHasta = '') {
+  getLibroDiario(fechaDesde = '', fechaHasta = '', tipoCuenta = '') {
     let query = `
       SELECT a.numero as numero_asiento, a.fecha, a.concepto as concepto_asiento, a.tipo_origen, a.estado,
              pc.codigo as cuenta_codigo, pc.nombre as cuenta_nombre, mc.debito, mc.credito
@@ -292,6 +293,7 @@ class AsientoContableRepository {
     const params = [];
     if (fechaDesde) { query += ' AND a.fecha >= ?'; params.push(fechaDesde); }
     if (fechaHasta) { query += ' AND a.fecha <= ?'; params.push(fechaHasta); }
+    if (tipoCuenta) { query += ' AND pc.tipo = ?'; params.push(tipoCuenta); }
     query += ' ORDER BY a.fecha ASC, a.numero ASC, mc.id ASC';
     return this.db.prepare(query).all(...params);
   }

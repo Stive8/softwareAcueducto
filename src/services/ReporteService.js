@@ -67,7 +67,7 @@ class ReporteService {
       case 'gastos_periodo':
         return this.reporteGastosPeriodo(params);
       case 'balance_general':
-        return this.reporteBalanceGeneral();
+        return this.reporteBalanceGeneral(params);
       case 'estado_resultados':
         return this.reporteEstadoResultados(params);
       case 'flujo_caja':
@@ -119,8 +119,8 @@ class ReporteService {
     };
   }
 
-  reporteHistorialPagos({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
-    const filas = this.repository.getHistorialPagos(fechaDesde, fechaHasta, cuentaContableId);
+  reporteHistorialPagos({ fechaDesde = '', fechaHasta = '', cuentaContableId = '', tipoCuenta = '' } = {}) {
+    const filas = this.repository.getHistorialPagos(fechaDesde, fechaHasta, cuentaContableId, tipoCuenta);
 
     return {
       tipo: 'tabla',
@@ -140,8 +140,8 @@ class ReporteService {
     };
   }
 
-  reporteHistorialGastos({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
-    const filas = this.repository.getHistorialGastos(fechaDesde, fechaHasta, cuentaContableId);
+  reporteHistorialGastos({ fechaDesde = '', fechaHasta = '', cuentaContableId = '', tipoCuenta = '' } = {}) {
+    const filas = this.repository.getHistorialGastos(fechaDesde, fechaHasta, cuentaContableId, tipoCuenta);
     return {
       tipo: 'tabla',
       titulo: 'Historial de Gastos',
@@ -246,8 +246,8 @@ class ReporteService {
     };
   }
 
-  reporteIngresosPeriodo({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
-    const filas = this.repository.getIngresosPorPeriodo(fechaDesde, fechaHasta, cuentaContableId).map(f => ({
+  reporteIngresosPeriodo({ fechaDesde = '', fechaHasta = '', cuentaContableId = '', tipoCuenta = '' } = {}) {
+    const filas = this.repository.getIngresosPorPeriodo(fechaDesde, fechaHasta, cuentaContableId, tipoCuenta).map(f => ({
       ...f,
       cuentas_contables: f.cuentas_contables || '-'
     }));
@@ -268,8 +268,8 @@ class ReporteService {
     };
   }
 
-  reporteGastosPeriodo({ fechaDesde = '', fechaHasta = '', cuentaContableId = '' } = {}) {
-    const filas = this.repository.getGastosPorPeriodo(fechaDesde, fechaHasta, cuentaContableId);
+  reporteGastosPeriodo({ fechaDesde = '', fechaHasta = '', cuentaContableId = '', tipoCuenta = '' } = {}) {
+    const filas = this.repository.getGastosPorPeriodo(fechaDesde, fechaHasta, cuentaContableId, tipoCuenta);
     return {
       tipo: 'tabla',
       titulo: 'Gastos por Período',
@@ -286,69 +286,108 @@ class ReporteService {
     };
   }
 
-  // Balance General simplificado: no existe un libro mayor de doble partida en este sistema
-  // (deliberado, para no convertirlo en un ERP); se deriva directamente de caja/banco reales
-  // y de un estimado de cuentas por cobrar a partir de los meses en mora.
-  reporteBalanceGeneral() {
-    const saldoCaja = this.cajaRepository.getSaldoCaja();
-    const saldoBanco = this.cajaRepository.getSaldoBanco();
+  // Balance General: se deriva de la misma fuente que el Balance de Prueba (movimientos_contables,
+  // la doble partida real), no de la tabla simple de caja/banco — así Activo siempre cuadra con
+  // Pasivo + Patrimonio por construcción, y los dos reportes nunca pueden divergir entre sí.
+  // Como este sistema no hace un cierre de ejercicio formal (que trasladaría el saldo de las
+  // cuentas de Ingreso/Gasto/Costo a una cuenta de Patrimonio), el "Resultado del Ejercicio" se
+  // calcula aquí mismo, acumulado desde el inicio hasta la fecha de corte, y se suma al
+  // Patrimonio registrado: es la identidad contable que garantiza que el balance cuadre siempre,
+  // sin necesidad de un asiento de cierre.
+  reporteBalanceGeneral({ fechaCorte = '' } = {}) {
+    const corte = fechaCorte || new Date().toISOString().split('T')[0];
+    const { filas } = this.asientoContableService.getBalancePrueba('', corte);
+
+    const sumarSaldo = (tipo) => filas.filter(f => f.tipo === tipo).reduce((s, f) => s + f.saldo, 0);
+    const itemsPorTipo = (tipo) => filas.filter(f => f.tipo === tipo).map(f => ({ label: `${f.codigo} - ${f.nombre}`, valor: f.saldo }));
+
+    const totalActivos = sumarSaldo('Activo');
+    const totalPasivos = sumarSaldo('Pasivo');
+    const patrimonioRegistrado = sumarSaldo('Patrimonio');
+    const resultadoEjercicio = sumarSaldo('Ingreso') - sumarSaldo('Gasto') - sumarSaldo('Costo');
+    const totalPatrimonio = patrimonioRegistrado + resultadoEjercicio;
+
     const cuentasPorCobrar = this.repository.getCuentasPorCobrarEstimado();
-    const totalActivos = saldoCaja + saldoBanco + cuentasPorCobrar;
 
     return {
       tipo: 'resumen',
-      titulo: 'Balance General Simplificado',
-      fecha: new Date().toISOString().split('T')[0],
+      titulo: 'Balance General',
+      fecha: corte,
       secciones: [
         {
           titulo: 'Activos',
-          items: [
-            { label: 'Caja', valor: saldoCaja },
-            { label: 'Bancos', valor: saldoBanco },
-            { label: 'Cuentas por Cobrar (estimado por mora)', valor: cuentasPorCobrar }
-          ],
+          items: itemsPorTipo('Activo').length > 0 ? itemsPorTipo('Activo') : [{ label: 'Sin movimientos registrados', valor: 0 }],
           total: totalActivos
         },
         {
           titulo: 'Pasivos',
-          items: [{ label: 'Sin pasivos registrados', valor: 0 }],
-          total: 0
+          items: itemsPorTipo('Pasivo').length > 0 ? itemsPorTipo('Pasivo') : [{ label: 'Sin pasivos registrados', valor: 0 }],
+          total: totalPasivos
         },
         {
           titulo: 'Patrimonio',
-          items: [{ label: 'Patrimonio (Activos - Pasivos)', valor: totalActivos }],
-          total: totalActivos
+          items: [
+            ...itemsPorTipo('Patrimonio'),
+            { label: 'Resultado del Ejercicio (Ingresos - Gastos - Costos, acumulado a la fecha)', valor: resultadoEjercicio }
+          ],
+          total: totalPatrimonio
+        },
+        // Fuera de la ecuación Activo = Pasivo + Patrimonio a propósito: este sistema reconoce
+        // el ingreso por sostenimiento solo cuando se recibe el pago (no cuando se causa la
+        // mora), así que la cartera pendiente no tiene una cuenta por cobrar contabilizada que
+        // sumar al Activo. Se muestra aparte, como memo informativo.
+        {
+          titulo: 'Cartera Pendiente (informativo, no incluida en el balance contable)',
+          items: [{ label: 'Estimado por meses en mora a la tarifa vigente', valor: cuentasPorCobrar }],
+          total: cuentasPorCobrar
         }
       ]
     };
   }
 
+  // Estado de Resultados: misma fuente que el Balance de Prueba y el Balance General
+  // (movimientos_contables), filtrado a las cuentas de resultado (Ingreso/Gasto/Costo) del
+  // período. Al usar la misma fuente, el "Resultado del Ejercicio" acumulado que se ve en el
+  // Balance General y el "Resultado del Período" que se ve aquí son consistentes entre sí: la
+  // diferencia entre ambos números es exactamente el resultado acumulado ANTES de fechaDesde
+  // (igual que en cualquier balance contra estado de resultados real).
   reporteEstadoResultados({ fechaDesde = '', fechaHasta = '' } = {}) {
-    const ingresosPorConcepto = this.repository.getTotalIngresosPorConcepto(fechaDesde, fechaHasta);
-    const gastosPorTipo = this.repository.getTotalGastosPorTipo(fechaDesde, fechaHasta);
+    const { filas } = this.asientoContableService.getBalancePrueba(fechaDesde, fechaHasta);
 
-    const totalIngresos = ingresosPorConcepto.reduce((s, i) => s + i.total, 0);
-    const totalGastos = gastosPorTipo.reduce((s, g) => s + g.total, 0);
+    const itemsPorTipo = (tipo) => filas.filter(f => f.tipo === tipo).map(f => ({ label: `${f.codigo} - ${f.nombre}`, valor: f.saldo }));
+    const sumarSaldo = (tipo) => filas.filter(f => f.tipo === tipo).reduce((s, f) => s + f.saldo, 0);
+
+    const totalIngresos = sumarSaldo('Ingreso');
+    const totalGastos = sumarSaldo('Gasto');
+    const totalCostos = sumarSaldo('Costo');
+    const resultado = totalIngresos - totalGastos - totalCostos;
+
+    const seccionesGastosCostos = [
+      {
+        titulo: 'Gastos',
+        items: itemsPorTipo('Gasto').length > 0 ? itemsPorTipo('Gasto') : [{ label: 'Sin gastos en el período', valor: 0 }],
+        total: totalGastos
+      }
+    ];
+    if (itemsPorTipo('Costo').length > 0) {
+      seccionesGastosCostos.push({ titulo: 'Costos', items: itemsPorTipo('Costo'), total: totalCostos });
+    }
 
     return {
       tipo: 'resumen',
-      titulo: 'Estado de Resultados Simplificado',
+      titulo: 'Estado de Resultados',
       periodo: { fechaDesde, fechaHasta },
       secciones: [
         {
           titulo: 'Ingresos',
-          items: ingresosPorConcepto.map(i => ({ label: i.categoria, valor: i.total })),
+          items: itemsPorTipo('Ingreso').length > 0 ? itemsPorTipo('Ingreso') : [{ label: 'Sin ingresos en el período', valor: 0 }],
           total: totalIngresos
         },
+        ...seccionesGastosCostos,
         {
-          titulo: 'Gastos',
-          items: gastosPorTipo.map(g => ({ label: g.tipo_gasto, valor: g.total })),
-          total: totalGastos
-        },
-        {
-          titulo: 'Resultado Neto del Período',
-          items: [{ label: 'Ingresos - Gastos', valor: totalIngresos - totalGastos }],
-          total: totalIngresos - totalGastos
+          titulo: 'Resultado del Período',
+          items: [{ label: 'Ingresos - Gastos - Costos', valor: resultado }],
+          total: resultado
         }
       ]
     };
@@ -393,12 +432,12 @@ class ReporteService {
   // cuenta), agrupadas visualmente por número de asiento. Reemplaza la versión simplificada
   // anterior (que solo listaba ingresos y egresos en una columna) ahora que cada gasto, recibo
   // y traslado de caja/banco genera su asiento automáticamente.
-  reporteLibroDiario({ fechaDesde = '', fechaHasta = '' } = {}) {
-    const filas = this.asientoContableService.getLibroDiario(fechaDesde, fechaHasta);
+  reporteLibroDiario({ fechaDesde = '', fechaHasta = '', tipoCuenta = '' } = {}) {
+    const filas = this.asientoContableService.getLibroDiario(fechaDesde, fechaHasta, tipoCuenta);
 
     return {
       tipo: 'tabla',
-      titulo: 'Libro Diario',
+      titulo: tipoCuenta ? `Libro Diario - Cuentas de ${tipoCuenta}` : 'Libro Diario',
       columnas: [
         { key: 'numero_asiento', label: 'Asiento No.' },
         { key: 'fecha', label: 'Fecha', tipo: 'fecha' },
@@ -445,12 +484,12 @@ class ReporteService {
   // Balance de Prueba: por cada cuenta con movimiento, total débito/crédito y saldo según su
   // naturaleza. Si el sistema de doble partida está bien construido, el total débito siempre
   // debe coincidir con el total crédito (columna "Diferencia" en 0).
-  reporteBalancePrueba({ fechaDesde = '', fechaHasta = '' } = {}) {
-    const { filas, totalDebito, totalCredito } = this.asientoContableService.getBalancePrueba(fechaDesde, fechaHasta);
+  reporteBalancePrueba({ fechaDesde = '', fechaHasta = '', tipoCuenta = '' } = {}) {
+    const { filas, totalDebito, totalCredito } = this.asientoContableService.getBalancePrueba(fechaDesde, fechaHasta, tipoCuenta);
 
     return {
       tipo: 'tabla',
-      titulo: 'Balance de Prueba',
+      titulo: tipoCuenta ? `Balance de Prueba - Cuentas de ${tipoCuenta}` : 'Balance de Prueba',
       columnas: [
         { key: 'codigo', label: 'Código Cuenta Contable' },
         { key: 'nombre', label: 'Nombre Cuenta Contable' },
@@ -506,7 +545,7 @@ class ReporteService {
     const enMora = cartera.filter(c => c.meses_mora > 0).length;
     const conSaldoFavor = this.repository.getCuentasConSaldoAFavor().length;
 
-    const balance = this.reporteBalanceGeneral();
+    const balance = this.reporteBalanceGeneral({ fechaCorte: fechaHasta });
     const resultados = this.reporteEstadoResultados({ fechaDesde, fechaHasta });
     const flujo = this.reporteFlujoCaja({ fechaDesde, fechaHasta });
     const actividadUsuarios = this.auditoriaRepository.getResumenPorUsuario(fechaDesde, fechaHasta);

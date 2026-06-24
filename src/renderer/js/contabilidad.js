@@ -9,16 +9,16 @@ const Contabilidad = {
     {
       titulo: 'Pagos y Gastos',
       reportes: [
-        { tipo: 'historial_pagos', titulo: 'Historial de Pagos', icon: '💰', rangoFecha: true, filtroCuentaContable: true },
-        { tipo: 'historial_gastos', titulo: 'Historial de Gastos', icon: '💸', rangoFecha: true, filtroCuentaContable: true },
-        { tipo: 'ingresos_periodo', titulo: 'Ingresos por Período', icon: '📈', rangoFecha: true, filtroCuentaContable: true },
-        { tipo: 'gastos_periodo', titulo: 'Gastos por Período', icon: '📉', rangoFecha: true, filtroCuentaContable: true }
+        { tipo: 'historial_pagos', titulo: 'Historial de Pagos', icon: '💰', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
+        { tipo: 'historial_gastos', titulo: 'Historial de Gastos', icon: '💸', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
+        { tipo: 'ingresos_periodo', titulo: 'Ingresos por Período', icon: '📈', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
+        { tipo: 'gastos_periodo', titulo: 'Gastos por Período', icon: '📉', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true }
       ]
     },
     {
       titulo: 'Estados Financieros',
       reportes: [
-        { tipo: 'balance_general', titulo: 'Balance General', icon: '📊' },
+        { tipo: 'balance_general', titulo: 'Balance General', icon: '📊', fechaCorte: true },
         { tipo: 'estado_resultados', titulo: 'Estado de Resultados', icon: '📋', rangoFecha: true },
         { tipo: 'flujo_caja', titulo: 'Flujo de Caja', icon: '💧', rangoFecha: true }
       ]
@@ -26,9 +26,9 @@ const Contabilidad = {
     {
       titulo: 'Doble Partida',
       reportes: [
-        { tipo: 'libro_diario', titulo: 'Libro Diario', icon: '📖', rangoFecha: true },
+        { tipo: 'libro_diario', titulo: 'Libro Diario', icon: '📖', rangoFecha: true, filtroTipoCuenta: true },
         { tipo: 'libro_mayor', titulo: 'Libro Mayor', icon: '📚', rangoFecha: true, requiereCuentaContable: true },
-        { tipo: 'balance_prueba', titulo: 'Balance de Prueba', icon: '⚖️', rangoFecha: true },
+        { tipo: 'balance_prueba', titulo: 'Balance de Prueba', icon: '⚖️', rangoFecha: true, filtroTipoCuenta: true },
         { tipo: 'balance_prueba_tercero', titulo: 'Balance de Prueba por Tercero', icon: '🧾', rangoFecha: true, rangoCuentaContable: true, filtroTercero: true, previaPantalla: true }
       ]
     },
@@ -866,9 +866,25 @@ const Contabilidad = {
             <input type="date" id="hasta_${idSufijo}" value="${hoy}">
           </div>
         ` : ''}
+        ${reporte.fechaCorte ? `
+          <div class="reporte-card-fechas">
+            <input type="date" id="corte_${idSufijo}" value="${hoy}" title="Fecha de corte">
+          </div>
+        ` : ''}
         ${reporte.filtroCuentaContable || reporte.requiereCuentaContable ? `
           <select id="cuentaContable_${idSufijo}" data-select-cuenta-contable data-requerida="${!!reporte.requiereCuentaContable}" style="width: 100%; margin-bottom: 8px;" ${reporte.requiereCuentaContable ? 'required' : ''}>
             <option value="">Todas las cuentas contables</option>
+          </select>
+        ` : ''}
+        ${reporte.filtroTipoCuenta ? `
+          <select id="tipoCuenta_${idSufijo}" style="width: 100%; margin-bottom: 8px;">
+            <option value="">Todos los tipos de cuenta</option>
+            <option value="Activo">Activo</option>
+            <option value="Pasivo">Pasivo</option>
+            <option value="Patrimonio">Patrimonio</option>
+            <option value="Ingreso">Ingreso</option>
+            <option value="Gasto">Gasto</option>
+            <option value="Costo">Costo</option>
           </select>
         ` : ''}
         ${reporte.rangoCuentaContable ? `
@@ -912,12 +928,20 @@ const Contabilidad = {
       params.fechaHasta = document.getElementById(`hasta_${idSufijo}`).value;
     }
 
+    if (reporte.fechaCorte) {
+      params.fechaCorte = document.getElementById(`corte_${idSufijo}`).value;
+    }
+
     if (reporte.filtroCuentaContable || reporte.requiereCuentaContable) {
       params.cuentaContableId = document.getElementById(`cuentaContable_${idSufijo}`).value;
       if (reporte.requiereCuentaContable && !params.cuentaContableId) {
         App.toast('Debe seleccionar una cuenta contable', 'error');
         return null;
       }
+    }
+
+    if (reporte.filtroTipoCuenta) {
+      params.tipoCuenta = document.getElementById(`tipoCuenta_${idSufijo}`).value;
     }
 
     if (reporte.rangoCuentaContable) {
