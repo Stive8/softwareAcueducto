@@ -10,7 +10,9 @@ const Gastos = {
   fechaDesde: '',
   fechaHasta: '',
 
-  async load() {
+  // tabInicial: a qué pestaña entrar (la elige el submenú del sidebar al pasar el cursor sobre
+  // "Gastos"). Si no se indica, se mantiene en la última que estaba abierta.
+  async load(tabInicial = null) {
     const content = document.getElementById('page-content');
 
     content.innerHTML = `
@@ -20,26 +22,15 @@ const Gastos = {
       </div>
 
       <div class="table-container">
-        <div class="table-header">
-          <div class="table-controls" style="gap: 8px;">
-            <button class="btn btn-secondary" id="tabGastosBtn">Gastos</button>
-            <button class="btn btn-secondary" id="tabProveedoresBtn">Proveedores</button>
-          </div>
-        </div>
         <div id="gastosModuloBody"></div>
       </div>
     `;
 
-    document.getElementById('tabGastosBtn').addEventListener('click', () => this.mostrarTab('gastos'));
-    document.getElementById('tabProveedoresBtn').addEventListener('click', () => this.mostrarTab('proveedores'));
-
-    await this.mostrarTab('gastos');
+    await this.mostrarTab(tabInicial || this.tabActual);
   },
 
   async mostrarTab(tab) {
     this.tabActual = tab;
-    document.getElementById('tabGastosBtn').className = tab === 'gastos' ? 'btn btn-primary' : 'btn btn-secondary';
-    document.getElementById('tabProveedoresBtn').className = tab === 'proveedores' ? 'btn btn-primary' : 'btn btn-secondary';
 
     if (tab === 'gastos') await this.renderTabGastos();
     if (tab === 'proveedores') await this.renderTabProveedores();
@@ -601,10 +592,10 @@ const Gastos = {
         </div>
         <div class="form-group">
           <label>Tipo de Tercero <span style="color: #ef4444;">*</span></label>
-          <label style="display: flex; align-items: center; gap: 6px; font-weight: normal;">
+          <label class="form-check">
             <input type="checkbox" id="p_esProveedor" ${tercero ? (tercero.es_proveedor ? 'checked' : '') : 'checked'}> Proveedor
           </label>
-          <label style="display: flex; align-items: center; gap: 6px; font-weight: normal;">
+          <label class="form-check">
             <input type="checkbox" id="p_esOtro" ${tercero?.es_otro ? 'checked' : ''}> Otro (contratista, aliado, etc.)
           </label>
         </div>

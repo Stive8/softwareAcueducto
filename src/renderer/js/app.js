@@ -24,7 +24,7 @@ const App = {
       if (response.success && response.data.nombre_asociacion) {
         const nombre = response.data.nombre_asociacion;
         document.getElementById('loginAsociacionNombre').textContent = nombre;
-        document.getElementById('sidebarAsociacionNombre').textContent = nombre;
+        Sidebar.setAsociacion(nombre);
       }
     } catch (error) {
       console.error('Error al cargar el nombre de la asociación:', error);
@@ -57,10 +57,7 @@ const App = {
     document.getElementById('loginScreen').style.display = 'none';
     document.getElementById('appContainer').style.display = 'flex';
 
-    document.getElementById('sidebarUser').innerHTML = `
-      <strong>${this.currentUser.nombreCompleto}</strong>
-      <span>${this.currentUser.rol}</span>
-    `;
+    Sidebar.setUsuario(this.currentUser.nombreCompleto, this.currentUser.rol);
 
     if (!this.initialized) {
       this.setupNavigation();
@@ -128,23 +125,24 @@ const App = {
   },
 
   setupNavigation() {
-    document.querySelectorAll('.nav-item:not(.disabled)').forEach(item => {
+    // Contabilidad y Gastos (.nav-item-main, con acordeón de sub-páginas) los maneja Sidebar
+    // directamente (ver sidebar.js); aquí solo los ítems simples, que solo navegan.
+    document.querySelectorAll('.nav-item:not(.disabled):not(.nav-item-main)').forEach(item => {
       item.addEventListener('click', (e) => {
         e.preventDefault();
         const page = item.dataset.page;
-        
+
         document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
         item.classList.add('active');
-        
+
         this.loadPage(page);
       });
     });
   },
 
-  loadPage(page) {
+  loadPage(page, tab = null) {
     this.currentPage = page;
-    const content = document.getElementById('page-content');
-    
+
     if (page === 'dashboard') {
       Dashboard.load();
     } else if (page === 'cuentas') {
@@ -158,7 +156,7 @@ const App = {
     } else if (page === 'recibos') {
       Recibos.load();
     } else if (page === 'gastos') {
-      Gastos.load();
+      Gastos.load(tab);
     } else if (page === 'caja') {
       Caja.load();
     } else if (page === 'configuracion') {
@@ -166,7 +164,7 @@ const App = {
     } else if (page === 'reportes') {
       Reportes.load();
     } else if (page === 'contabilidad') {
-      Contabilidad.load();
+      Contabilidad.load(tab);
     }
   },
 

@@ -386,10 +386,11 @@ const Propietarios = {
     `;
 
     App.openModal(content);
+    Combobox.attach('cuenta_id');
 
     document.getElementById('asignarForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      
+
       const cuentaId = document.getElementById('cuenta_id').value;
       const fechaInicio = document.getElementById('fecha_inicio').value;
       const observaciones = document.getElementById('observaciones_asignacion').value.trim();

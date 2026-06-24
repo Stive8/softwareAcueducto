@@ -12,9 +12,10 @@ Este documento complementa al [README.md](README.md) (qué hace el sistema, regl
 | Gráficos | **Chart.js** | Dashboard (barras/líneas de ingresos vs gastos). |
 | Exportación a Excel | **exceljs** | Generación de `.xlsx` multi-hoja desde Node, sin Excel instalado. |
 | PDF | **`webContents.printToPDF` / `.print()` de Electron** | No se usa ninguna librería de PDF: se renderiza HTML en una `BrowserWindow` oculta y se imprime/exporta con el motor de impresión nativo de Chromium. |
+| Respaldo en la nube (opcional) | **googleapis** (OAuth2 + Drive API v3) | Sube/descarga un único archivo (la base de datos completa) a una carpeta de Google Drive del usuario. No es una sincronización en tiempo real ni un backend propio: cada equipo decide cuándo subir/traer, ver sección 12. |
 | Empaquetado | **electron-builder** (NSIS) | Genera el instalador `.exe` para Windows y resuelve la recompilación nativa de `better-sqlite3` contra la versión de Electron usada. |
 
-No hay backend remoto, no hay nube, no hay build step de frontend (Webpack/Vite) ni transpilación: lo que está en `src/renderer/` es exactamente lo que carga el navegador embebido de Electron.
+No hay backend propio ni servidor remoto, no hay build step de frontend (Webpack/Vite) ni transpilación: lo que está en `src/renderer/` es exactamente lo que carga el navegador embebido de Electron. El respaldo en la nube (sección 12) es la única pieza que sale a internet, y es opcional: el sistema funciona 100% sin ella.
 
 ## 2. Estructura de carpetas
 
@@ -24,7 +25,7 @@ preload.js                contextBridge: la única puerta entre el renderer y No
 src/
   database/
     DatabaseService.js    Apertura de la conexión SQLite + runner de migraciones
-    migrations/           *.sql numerados (001, 003, 004, ... 008), nunca se editan tras mergear
+    migrations/           *.sql numerados secuencialmente, nunca se editan tras mergear
   repositories/            Acceso directo a SQLite (una clase por entidad, sin lógica de negocio)
   services/                Lógica de negocio, validaciones, orquesta repositorios y transacciones
   utils/                   Helpers puros (hash de contraseña, etc.)
@@ -33,6 +34,10 @@ src/
     css/                   Estilos
     js/
       app.js               Router de páginas + estado global mínimo (sesión, toasts, modales)
+      sidebar.js            Acordeón de sub-páginas del sidebar (Contabilidad, Gastos) y los
+                             textos que solo existen tras login (asociación, usuario)
+      combobox.js           Select buscable reutilizable (ver sección 8.1), para listas largas
+                             (cuentas de servicio, plan de cuentas)
       <modulo>.js           Un archivo por módulo (cuentas.js, pagos.js, contabilidad.js, ...),
                              cada uno un objeto global (p.ej. `Contabilidad`) con sus métodos
     pages/                 Fragmentos HTML que `app.js` inyecta al navegar
@@ -105,12 +110,23 @@ Toda la seguridad de la app pasa por una única función en `main.js`, `envolver
 - **Repository** (`src/repositories/`): un método por consulta, SQL crudo con `better-sqlite3` (`db.prepare(...).run()/get()/all()`), sin reglas de negocio. Aquí vive también `transaccion(fn)` cuando el repositorio necesita garantizar atomicidad.
 - **Service** (`src/services/`): valida entradas, decide reglas de negocio (p. ej. "un pago siempre es por mes calendario completo", "no se puede desactivar una cuenta contable en uso"), y orquesta uno o más repositorios (a veces de otros módulos: `PagoService` usa su propio repositorio y también `AsientoContableService` para generar el asiento). Lanza `Error` normales; quien los traduce a `{ success: false, error }` es `envolverHandle`.
 - Un mismo dato puede tener su `cuenta_contable_id` resuelto en el `Repository` (vía el mapeo configurable de conceptos) en el momento de creación, y ese valor ya resuelto es el que usa después el motor de asientos — así, si el mapeo cambia más adelante, los registros históricos no cambian de cuenta retroactivamente.
+- **Migrar de texto libre a catálogo sin romper lo histórico**: cuando `gastos.tercero_id` se agregó, ya existían gastos con solo `proveedor`/`nit_cedula` en texto plano (sin tercero asociado). En vez de forzar una migración de datos imperfecta, todo `SELECT` que muestra el proveedor de un gasto usa `COALESCE(t.nombre_razon_social, g.proveedor)` (con `LEFT JOIN terceros t ON t.id = g.tercero_id`): si el gasto tiene tercero, se usa su nombre actual del catálogo; si no, se usa el texto histórico tal cual quedó guardado. Los gastos nuevos siempre llevan `tercero_id`; las columnas de texto solo se conservan como respaldo de lo antiguo. Una migración aparte (`014_migrar_proveedores_existentes.sql`) además crea automáticamente un Tercero por cada combinación distinta de NIT que se repetía en el histórico, y enlaza esos gastos viejos al nuevo registro — agrupando por NIT (no por nombre) para fusionar variantes de escritura del mismo proveedor bajo un solo tercero.
 
 ## 8. Renderer: SPA sin framework
 
 - `app.js` mantiene el estado mínimo (sesión actual, página activa) y hace de router: cambia de página inyectando el fragmento HTML correspondiente (`src/renderer/pages/`) y llamando al método `.load()` del objeto global del módulo (`Cuentas.load()`, `Contabilidad.load()`, etc.).
 - Cada módulo (`src/renderer/js/<modulo>.js`) es un objeto plano con métodos (`load`, `render...`, `show...Modal`, `save...`), sin clases ni estado reactivo: el patrón es "pedir datos a `window.api`, construir el HTML como string, inyectarlo, volver a pedir datos cuando algo cambia". Es deliberadamente simple porque no hay equipo de frontend ni necesidad de un grafo de estado complejo.
 - Los modales y toasts son utilidades compartidas (`App.openModal(html)`, `App.toast(msg)`), no un sistema de componentes.
+
+### 8.1 Sidebar colapsable y submenús
+
+El sidebar (`index.html` → `.sidebar`) ocupa siempre 64px en el layout — `.main-content` nunca se reacomoda al pasar el cursor —, pero su contenido real vive en `.sidebar-inner`, puesto encima con `position: absolute` dentro de ese mismo riel; al pasar el cursor (`.sidebar:hover`), solo `.sidebar-inner` cambia de ancho (64px → 240px) y se ve por encima del contenido, sin afectar el ancho real del `<aside>`. Es deliberado: una versión anterior dejaba que `.sidebar` mismo creciera, lo que reacomodaba toda la pantalla cada vez que el cursor pasaba por encima.
+
+Los nombres de cada módulo (`.nav-label`) están siempre en el DOM pero con `opacity: 0` mientras está colapsado — no `display: none` — para que `.sidebar:hover .nav-label { opacity: 1 }` sea instantáneo sin tener que medir ni recalcular nada. Contabilidad y Gastos llevan además un acordeón (`.nav-item-main` + `.nav-submenu`, clase `.open` para expandir) que reemplaza los botones de pestaña que antes vivían arriba de cada pantalla: `sidebar.js` maneja el clic de apertura/cierre y, al elegir una sub-página, llama a `App.loadPage(pagina, pestaña)`, que a su vez le pasa esa pestaña al `.load(tabInicial)` del módulo correspondiente (`Contabilidad.load('mapeo')`, `Gastos.load('proveedores')`, etc.).
+
+### 8.2 `Combobox`: select buscable para listas largas
+
+`combobox.js` expone `Combobox.attach(selectOrId)`: toma un `<select>` ya existente (con o sin `<optgroup>`), lo oculta (`display: none`) y, justo después en el DOM, inserta un campo de texto con una lista filtrable. El `<select>` original sigue siendo la fuente de verdad de su valor — `Combobox` solo lo actualiza (`select.value = ...` + `dispatchEvent('change')`) cuando el usuario elige una opción —, así que todo el código de cada módulo que ya leía `document.getElementById(id).value` sigue funcionando sin cambios; solo hace falta una línea extra (`Combobox.attach('idDelSelect')`) después de `App.openModal(...)`. Se usa donde una lista puede crecer mucho (cuentas de servicio al asignar un propietario, cuentas del Plan Único al mapear un concepto o armar una Nota Contable manual).
 
 ## 9. Reportes y documentos (PDF/Excel)
 
@@ -151,3 +167,25 @@ Para lo que la generación automática no cubre (partidas de apertura, ajustes, 
 ## 11. Empaquetado y distribución
 
 `npm run dist` ejecuta `electron-rebuild` (recompila el binario nativo de `better-sqlite3` contra la versión exacta de Electron usada — un módulo nativo compilado para el Node del sistema no es compatible con el Node embebido en Electron) y luego `electron-builder --win`, que genera un instalador NSIS en `dist/`. El binario de `better-sqlite3` se deja sin empaquetar en el `.asar` (`asarUnpack`) porque los módulos nativos no pueden ejecutarse desde dentro de un archivo `.asar`.
+
+## 12. Respaldo en la nube (Google Drive, opcional)
+
+A diferencia del resto del sistema (100% local), esta pieza sí sale a internet — pero solo para subir/traer un único archivo (la base de datos completa), nunca para operar en tiempo real contra ella.
+
+### 12.1 Por qué un archivo completo y no sincronización fila por fila
+
+Sincronizar tabla por tabla entre varios equipos (con resolución de conflictos campo a campo) es la complejidad de un sistema multiusuario distribuido — exactamente lo que esta app evita a propósito (ver sección 1). En vez de eso, `CloudBackupOrchestratorService` trata el `.db` completo como una sola unidad: lo sube, lo descarga, y compara cuál copia es más reciente con un número de **secuencia** simple (no con marcas de tiempo, que pueden desincronizarse entre relojes de distintos equipos).
+
+### 12.2 Un solo escritor a la vez
+
+- Cada equipo guarda su propio `secuenciaLocal` en un JSON local (`data/cloud-backup-estado.json`, junto a la base de datos pero fuera de ella: tiene que sobrevivir incluso a que el archivo `.db` se reemplace por el que viene de la nube).
+- Antes de **subir**, el orquestador descarga primero el número de secuencia que hay en la nube; si es mayor que el `secuenciaLocal` de este equipo, significa que otro equipo subió algo que este todavía no tiene — se avisa del conflicto en vez de sobrescribir a ciegas.
+- Después de **traer** un respaldo (`aplicarRespaldoDescargado` en `main.js`), `marcarRespaldoTraido(secuencia)` actualiza el `secuenciaLocal` antes de reemplazar el archivo `.db` — quedó como corrección de un bug real: si esto no se actualizaba, el equipo volvía a detectar "hay algo nuevo" en cada inicio de sesión y entraba en un ciclo de traer el mismo respaldo una y otra vez.
+
+### 12.3 Consulta es de solo-lectura ante la nube
+
+El rol `Consulta` nunca tiene cambios propios que perder (no puede escribir nada), así que es el único caso donde traer un respaldo más nuevo no necesita confirmación: `App.verificarActualizacionNubeSilenciosa()` se dispara solo después de un login con ese rol, y si hay algo más nuevo, lo trae y reinicia la app sin preguntar.
+
+### 12.4 Canales que funcionan sin sesión
+
+`CANALES_SIN_SESION` (en `main.js`) es la única excepción a la regla de "todo canal exige sesión" (sección 5): la pantalla de **Configuración Inicial** (un equipo nuevo, base de datos vacía) necesita poder revisar y traer un respaldo de la nube *antes* de que exista cualquier usuario local con el que iniciar sesión.

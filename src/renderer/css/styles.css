@@ -15,39 +15,108 @@ body {
   height: 100vh;
 }
 
-/* Sidebar */
+/* Sidebar: el riel de íconos (.sidebar) mantiene SIEMPRE 64px en el layout —el resto de la
+   pantalla (.main-content) nunca se reacomoda al pasar el cursor—. Lo que de verdad crece es
+   .sidebar-inner, puesto encima con position:absolute (no afecta el ancho real de .sidebar),
+   mostrando los nombres de cada módulo y, en Contabilidad/Gastos, un acordeón con sus
+   sub-páginas en vez de los botones que había antes dentro de cada pantalla. */
 .sidebar {
-  width: 250px;
+  width: 64px;
+  height: 100vh;
+  position: relative;
+  z-index: 100;
+  flex-shrink: 0;
+}
+
+.sidebar-inner {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 64px;
+  height: 100%;
   background: linear-gradient(180deg, #1e3a8a 0%, #1e40af 100%);
   color: white;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  transition: width 0.18s ease;
+}
+
+.sidebar:hover .sidebar-inner {
+  width: 240px;
 }
 
 .sidebar-header {
-  padding: 24px 20px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.sidebar-header h2 {
-  font-size: 15px;
+.sidebar-header-icon {
+  font-size: 22px;
+  flex-shrink: 0;
+}
+
+/* El nombre de la asociación es libre (lo escribe el usuario en Configuración) y puede ser
+   largo; a diferencia de los nav-label de cada módulo (una sola línea corta), aquí sí puede
+   pasar a una segunda línea en vez de cortarse, porque el encabezado tiene espacio vertical
+   de sobra para eso. Pero el salto de línea solo se permite ya expandido: con el sidebar
+   colapsado el texto sigue ahí (oculto con opacity) ocupando su espacio normal, y si se le
+   permitiera envolver en una caja angosta de 64px se partiría en muchas líneas (aunque
+   invisibles, su alto seguía estirando toda la fila, incluida la gota). */
+.sidebar-header .nav-label {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  line-height: 1.25;
+  font-size: 14px;
   font-weight: 600;
-  line-height: 1.35;
-  word-wrap: break-word;
+}
+
+.sidebar:hover .sidebar-header .nav-label {
+  white-space: normal;
 }
 
 .sidebar-nav {
   flex: 1;
-  padding: 20px 0;
+  padding: 12px 0;
+  overflow-y: auto;
+  /* Sin esto, el navegador trata el eje X también como "auto" (es el comportamiento por
+     defecto cuando solo se fija overflow-y), y los nav-label —que ocupan su ancho real aunque
+     estén con opacity:0 mientras el sidebar está colapsado— disparaban una barra de scroll
+     horizontal innecesaria. */
+  overflow-x: hidden;
+}
+
+/* Scrollbar delgada y del mismo tono del sidebar: solo aparece si de verdad hace falta (muchos
+   módulos en una pantalla baja), y pasa casi inadvertida en vez de la barra gris por defecto. */
+.sidebar-nav::-webkit-scrollbar {
+  width: 6px;
+}
+
+.sidebar-nav::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb {
+  background-color: rgba(255, 255, 255, 0.15);
+  border-radius: 3px;
+}
+
+.sidebar-nav::-webkit-scrollbar-thumb:hover {
+  background-color: rgba(255, 255, 255, 0.3);
 }
 
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 14px 20px;
+  gap: 14px;
+  padding: 13px 20px;
   color: rgba(255, 255, 255, 0.8);
   text-decoration: none;
-  transition: all 0.3s;
+  transition: background-color 0.2s, color 0.2s;
   cursor: pointer;
 }
 
@@ -69,8 +138,65 @@ body {
 
 .nav-item .icon {
   font-size: 20px;
-  margin-right: 12px;
-  width: 24px;
+  flex-shrink: 0;
+}
+
+/* El nombre solo se ve cuando .sidebar-inner ya se expandió (cursor encima). El overflow:hidden
+   del .sidebar-inner ya recorta el texto que sobra al estar colapsado, pero con el ícono y el
+   espacio entre ambos, una esquina de la primera letra todavía entraba en los 64px visibles; con
+   opacity:0 queda invisible de verdad mientras está colapsado, sin depender de ese recorte. */
+.nav-label {
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.1s;
+}
+
+.sidebar:hover .nav-label {
+  opacity: 1;
+  transition: opacity 0.15s 0.05s;
+}
+
+.nav-caret {
+  margin-left: auto;
+  font-size: 12px;
+  opacity: 0;
+  transition: transform 0.15s, opacity 0.1s;
+}
+
+.sidebar:hover .nav-caret {
+  opacity: 1;
+  transition: transform 0.15s, opacity 0.15s 0.05s;
+}
+
+.nav-item-main.open .nav-caret {
+  transform: rotate(180deg);
+}
+
+/* Acordeón de sub-páginas (Contabilidad, Gastos): colapsado por defecto, se abre con el clic en
+   la fila principal (no con el hover que expande el sidebar, para no abrirse solo de pasada). */
+.nav-submenu {
+  max-height: 0;
+  overflow: hidden;
+  background-color: rgba(0, 0, 0, 0.15);
+  transition: max-height 0.2s ease;
+}
+
+.nav-submenu.open {
+  max-height: 240px;
+}
+
+.nav-submenu-link {
+  display: block;
+  padding: 11px 20px 11px 54px;
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 15px;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.nav-submenu-link:hover {
+  background-color: rgba(255, 255, 255, 0.1);
+  color: white;
 }
 
 /* Main Content */
@@ -466,6 +592,114 @@ tr:hover {
   font-family: inherit;
 }
 
+/* Combobox: select buscable para listas largas (cuentas de servicio, plan de cuentas). El
+   <select> real queda oculto justo antes de este wrapper (ver combobox.js). Lleva su propio
+   estilo base (no todos los usos están dentro de un .form-group, p.ej. las líneas de un
+   asiento manual van sueltas en una celda de tabla). */
+.combobox {
+  position: relative;
+}
+
+.combobox-input {
+  width: 100%;
+  padding: 10px 32px 10px 16px;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.combobox-input:focus {
+  outline: none;
+  border-color: #1e40af;
+}
+
+/* Cuando el combobox sí va dentro de un .form-group, ".form-group input" (más específico por
+   tener un selector de tipo además de la clase) ganaría sobre ".combobox-input" y le quitaría
+   el padding-right reservado para la flecha; estas dos clases juntas tienen más especificidad
+   y lo mantienen. */
+.form-group .combobox-input {
+  padding: 10px 32px 10px 16px;
+}
+
+.combobox::after {
+  content: '▾';
+  position: absolute;
+  right: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #64748b;
+  font-size: 12px;
+  pointer-events: none;
+}
+
+.combobox-dropdown {
+  display: none;
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  margin-top: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  background: white;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 10;
+}
+
+.combobox-dropdown.open {
+  display: block;
+}
+
+.combobox-option {
+  padding: 8px 16px;
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.combobox-option:hover,
+.combobox-option.highlighted {
+  background-color: #eff6ff;
+}
+
+.combobox-group-label {
+  padding: 6px 16px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: #94a3b8;
+  background-color: #f8fafc;
+}
+
+.combobox-empty {
+  padding: 10px 16px;
+  font-size: 14px;
+  color: #94a3b8;
+}
+
+/* Los checkboxes/radios no deben heredar el ancho/padding pensado para campos de texto: eso
+   los deformaba (se veían estirados, descuadrados con su etiqueta). */
+.form-group input[type="checkbox"],
+.form-group input[type="radio"] {
+  width: auto;
+  padding: 0;
+  border: none;
+  flex-shrink: 0;
+}
+
+/* Para una opción tipo checkbox dentro de un .form-group (ej. "Tipo de Tercero": Proveedor /
+   Otro), en vez de repetir el style inline en cada label. */
+.form-check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: normal;
+  margin-bottom: 6px;
+  cursor: pointer;
+}
+
 .form-group textarea {
   resize: vertical;
   min-height: 80px;
@@ -565,23 +799,63 @@ tr:hover {
   font-size: 14px;
 }
 
-/* Pie del sidebar (usuario actual y cerrar sesión) */
+/* Pie del sidebar (usuario actual y cerrar sesión): flex-shrink: 0 evita que el contenido de
+   .sidebar-nav lo comprima o lo empuje fuera del área visible cuando hay muchos ítems y la
+   pantalla es baja (.sidebar-nav absorbe el overflow con su propio scroll, no este pie).
+   Colapsado (64px) no hay espacio para el ícono de usuario y el botón uno junto al otro, por
+   eso van apilados (columna) y solo pasan a estar lado a lado (fila) cuando el sidebar ya se
+   expandió; ponerlos en fila con tan poco ancho disponible era lo que causaba que el botón de
+   cerrar sesión quedara encima del ícono de usuario. */
 .sidebar-footer {
-  padding: 16px 20px;
+  flex-shrink: 0;
+  padding: 14px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
   border-top: 1px solid rgba(255, 255, 255, 0.1);
 }
 
-.sidebar-user {
-  margin-bottom: 12px;
-  color: white;
-  font-size: 14px;
-  line-height: 1.4;
+.sidebar:hover .sidebar-footer {
+  flex-direction: row;
+  padding: 14px 20px;
 }
 
-.sidebar-user span {
+.sidebar-user {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex: 1;
+  min-width: 0;
+  color: white;
+  cursor: default;
+}
+
+.sidebar-user .icon {
+  font-size: 20px;
+  flex-shrink: 0;
+}
+
+.sidebar-user .nav-label {
+  font-size: 13px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.sidebar-user .nav-label span {
   display: block;
-  font-size: 12px;
+  font-size: 11px;
   opacity: 0.7;
+}
+
+#btnLogout {
+  flex-shrink: 0;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 16px;
+  line-height: 1;
 }
 
 /* Reportes */

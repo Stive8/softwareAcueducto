@@ -53,60 +53,72 @@
   </div>
 
   <div class="app-container" id="appContainer" style="display: none;">
+    <!-- .sidebar mantiene SIEMPRE 64px en el layout (para que el resto de la pantalla nunca se
+         reacomode al pasar el cursor); lo que crece es .sidebar-inner, posicionado encima
+         (position: absolute) sin afectar el ancho real de .sidebar. -->
     <aside class="sidebar">
-      <div class="sidebar-header">
-        <h2 id="sidebarAsociacionNombre">Acueducto</h2>
-      </div>
-      <nav class="sidebar-nav">
-        <a href="#" class="nav-item active" data-page="dashboard">
-          <span class="icon">📊</span>
-          <span>Dashboard</span>
-        </a>
-        <a href="#" class="nav-item" data-page="cuentas">
-          <span class="icon">🏠</span>
-          <span>Cuentas</span>
-        </a>
-        <a href="#" class="nav-item" data-page="propietarios">
-          <span class="icon">👤</span>
-          <span>Propietarios</span>
-        </a>
-        <a href="#" class="nav-item" data-page="categorias">
-          <span class="icon">📋</span>
-          <span>Categorías</span>
-        </a>
-        <a href="#" class="nav-item" data-page="pagos">
-          <span class="icon">💰</span>
-          <span>Pagos</span>
-        </a>
-        <a href="#" class="nav-item" data-page="recibos">
-          <span class="icon">📄</span>
-          <span>Recibos</span>
-        </a>
-        <a href="#" class="nav-item" data-page="gastos">
-          <span class="icon">💸</span>
-          <span>Gastos</span>
-        </a>
-        <a href="#" class="nav-item" data-page="caja">
-          <span class="icon">🏦</span>
-          <span>Caja/Banco</span>
-        </a>
-        <a href="#" class="nav-item" data-page="contabilidad">
-          <span class="icon">📒</span>
-          <span>Contabilidad</span>
-        </a>
-        <a href="#" class="nav-item" data-page="reportes">
-          <span class="icon">📑</span>
-          <span>Reportes</span>
-        </a>
-        <a href="#" class="nav-item" data-page="configuracion">
-          <span class="icon">⚙️</span>
-          <span>Configuración</span>
-        </a>
-      </nav>
+      <div class="sidebar-inner">
+        <div class="sidebar-header">
+          <span class="sidebar-header-icon">💧</span>
+          <span class="nav-label" id="sidebarAsociacionNombre">Acueducto</span>
+        </div>
+        <nav class="sidebar-nav">
+          <a href="#" class="nav-item active" data-page="dashboard">
+            <span class="icon">📊</span><span class="nav-label">Dashboard</span>
+          </a>
+          <a href="#" class="nav-item" data-page="cuentas">
+            <span class="icon">🏠</span><span class="nav-label">Cuentas</span>
+          </a>
+          <a href="#" class="nav-item" data-page="propietarios">
+            <span class="icon">👤</span><span class="nav-label">Propietarios</span>
+          </a>
+          <a href="#" class="nav-item" data-page="categorias">
+            <span class="icon">📋</span><span class="nav-label">Categorías</span>
+          </a>
+          <a href="#" class="nav-item" data-page="pagos">
+            <span class="icon">💰</span><span class="nav-label">Pagos</span>
+          </a>
+          <a href="#" class="nav-item" data-page="recibos">
+            <span class="icon">📄</span><span class="nav-label">Recibos</span>
+          </a>
+          <div class="nav-item-group">
+            <a href="#" class="nav-item nav-item-main" data-page="gastos">
+              <span class="icon">💸</span><span class="nav-label">Gastos</span><span class="nav-caret">▾</span>
+            </a>
+            <div class="nav-submenu">
+              <a href="#" class="nav-submenu-link" data-page="gastos" data-tab="gastos">Gastos</a>
+              <a href="#" class="nav-submenu-link" data-page="gastos" data-tab="proveedores">Proveedores</a>
+            </div>
+          </div>
+          <a href="#" class="nav-item" data-page="caja">
+            <span class="icon">🏦</span><span class="nav-label">Caja/Banco</span>
+          </a>
+          <div class="nav-item-group">
+            <a href="#" class="nav-item nav-item-main" data-page="contabilidad">
+              <span class="icon">📒</span><span class="nav-label">Contabilidad</span><span class="nav-caret">▾</span>
+            </a>
+            <div class="nav-submenu">
+              <a href="#" class="nav-submenu-link" data-page="contabilidad" data-tab="plancuentas">Plan de Cuentas</a>
+              <a href="#" class="nav-submenu-link" data-page="contabilidad" data-tab="mapeo">Mapeo de Conceptos</a>
+              <a href="#" class="nav-submenu-link" data-page="contabilidad" data-tab="asientos">Asientos Contables</a>
+              <a href="#" class="nav-submenu-link" data-page="contabilidad" data-tab="reportes">Reportes Contables</a>
+            </div>
+          </div>
+          <a href="#" class="nav-item" data-page="reportes">
+            <span class="icon">📑</span><span class="nav-label">Reportes</span>
+          </a>
+          <a href="#" class="nav-item" data-page="configuracion">
+            <span class="icon">⚙️</span><span class="nav-label">Configuración</span>
+          </a>
+        </nav>
 
-      <div class="sidebar-footer">
-        <div class="sidebar-user" id="sidebarUser"></div>
-        <button class="btn btn-secondary" id="btnLogout" style="width: 100%;">Cerrar Sesión</button>
+        <div class="sidebar-footer">
+          <div class="sidebar-user" id="sidebarUser">
+            <span class="icon">👤</span>
+            <span class="nav-label" id="sidebarUserInfo"></span>
+          </div>
+          <button class="btn btn-secondary" id="btnLogout" title="Cerrar Sesión">🚪</button>
+        </div>
       </div>
     </aside>
 
@@ -125,6 +137,8 @@
   <div id="toastContainer" class="toast-container"></div>
 
   <script src="../../node_modules/chart.js/dist/chart.umd.js"></script>
+  <script src="js/combobox.js"></script>
+  <script src="js/sidebar.js"></script>
   <script src="js/app.js"></script>
   <script src="js/dashboard.js"></script>
   <script src="js/cuentas.js"></script>

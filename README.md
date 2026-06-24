@@ -7,10 +7,11 @@ No es un ERP completo: el sistema está acotado a lo que necesita una junta de a
 ## Stack Tecnológico
 
 - **Electron** — aplicación de escritorio para Windows
-- **better-sqlite3** — base de datos local, sin dependencias externas ni nube
+- **better-sqlite3** — base de datos local; el sistema funciona 100% sin internet, el respaldo en la nube (más abajo) es opcional
 - **JavaScript vanilla** en el renderer (sin frameworks de frontend)
 - **Chart.js** — gráficos del dashboard
 - **exceljs** — exportación de reportes a Excel
+- **googleapis** — respaldo opcional de la base de datos en Google Drive
 - **electron-builder** — empaquetado del instalador `.exe`
 
 ## Reglas de negocio clave
@@ -22,6 +23,8 @@ No es un ERP completo: el sistema está acotado a lo que necesita una junta de a
 - **Nada se elimina**, solo se desactiva/anula/cancela (cuentas, gastos, nuevos puntos, cuentas contables, etc.). Anular un gasto o recibo no borra su asiento contable: se crea un asiento de **reversión** que lo neutraliza, y el original queda marcado pero intacto como constancia.
 - El sistema **no genera facturación automática**: todo pago o gasto se registra manualmente.
 - Cada gasto, recibo y traslado de caja a banco genera **automáticamente su asiento contable** (débito/crédito), según un mapeo configurable de conceptos a cuentas del Plan Único de Cuentas — nadie tiene que llevar la contabilidad "a mano" aparte.
+- El **Tipo de Gasto** es una lista cerrada (no texto libre): cada uno ya tiene una cuenta contable asignada en Mapeo de Conceptos, así que un gasto nunca puede quedar mal clasificado por error de tipeo. Un Administrador puede agregar nuevos tipos desde Contabilidad → Mapeo de Conceptos cuando aparezca una categoría de gasto que no estaba contemplada.
+- **Terceros** (proveedores y otros aliados) es un catálogo separado de **Propietarios** (clientes/predios): un propietario nunca aparece como tercero ni viceversa, porque son relaciones de naturaleza distinta con el acueducto.
 
 ## Módulos
 
@@ -33,16 +36,24 @@ No es un ERP completo: el sistema está acotado a lo que necesita una junta de a
 | Categorías | Tipos de cuenta (Finca, Tienda, etc.) y su tarifa histórica de sostenimiento |
 | Pagos | Estado de cartera (al día/en mora/saldo a favor), registro de pagos y abonos |
 | Recibos | Comprobantes generados por cada pago, impresión y exportación a PDF |
-| Gastos | Egresos del acueducto (proveedor, NIT/cédula, categoría del gasto) |
+| Gastos | Egresos del acueducto, con su Tipo de Gasto (lista cerrada, define la cuenta contable — ver Mapeo de Conceptos) y, en su propia pestaña, el catálogo de **Terceros** (proveedores y otros aliados, para no reescribir nombre/identificación cada vez) |
 | Caja y Bancos | Saldos, movimientos, consignaciones, resumen de flujo del período |
 | Nuevos Puntos | Conexiones nuevas con valor total y abonos parciales hasta saldarse |
-| Contabilidad | Plan Único de Cuentas (catálogo jerárquico), Mapeo de Conceptos (qué cuenta usa cada tipo de gasto/recibo), Asientos Contables (automáticos + Notas Contables manuales, con reversión), y sus reportes: Libro Diario, Libro Mayor, Balance de Prueba, Balance General, Estado de Resultados, Flujo de Caja, Historial de Pagos/Gastos, e Informe de Empalme (para entrega de junta) |
+| Contabilidad | Plan Único de Cuentas (catálogo jerárquico), Mapeo de Conceptos (qué cuenta usa cada tipo de gasto/recibo, con opción de agregar nuevos tipos), Asientos Contables (automáticos + Notas Contables manuales, con reversión), y sus reportes: Libro Diario, Libro Mayor, Balance de Prueba (general y por Tercero), Balance General, Estado de Resultados, Flujo de Caja, Historial de Pagos/Gastos, e Informe de Empalme (para entrega de junta) |
 | Reportes | Cuentas y Propietarios, y Estado de Cuentas (al día, en mora, saldo a favor, nuevos puntos) |
-| Configuración | Datos de la asociación, parámetros, cambio de contraseña, copia de seguridad/restauración, Modo de Pruebas |
+| Configuración | Datos de la asociación, parámetros, cambio de contraseña, copia de seguridad/restauración local, respaldo en la nube, Modo de Pruebas |
+
+## Respaldo en la nube (opcional)
+
+Cada equipo puede conectar su propia cuenta de Google Drive (Configuración → Respaldo en la Nube) para mantener una copia de la base de datos sincronizada entre varios computadores de la misma asociación (p. ej. el de la tesorería y el de la presidencia). No es obligatorio: el sistema funciona completo sin esto, guardando todo solo en el equipo local.
+
+- **Un solo escritor a la vez**: antes de subir un respaldo, el sistema detecta si otro equipo subió una versión más nueva que este no tiene, para no sobrescribir cambios ajenos sin avisar.
+- **Consulta es de solo-lectura ante la nube**: una sesión con rol Consulta nunca sube nada; al iniciar sesión, si hay una versión más reciente en la nube, la trae sola y reinicia la app, sin pedir confirmación (nunca tiene cambios propios que perder).
+- **Equipo nuevo**: si la base de datos local está vacía, la pantalla previa al login ofrece traer el respaldo más reciente de la nube en vez de empezar desde cero.
 
 ## Arquitectura
 
-> Para el detalle técnico completo (stack, flujo de datos, modelo de seguridad/IPC, base de datos, patrón Repository/Service y el motor de contabilidad de doble partida), ver **[ARQUITECTURA.md](ARQUITECTURA.md)**.
+> Para el detalle técnico completo (stack, flujo de datos, modelo de seguridad/IPC, base de datos, patrón Repository/Service, el motor de contabilidad de doble partida y el respaldo en la nube), ver **[ARQUITECTURA.md](ARQUITECTURA.md)**.
 
 - **Renderer** (`src/renderer/`): HTML/CSS/JS vanilla, un archivo por módulo, sin acceso directo a Node — todo pasa por `window.api` (expuesto en `preload.js` vía `contextBridge`).
 - **Proceso principal** (`main.js`): registra los manejadores `ipcMain.handle(...)`, cada uno devuelve `{ success, data }` o `{ success, error }`.

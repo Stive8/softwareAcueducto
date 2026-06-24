@@ -40,7 +40,9 @@ const Contabilidad = {
     }
   ],
 
-  async load() {
+  // tabInicial: a qué pestaña entrar (la elige el submenú del sidebar al pasar el cursor sobre
+  // "Contabilidad"). Si no se indica, se mantiene en la última que estaba abierta.
+  async load(tabInicial = null) {
     const content = document.getElementById('page-content');
     content.innerHTML = `
       <div class="page-header">
@@ -49,32 +51,15 @@ const Contabilidad = {
       </div>
 
       <div class="table-container">
-        <div class="table-header">
-          <div class="table-controls" style="gap: 8px;">
-            <button class="btn btn-secondary" id="tabPlanCuentasBtn">Plan de Cuentas</button>
-            <button class="btn btn-secondary" id="tabMapeoBtn">Mapeo de Conceptos</button>
-            <button class="btn btn-secondary" id="tabAsientosBtn">Asientos Contables</button>
-            <button class="btn btn-secondary" id="tabReportesContablesBtn">Reportes Contables</button>
-          </div>
-        </div>
         <div id="contabilidadBody"></div>
       </div>
     `;
 
-    document.getElementById('tabPlanCuentasBtn').addEventListener('click', () => this.mostrarTab('plancuentas'));
-    document.getElementById('tabMapeoBtn').addEventListener('click', () => this.mostrarTab('mapeo'));
-    document.getElementById('tabAsientosBtn').addEventListener('click', () => this.mostrarTab('asientos'));
-    document.getElementById('tabReportesContablesBtn').addEventListener('click', () => this.mostrarTab('reportes'));
-
-    await this.mostrarTab('plancuentas');
+    await this.mostrarTab(tabInicial || this.tabActual);
   },
 
   async mostrarTab(tab) {
     this.tabActual = tab;
-    document.getElementById('tabPlanCuentasBtn').className = tab === 'plancuentas' ? 'btn btn-primary' : 'btn btn-secondary';
-    document.getElementById('tabMapeoBtn').className = tab === 'mapeo' ? 'btn btn-primary' : 'btn btn-secondary';
-    document.getElementById('tabAsientosBtn').className = tab === 'asientos' ? 'btn btn-primary' : 'btn btn-secondary';
-    document.getElementById('tabReportesContablesBtn').className = tab === 'reportes' ? 'btn btn-primary' : 'btn btn-secondary';
 
     if (tab === 'plancuentas') {
       await this.loadCatalogo();
@@ -373,6 +358,7 @@ const Contabilidad = {
     `;
 
     App.openModal(content);
+    Combobox.attach('cuentaContableId');
 
     document.getElementById('mapeoForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -431,6 +417,7 @@ const Contabilidad = {
     `;
 
     App.openModal(content);
+    Combobox.attach('nuevaCuentaContableId');
 
     document.getElementById('agregarTipoGastoForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -768,6 +755,7 @@ const Contabilidad = {
     `;
 
     tbody.appendChild(fila);
+    Combobox.attach(fila.querySelector('.linea-cuenta'));
 
     const inputDebito = fila.querySelector('.linea-debito');
     const inputCredito = fila.querySelector('.linea-credito');
