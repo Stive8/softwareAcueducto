@@ -5,6 +5,8 @@ const CategoriaService = require('./CategoriaService');
 const PagoService = require('./PagoService');
 const GastoService = require('./GastoService');
 const NuevoPuntoService = require('./NuevoPuntoService');
+const TerceroService = require('./TerceroService');
+const AsientoContableService = require('./AsientoContableService');
 
 // Utilidad exclusiva para pruebas/demostración: nunca se ejecuta automáticamente (no hay
 // migración ni arranque que la dispare), solo a través de un botón explícito en Configuración.
@@ -20,6 +22,8 @@ class DevToolsService {
     this.pagoService = new PagoService(dbService);
     this.gastoService = new GastoService(dbService);
     this.nuevoPuntoService = new NuevoPuntoService(dbService);
+    this.terceroService = new TerceroService(dbService);
+    this.asientoContableService = new AsientoContableService(dbService);
   }
 
   tieneDatosOperativos() {
@@ -85,10 +89,53 @@ class DevToolsService {
         this.pagoService.registrarPagoSostenimiento({ cuentaId: cuenta5, anioInicio: anio, mesInicio: 1, cantidadMeses: mesesAlDia, fechaPago: hoy, metodoPago: 'Transferencia' });
       }
 
-      // Gastos de ejemplo
-      this.gastoService.create({ fechaGasto: hoy, concepto: 'Mantenimiento tubería principal (Ejemplo)', tipoGasto: 'Mantenimiento', proveedor: 'Fontanería El Río', nitCedula: '900111222-3', valor: 350000, metodoPago: 'Efectivo' });
-      this.gastoService.create({ fechaGasto: hoy, concepto: 'Cloro para tratamiento (Ejemplo)', tipoGasto: 'Insumos', proveedor: 'Distribuidora Aguas', nitCedula: '900333444-5', valor: 85000, metodoPago: 'Efectivo' });
-      this.gastoService.create({ fechaGasto: hoy, concepto: 'Pago energía eléctrica (Ejemplo)', tipoGasto: 'Servicios', proveedor: 'Empresa de Energía', nitCedula: '900555666-7', valor: 180000, metodoPago: 'Transferencia' });
+      // Terceros de ejemplo: dos proveedores (uno persona, uno empresa) y uno que presta un
+      // servicio profesional (marcado "Otro", no "Proveedor", para probar esa distinción).
+      const provFontaneria = this.terceroService.create({
+        tipoIdentificacion: 'NIT', numeroIdentificacion: '900111222', nombreRazonSocial: 'Fontanería El Río SAS (Ejemplo)',
+        telefono: '3201112233', esProveedor: true, esOtro: false
+      });
+      const provFerreteria = this.terceroService.create({
+        tipoIdentificacion: 'NIT', numeroIdentificacion: '900333444', nombreRazonSocial: 'Ferretería El Tubo SAS (Ejemplo)',
+        telefono: '3204445566', esProveedor: true, esOtro: false
+      });
+      const provEnergia = this.terceroService.create({
+        tipoIdentificacion: 'NIT', numeroIdentificacion: '900555666', nombreRazonSocial: 'Empresa de Energía (Ejemplo)',
+        telefono: '6017778899', esProveedor: true, esOtro: false
+      });
+      const contadorExterno = this.terceroService.create({
+        tipoIdentificacion: 'Cédula de Ciudadanía', numeroIdentificacion: '10203040', nombreRazonSocial: 'Ana Contreras, Contadora (Ejemplo)',
+        telefono: '3159998877', esProveedor: false, esOtro: true
+      });
+
+      // Gastos de ejemplo: cubren varios tipos distintos (varias cuentas del plan de cuentas),
+      // cada uno con su tercero real, y uno se anula para poder probar la reversión contable.
+      this.gastoService.create({ fechaGasto: hoy, concepto: 'Mantenimiento tubería principal (Ejemplo)', tipoGasto: 'Mantenimiento', terceroId: provFontaneria, valor: 350000, metodoPago: 'Efectivo' });
+      this.gastoService.create({ fechaGasto: hoy, concepto: 'Accesorios y tubería PVC (Ejemplo)', tipoGasto: 'Accesorios y Materiales', terceroId: provFerreteria, valor: 85000, metodoPago: 'Efectivo' });
+      this.gastoService.create({ fechaGasto: hoy, concepto: 'Pago energía eléctrica (Ejemplo)', tipoGasto: 'Energía Eléctrica', terceroId: provEnergia, valor: 180000, metodoPago: 'Transferencia' });
+      this.gastoService.create({ fechaGasto: hoy, concepto: 'Honorarios contables del mes (Ejemplo)', tipoGasto: 'Honorarios', terceroId: contadorExterno, valor: 250000, metodoPago: 'Transferencia' });
+      const gastoIdAnulado = this.gastoService.create({ fechaGasto: hoy, concepto: 'Papelería pedida por error (Ejemplo)', tipoGasto: 'Papelería', terceroId: provFerreteria, valor: 45000, metodoPago: 'Efectivo' });
+      this.gastoService.anular(gastoIdAnulado, 'Pedido duplicado por error (Ejemplo, para probar la reversión contable)');
+
+      // Notas Contables manuales de ejemplo: para que se pueda probar el módulo de Contabilidad
+      // más allá de lo que generan automáticamente los pagos y gastos (Libro Diario, Balance de
+      // Prueba y Balance General con movimiento real en Pasivo y Patrimonio, no solo en Activo).
+      this.asientoContableService.crearManual({
+        fecha: fechaInicioCategoria,
+        concepto: 'Aporte inicial de la junta directiva (Ejemplo, Nota Contable manual)',
+        lineas: [
+          { cuentaContableId: this._idCuentaPorCodigo('111005'), debito: 1000000, credito: 0 },
+          { cuentaContableId: this._idCuentaPorCodigo('3105'), debito: 0, credito: 1000000 }
+        ]
+      });
+      this.asientoContableService.crearManual({
+        fecha: hoy,
+        concepto: 'Préstamo recibido para repuestos de la bomba (Ejemplo, Nota Contable manual)',
+        lineas: [
+          { cuentaContableId: this._idCuentaPorCodigo('111005'), debito: 500000, credito: 0 },
+          { cuentaContableId: this._idCuentaPorCodigo('2105'), debito: 0, credito: 500000 }
+        ]
+      });
 
       // Nuevo punto de ejemplo, pendiente con un abono parcial
       const nuevoPunto = this.nuevoPuntoService.create({ cuentaId: cuenta2, valorTotal: 500000, fechaRegistro: hoy, observaciones: 'Conexión nueva de ejemplo' });
@@ -96,6 +143,12 @@ class DevToolsService {
 
       return { cuentasCreadas: 5 };
     })();
+  }
+
+  _idCuentaPorCodigo(codigo) {
+    const cuenta = this.db.prepare('SELECT id FROM plan_cuentas WHERE codigo = ?').get(codigo);
+    if (!cuenta) throw new Error(`No se encontró la cuenta contable ${codigo} (¿faltó ejecutar la migración del plan de cuentas?)`);
+    return cuenta.id;
   }
 
   eliminarDatosOperativos() {
@@ -116,11 +169,12 @@ class DevToolsService {
         DELETE FROM cuenta_propietarios;
         DELETE FROM cuentas;
         DELETE FROM propietarios;
+        DELETE FROM terceros;
         DELETE FROM sqlite_sequence WHERE name IN (
           'cuentas', 'propietarios', 'cuenta_propietarios', 'cuenta_categorias',
           'recibos', 'recibo_detalles', 'recibos_anulados_fisicos', 'gastos', 'movimientos',
           'pago_periodos', 'cuenta_creditos', 'nuevos_puntos', 'nuevo_punto_abonos',
-          'asientos_contables', 'movimientos_contables'
+          'asientos_contables', 'movimientos_contables', 'terceros'
         );
       `);
       this.db.prepare("UPDATE configuracion SET valor = '1' WHERE clave = 'consecutivo_recibos'").run();

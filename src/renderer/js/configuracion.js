@@ -301,7 +301,7 @@ const Configuracion = {
 
   async cargarDatosEjemplo() {
     const confirmado = await App.confirmDialog(
-      'Esto creará cuentas, propietarios, pagos, gastos y un punto nuevo de ejemplo para que pruebes el sistema. Solo funciona si no hay cuentas registradas todavía. ¿Desea continuar?',
+      'Esto creará cuentas, propietarios, pagos, gastos, terceros (proveedores), un punto nuevo y dos notas contables manuales de ejemplo, para que puedas probar a fondo el sistema (incluyendo el módulo de Contabilidad: asientos, Libro Diario, Balance de Prueba, Balance General y Estado de Resultados con datos reales). Solo funciona si no hay cuentas registradas todavía. ¿Desea continuar?',
       { titulo: 'Cargar Datos de Ejemplo', textoConfirmar: 'Sí, cargar' }
     );
     if (!confirmado) return;
@@ -321,7 +321,7 @@ const Configuracion = {
 
   async eliminarDatosOperativos() {
     const confirmado = await App.confirmDialog(
-      'Esto eliminará PERMANENTEMENTE todas las cuentas, propietarios, pagos, recibos (incluyendo los anulados del talonario físico), gastos, movimientos y nuevos puntos (sean de ejemplo o reales). No afecta categorías, configuración ni el usuario administrador. Esta acción no se puede deshacer. ¿Desea continuar?',
+      'Esto eliminará PERMANENTEMENTE todas las cuentas, propietarios, terceros, pagos, recibos (incluyendo los anulados del talonario físico), gastos, movimientos, asientos contables y nuevos puntos (sean de ejemplo o reales). No afecta categorías, configuración ni el usuario administrador. Esta acción no se puede deshacer. ¿Desea continuar?',
       { titulo: 'Eliminar Todos los Datos Operativos', textoConfirmar: 'Sí, eliminar todo' }
     );
     if (!confirmado) return;
