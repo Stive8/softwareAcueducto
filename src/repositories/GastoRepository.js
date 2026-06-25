@@ -73,6 +73,52 @@ class GastoRepository {
     return this.db.prepare(this._selectConTercero() + ' WHERE g.id = ?').get(id);
   }
 
+  // Total y cantidad de gastos para el mismo conjunto de filtros que usa findAll(), para la
+  // métrica "Total del período filtrado" de la fila de stat-cards del listado.
+  getTotalFiltrado(params = {}) {
+    const { search = '', tipoGasto = '', proveedor = '', fechaDesde = '', fechaHasta = '', estado = '' } = params;
+
+    let query = `
+      SELECT COALESCE(SUM(g.valor), 0) as total, COUNT(*) as cantidad
+      FROM gastos g
+      LEFT JOIN terceros t ON t.id = g.tercero_id
+      WHERE 1=1
+    `;
+    const queryParams = [];
+
+    if (search) {
+      query += ' AND (g.concepto LIKE ? OR g.proveedor LIKE ? OR t.nombre_razon_social LIKE ?)';
+      queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    if (tipoGasto) {
+      query += ' AND g.tipo_gasto = ?';
+      queryParams.push(tipoGasto);
+    }
+
+    if (proveedor) {
+      query += ' AND (g.proveedor LIKE ? OR t.nombre_razon_social LIKE ?)';
+      queryParams.push(`%${proveedor}%`, `%${proveedor}%`);
+    }
+
+    if (fechaDesde) {
+      query += ' AND g.fecha_gasto >= ?';
+      queryParams.push(fechaDesde);
+    }
+
+    if (fechaHasta) {
+      query += ' AND g.fecha_gasto <= ?';
+      queryParams.push(fechaHasta);
+    }
+
+    if (estado) {
+      query += ' AND g.estado = ?';
+      queryParams.push(estado);
+    }
+
+    return this.db.prepare(query).get(...queryParams);
+  }
+
   getTiposGasto() {
     return this.db.prepare(`
       SELECT DISTINCT tipo_gasto FROM gastos WHERE tipo_gasto IS NOT NULL AND tipo_gasto != '' ORDER BY tipo_gasto ASC

@@ -9,33 +9,33 @@ const Dashboard = {
         <h1>Dashboard</h1>
         <p>Resumen general del sistema</p>
       </div>
-      
+
       <div id="alertasContainer"></div>
 
-      <div class="stats-grid" id="stats-grid">
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-card-title">Cargando...</span>
-            <span class="stat-card-icon">⏳</span>
-          </div>
-          <div class="stat-card-value">-</div>
-        </div>
-      </div>
+      <h3 class="stats-section-title">Estado financiero</h3>
+      <div class="stats-grid" id="stats-grid-financiero"></div>
+
+      <h3 class="stats-section-title">Estado operativo</h3>
+      <div class="stats-grid" id="stats-grid-operativo"></div>
 
       <div class="chart-card">
         <h3>Ingresos vs Gastos (Últimos 6 meses)</h3>
         <canvas id="ingresosGastosChart"></canvas>
       </div>
+
+      <h3 class="stats-section-title">Actividad reciente</h3>
+      <div class="actividad-grid" id="actividad-grid"></div>
     `;
 
     await this.loadStats();
     await this.loadChart();
+    await this.loadActividadReciente();
   },
 
   async loadStats() {
     try {
       const response = await window.api.dashboard.getStats();
-      
+
       if (response.success) {
         this.renderAlertas(response.data);
         this.renderStats(response.data);
@@ -89,95 +89,25 @@ const Dashboard = {
   },
 
   renderStats(stats) {
-    const statsGrid = document.getElementById('stats-grid');
-    statsGrid.innerHTML = `
-      <div class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-title">Total Cuentas</span>
-          <span class="stat-card-icon">📋</span>
-        </div>
-        <div class="stat-card-value">${stats.totalCuentas}</div>
-        <div class="stat-card-footer">${stats.cuentasActivas} activas / ${stats.cuentasInactivas} inactivas</div>
-      </div>
+    document.getElementById('stats-grid-financiero').innerHTML = App.renderStatsGrid([
+      { titulo: 'Saldo Caja', valor: `$${this.formatNumber(stats.saldoCaja)}`, footer: 'Efectivo disponible', icono: 'wallet' },
+      { titulo: 'Saldo Banco', valor: `$${this.formatNumber(stats.saldoBanco)}`, footer: 'Cuenta bancaria', icono: 'landmark' },
+      { titulo: 'Cartera Pendiente', valor: `$${this.formatNumber(stats.carteraPendiente)}`, footer: `${stats.cuentasEnMora} cuentas en mora`, icono: 'trendingDown' },
+      { titulo: 'Ingresos del Mes', valor: `$${this.formatNumber(stats.ingresosMes)}`, footer: 'Mes actual', icono: 'barChart' }
+    ]);
 
-      <div class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-title">Cuentas Suspendidas</span>
-          <span class="stat-card-icon">⚠️</span>
-        </div>
-        <div class="stat-card-value">${stats.cuentasSuspendidas}</div>
-        <div class="stat-card-footer">Requieren atención</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-title">Cuentas al Día</span>
-          <span class="stat-card-icon">💚</span>
-        </div>
-        <div class="stat-card-value">${stats.cuentasAlDia}</div>
-        <div class="stat-card-footer">Han pagado recientemente</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-title">Cuentas en Mora</span>
-          <span class="stat-card-icon">🔴</span>
-        </div>
-        <div class="stat-card-value">${stats.cuentasEnMora}</div>
-        <div class="stat-card-footer">Sin pagos recientes</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-title">Saldo a Favor</span>
-          <span class="stat-card-icon">⭐</span>
-        </div>
-        <div class="stat-card-value">${stats.cuentasConSaldoAFavor}</div>
-        <div class="stat-card-footer">Pagos adelantados</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-title">Ingresos Mes</span>
-          <span class="stat-card-icon">📈</span>
-        </div>
-        <div class="stat-card-value">$${this.formatNumber(stats.ingresosMes)}</div>
-        <div class="stat-card-footer">Mes actual</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-title">Gastos Mes</span>
-          <span class="stat-card-icon">📉</span>
-        </div>
-        <div class="stat-card-value">$${this.formatNumber(stats.gastosMes)}</div>
-        <div class="stat-card-footer">Mes actual</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-title">Saldo Caja</span>
-          <span class="stat-card-icon">💵</span>
-        </div>
-        <div class="stat-card-value">$${this.formatNumber(stats.saldoCaja)}</div>
-        <div class="stat-card-footer">Efectivo disponible</div>
-      </div>
-
-      <div class="stat-card">
-        <div class="stat-card-header">
-          <span class="stat-card-title">Saldo Banco</span>
-          <span class="stat-card-icon">🏦</span>
-        </div>
-        <div class="stat-card-value">$${this.formatNumber(stats.saldoBanco)}</div>
-        <div class="stat-card-footer">Cuenta bancaria</div>
-      </div>
-    `;
+    document.getElementById('stats-grid-operativo').innerHTML = App.renderStatsGrid([
+      { titulo: 'Cuentas Activas', valor: stats.cuentasActivas, footer: `${stats.totalCuentas} en total`, icono: 'home' },
+      { titulo: 'Cuentas Suspendidas', valor: stats.cuentasSuspendidas, footer: 'Requieren atención', icono: 'tag' },
+      { titulo: 'Pagos Vencidos', valor: stats.cuentasEnMora, footer: 'Cuentas en mora', icono: 'fileText' },
+      { titulo: 'Saldo a Favor', valor: stats.cuentasConSaldoAFavor, footer: 'Cuentas con pagos adelantados', icono: 'users' }
+    ]);
   },
 
   async loadChart() {
     try {
       const response = await window.api.dashboard.getChartData();
-      
+
       if (response.success) {
         this.renderChart(response.data);
       } else {
@@ -190,7 +120,7 @@ const Dashboard = {
 
   renderChart(data) {
     const ctx = document.getElementById('ingresosGastosChart');
-    
+
     if (this.chartInstance) {
       this.chartInstance.destroy();
     }
@@ -252,7 +182,63 @@ const Dashboard = {
     });
   },
 
+  async loadActividadReciente() {
+    const grid = document.getElementById('actividad-grid');
+    try {
+      const response = await window.api.dashboard.getActividadReciente();
+      if (!response.success) {
+        console.error('Error al cargar actividad reciente:', response.error);
+        return;
+      }
+      grid.innerHTML = this.renderActividadReciente(response.data);
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  },
+
+  renderActividadReciente(data) {
+    const lista = (items, vacioTexto, renderItem) => items.length === 0
+      ? `<p class="actividad-vacio">${vacioTexto}</p>`
+      : `<ul class="actividad-lista">${items.map(renderItem).join('')}</ul>`;
+
+    const ultimosPagos = lista(data.ultimosPagos, 'Sin pagos registrados todavía', p => `
+      <li>
+        <span>Recibo #${p.numero_recibo} · ${p.cuenta_codigo} - ${p.propietario_nombre}</span>
+        <span class="actividad-valor">$${this.formatNumber(p.total)}</span>
+      </li>
+    `);
+
+    const ultimosGastos = lista(data.ultimosGastos, 'Sin gastos registrados todavía', g => `
+      <li>
+        <span>${g.concepto} · ${g.proveedor || 'Sin proveedor'}</span>
+        <span class="actividad-valor">$${this.formatNumber(g.valor)}</span>
+      </li>
+    `);
+
+    const ultimosMovimientos = lista(data.ultimosMovimientosCaja, 'Sin movimientos registrados todavía', m => `
+      <li>
+        <span>${m.tipo} · ${m.concepto || (m.destino ? `${m.origen} → ${m.destino}` : m.origen)}</span>
+        <span class="actividad-valor">$${this.formatNumber(m.monto)}</span>
+      </li>
+    `);
+
+    return `
+      <div class="actividad-card">
+        <h4>Últimos pagos</h4>
+        ${ultimosPagos}
+      </div>
+      <div class="actividad-card">
+        <h4>Últimos gastos</h4>
+        ${ultimosGastos}
+      </div>
+      <div class="actividad-card">
+        <h4>Últimos movimientos de caja</h4>
+        ${ultimosMovimientos}
+      </div>
+    `;
+  },
+
   formatNumber(num) {
-    return num.toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+    return Number(num || 0).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   }
 };

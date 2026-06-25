@@ -28,7 +28,7 @@ const Pagos = {
         </div>
 
         <div id="tableContent">
-          <p style="padding: 24px; text-align: center;">Cargando...</p>
+          ${App.renderSkeletonTable()}
         </div>
       </div>
     `;
@@ -38,11 +38,11 @@ const Pagos = {
   },
 
   setupEventListeners() {
-    document.getElementById('searchInput').addEventListener('input', (e) => {
+    document.getElementById('searchInput').addEventListener('input', App.debounce((e) => {
       this.search = e.target.value;
       this.currentPage = 1;
       this.loadCuentas();
-    });
+    }));
 
     document.getElementById('filtroPagoSelect').addEventListener('change', (e) => {
       this.filtroPago = e.target.value;

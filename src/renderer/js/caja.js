@@ -25,18 +25,14 @@ const Caja = {
         <p>Saldos y movimientos generados automáticamente por pagos y gastos</p>
       </div>
 
-      <div class="stats-grid" id="saldosGrid">
-        <p style="padding: 24px; text-align: center;">Cargando saldos...</p>
-      </div>
+      <div class="stats-grid" id="saldosGrid">${App.renderSkeletonStatsGrid(3)}</div>
 
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header">
           <h2>Resumen del Período</h2>
           <p style="color: #64748b; font-size: 13px;">Usa los filtros de fecha de "Historial de Movimientos" para cambiar el período.</p>
         </div>
-        <div class="stats-grid" id="resumenPeriodoGrid" style="padding: 24px;">
-          <p style="text-align: center;">Cargando resumen...</p>
-        </div>
+        <div class="stats-grid" id="resumenPeriodoGrid" style="padding: 24px;">${App.renderSkeletonStatsGrid(3)}</div>
       </div>
 
       <div class="table-container">
@@ -61,7 +57,7 @@ const Caja = {
         </div>
 
         <div id="tableContent">
-          <p style="padding: 24px; text-align: center;">Cargando...</p>
+          ${App.renderSkeletonTable()}
         </div>
       </div>
     `;
@@ -116,29 +112,11 @@ const Caja = {
 
       const { saldoCaja, saldoBanco } = response.data;
 
-      saldosGrid.innerHTML = `
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-card-title">Saldo en Caja</span>
-            <span class="stat-card-icon">💵</span>
-          </div>
-          <div class="stat-card-value">$${this.formatNumber(saldoCaja)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-card-title">Saldo en Banco</span>
-            <span class="stat-card-icon">🏦</span>
-          </div>
-          <div class="stat-card-value">$${this.formatNumber(saldoBanco)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-card-title">Total Disponible</span>
-            <span class="stat-card-icon">💰</span>
-          </div>
-          <div class="stat-card-value">$${this.formatNumber(saldoCaja + saldoBanco)}</div>
-        </div>
-      `;
+      saldosGrid.innerHTML = App.renderStatsGrid([
+        { titulo: 'Saldo en Caja', valor: `$${this.formatNumber(saldoCaja)}`, icono: 'wallet' },
+        { titulo: 'Saldo en Banco', valor: `$${this.formatNumber(saldoBanco)}`, icono: 'landmark' },
+        { titulo: 'Total Disponible', valor: `$${this.formatNumber(saldoCaja + saldoBanco)}`, icono: 'barChart' }
+      ]);
     } catch (error) {
       console.error('Error:', error);
     }
@@ -157,29 +135,11 @@ const Caja = {
       const { ingresos, gastos, flujoNeto } = response.data;
       const colorFlujo = flujoNeto >= 0 ? '#10b981' : '#ef4444';
 
-      grid.innerHTML = `
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-card-title">Ingresos del Período</span>
-            <span class="stat-card-icon">📈</span>
-          </div>
-          <div class="stat-card-value" style="color: #10b981;">$${this.formatNumber(ingresos)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-card-title">Gastos del Período</span>
-            <span class="stat-card-icon">📉</span>
-          </div>
-          <div class="stat-card-value" style="color: #ef4444;">$${this.formatNumber(gastos)}</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-card-header">
-            <span class="stat-card-title">Flujo Neto</span>
-            <span class="stat-card-icon">⚖️</span>
-          </div>
-          <div class="stat-card-value" style="color: ${colorFlujo};">$${this.formatNumber(flujoNeto)}</div>
-        </div>
-      `;
+      grid.innerHTML = App.renderStatsGrid([
+        { titulo: 'Ingresos del Período', valor: `$${this.formatNumber(ingresos)}`, icono: 'barChart', valorColor: '#10b981' },
+        { titulo: 'Gastos del Período', valor: `$${this.formatNumber(gastos)}`, icono: 'trendingDown', valorColor: '#ef4444' },
+        { titulo: 'Flujo Neto', valor: `$${this.formatNumber(flujoNeto)}`, icono: 'wallet', valorColor: colorFlujo }
+      ]);
     } catch (error) {
       console.error('Error:', error);
     }

@@ -1,5 +1,6 @@
 const GastoRepository = require('../repositories/GastoRepository');
 const AsientoContableService = require('./AsientoContableService');
+const DashboardRepository = require('../repositories/DashboardRepository');
 
 const METODOS_PAGO_VALIDOS = ['Efectivo', 'Transferencia'];
 
@@ -7,6 +8,7 @@ class GastoService {
   constructor(dbService) {
     this.repository = new GastoRepository(dbService);
     this.asientoContableService = new AsientoContableService(dbService);
+    this.dashboardRepo = new DashboardRepository(dbService);
   }
 
   getAll(params) {
@@ -15,6 +17,14 @@ class GastoService {
 
   getById(id) {
     return this.repository.findById(id);
+  }
+
+  // Métricas rápidas para la fila de stat-cards del listado de Gastos: total del mes actual
+  // (mismo criterio que el Dashboard) y total/cantidad del filtro activo en la pantalla.
+  getStats(filtros = {}) {
+    const totalMes = this.dashboardRepo.getGastosMes();
+    const filtrado = this.repository.getTotalFiltrado(filtros);
+    return { totalMes, totalFiltrado: filtrado.total, cantidadFiltrado: filtrado.cantidad };
   }
 
   getTiposGasto() {

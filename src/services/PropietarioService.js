@@ -13,6 +13,10 @@ class PropietarioService {
     return this.repository.findById(id);
   }
 
+  getStats() {
+    return this.repository.getStats();
+  }
+
   create(propietarioData) {
     if (!propietarioData.nombre_completo || !propietarioData.nombre_completo.trim()) {
       throw new Error('El nombre completo es obligatorio');

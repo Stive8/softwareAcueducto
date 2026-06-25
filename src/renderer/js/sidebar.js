@@ -47,6 +47,14 @@ const Sidebar = {
         App.loadPage(page, tab);
       });
     });
+
+    // Al colapsar el sidebar (el cursor sale del riel), cualquier acordeón que haya quedado
+    // abierto se cierra: si no, con el sidebar angosto se veían las primeras letras de las
+    // sub-páginas asomando fuera del riel de 64px, sin importar si se eligió una opción o no.
+    document.querySelector('.sidebar').addEventListener('mouseleave', () => {
+      document.querySelectorAll('.nav-submenu.open').forEach(s => s.classList.remove('open'));
+      document.querySelectorAll('.nav-item-main.open').forEach(m => m.classList.remove('open'));
+    });
   }
 };
 

@@ -171,36 +171,96 @@ const App = {
   setupModal() {
     const modal = document.getElementById('modal');
     const closeBtn = document.querySelector('.modal-close');
-    
+
     closeBtn.addEventListener('click', () => this.closeModal());
-    
+
     modal.addEventListener('click', (e) => {
       if (e.target === modal) {
         this.closeModal();
       }
     });
+
+    // Escape cierra el modal activo, y Tab/Shift+Tab quedan atrapados dentro de él (no debe
+    // ser posible tabular hacia el contenido de la página que quedó detrás).
+    document.addEventListener('keydown', (e) => {
+      if (!modal.classList.contains('active')) return;
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        this.closeModal();
+      } else if (e.key === 'Tab') {
+        this.atraparFocoEnModal(e);
+      }
+    });
+  },
+
+  atraparFocoEnModal(e) {
+    const modalContent = document.querySelector('.modal-content');
+    const focosables = Array.from(modalContent.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
+      .filter(el => !el.disabled && el.offsetParent !== null);
+
+    if (focosables.length === 0) return;
+
+    const primero = focosables[0];
+    const ultimo = focosables[focosables.length - 1];
+
+    if (e.shiftKey && document.activeElement === primero) {
+      e.preventDefault();
+      ultimo.focus();
+    } else if (!e.shiftKey && document.activeElement === ultimo) {
+      e.preventDefault();
+      primero.focus();
+    }
   },
 
   openModal(content, size = 'normal') {
     const modal = document.getElementById('modal');
     const modalBody = document.getElementById('modal-body');
     const modalContent = modal.querySelector('.modal-content');
-    
+
     // Remover clases de tamaño previas
-    modalContent.classList.remove('modal-large');
-    
-    // Agregar clase de tamaño si es necesario
+    modalContent.classList.remove('modal-large', 'modal-xlarge');
+
+    // Agregar clase de tamaño si es necesario. 'xlarge' es para contenido que puede ser muy
+    // ancho (tablas de reportes): se adapta al espacio disponible en pantalla en vez de tener
+    // un ancho fijo, ver .modal-content.modal-xlarge en styles.css.
     if (size === 'large') {
       modalContent.classList.add('modal-large');
+    } else if (size === 'xlarge') {
+      modalContent.classList.add('modal-xlarge');
     }
-    
+
     modalBody.innerHTML = content;
     modal.classList.add('active');
+
+    // Para devolver el foco a donde estaba al cerrar (ej. el botón "+ Nuevo" que abrió el modal).
+    this.elementoConFocoPrevio = document.activeElement;
+
+    // Foco inicial dentro del modal: el primer campo de formulario si hay uno, o si no el
+    // primer botón. Sin esto el usuario tenía que hacer click dentro del modal antes de poder
+    // escribir o navegar con teclado.
+    requestAnimationFrame(() => {
+      const focoInicial = modalContent.querySelector('input, select, textarea') || modalContent.querySelector('button');
+      if (focoInicial) focoInicial.focus();
+    });
   },
 
   closeModal() {
     const modal = document.getElementById('modal');
     modal.classList.remove('active');
+
+    // Si el modal se cierra sin pasar por el botón que resuelve su propia promesa (ej.
+    // confirmDialog cerrado con Escape o clic fuera), esto evita que quede una promesa colgada.
+    if (this.alCerrarModalSinResolver) {
+      const callback = this.alCerrarModalSinResolver;
+      this.alCerrarModalSinResolver = null;
+      callback();
+    }
+
+    if (this.elementoConFocoPrevio && typeof this.elementoConFocoPrevio.focus === 'function') {
+      this.elementoConFocoPrevio.focus();
+    }
+    this.elementoConFocoPrevio = null;
   },
 
   // Notificación no bloqueante. Reemplaza a alert(): los diálogos nativos de Electron
@@ -233,6 +293,13 @@ const App = {
     const { titulo = 'Confirmar', textoConfirmar = 'Confirmar', textoCancelar = 'Cancelar' } = opciones;
 
     return new Promise((resolve) => {
+      let resuelto = false;
+      const resolverUnaVez = (valor) => {
+        if (resuelto) return;
+        resuelto = true;
+        resolve(valor);
+      };
+
       const content = `
         <div class="modal-header"><h2>${titulo}</h2></div>
         <p style="margin-bottom: 24px; color: #334155; font-size: 14px;">${message}</p>
@@ -243,17 +310,81 @@ const App = {
       `;
 
       this.openModal(content);
+      // Si el modal se cierra con Escape o clic fuera (sin pasar por ninguno de los dos
+      // botones), se trata como un Cancelar en vez de dejar la promesa colgada para siempre.
+      this.alCerrarModalSinResolver = () => resolverUnaVez(false);
 
       document.getElementById('confirmDialogCancelBtn').addEventListener('click', () => {
+        // Se limpia antes de cerrar: si no, closeModal() dispararía este mismo fallback con
+        // valor false y "ganaría" por ser el primero en resolver (la promesa solo resuelve una
+        // vez), aunque en este caso da igual porque el botón también cancela.
+        this.alCerrarModalSinResolver = null;
         this.closeModal();
-        resolve(false);
+        resolverUnaVez(false);
       });
 
       document.getElementById('confirmDialogOkBtn').addEventListener('click', () => {
+        // Aquí sí es crítico limpiar antes de cerrar: sin esto, closeModal() dispararía el
+        // fallback (resuelve false) antes de llegar a resolverUnaVez(true), y un "Confirmar"
+        // terminaría resolviendo como si hubiera sido un Cancelar.
+        this.alCerrarModalSinResolver = null;
         this.closeModal();
-        resolve(true);
+        resolverUnaVez(true);
       });
     });
+  },
+
+  // Cards de una fila de métricas rápidas (stat-cards), para usar como innerHTML de un
+  // contenedor con class="stats-grid" ya presente en el HTML del módulo (no incluye el wrapper,
+  // para no anidar dos .stats-grid cuando el módulo ya declaró el suyo con su propio id).
+  // items: [{ titulo, valor, footer, icono, valorColor }] — icono es una clave de Icons (ver
+  // icons.js); valorColor es opcional (ej. verde/rojo según si un flujo neto es positivo).
+  renderStatsGrid(items) {
+    return items.map(item => `
+      <div class="stat-card">
+        <div class="stat-card-header">
+          <span class="stat-card-title">${item.titulo}</span>
+          <span class="stat-card-icon">${renderIcon(item.icono)}</span>
+        </div>
+        <div class="stat-card-value"${item.valorColor ? ` style="color: ${item.valorColor};"` : ''}>${item.valor}</div>
+        ${item.footer ? `<div class="stat-card-footer">${item.footer}</div>` : ''}
+      </div>
+    `).join('');
+  },
+
+  // Retrasa la ejecución de fn hasta que pasen `espera` ms sin que se vuelva a llamar: se usa en
+  // los buscadores de las tablas para no disparar una consulta por cada tecla presionada.
+  debounce(fn, espera = 300) {
+    let temporizador;
+    return (...args) => {
+      clearTimeout(temporizador);
+      temporizador = setTimeout(() => fn(...args), espera);
+    };
+  },
+
+  // Placeholder de carga para una tabla (reemplaza el "Cargando..." de texto plano que tenían
+  // todos los módulos): un puñado de filas con barras grises animadas, del mismo ancho que el
+  // contenido real, así la pantalla no "salta" tanto cuando los datos llegan.
+  renderSkeletonTable(filas = 5, columnas = 5) {
+    const fila = () => `
+      <div class="skeleton-row">
+        ${Array.from({ length: columnas }).map(() => '<span class="skeleton skeleton-cell"></span>').join('')}
+      </div>
+    `;
+    return `<div class="skeleton-table">${Array.from({ length: filas }).map(fila).join('')}</div>`;
+  },
+
+  // Mismo recurso, pero con la forma de una fila de stat-cards (Caja muestra esto mientras
+  // llegan los saldos, antes de tener datos reales que mostrar).
+  renderSkeletonStatsGrid(cantidad = 3) {
+    return Array.from({ length: cantidad }).map(() => `
+      <div class="stat-card">
+        <div class="stat-card-header">
+          <span class="skeleton skeleton-text" style="width: 90px; height: 12px;"></span>
+        </div>
+        <span class="skeleton skeleton-text" style="width: 60%; height: 26px;"></span>
+      </div>
+    `).join('');
   },
 
   // --- Campos de dinero: formato con separador de miles y símbolo $ mientras se escribe ---

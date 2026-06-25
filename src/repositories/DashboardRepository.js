@@ -51,18 +51,24 @@ class DashboardRepository {
 
   // Cuentas activas cuyo último mes pagado es anterior al mes actual (o que nunca han pagado)
   getCuentasEnMora() {
+    return this.getCuentasEnMoraIds().length;
+  }
+
+  // Mismo criterio que getCuentasEnMora(), pero devuelve los ids: lo usa DashboardService
+  // para sumar la deuda estimada de cada una reutilizando PagoService.getEstadoCuenta().
+  getCuentasEnMoraIds() {
     const periodoActual = this.getPeriodoActualCodigo();
 
-    const result = this.db.prepare(`
-      SELECT COUNT(*) as total
+    const rows = this.db.prepare(`
+      SELECT c.id
       FROM cuentas c
       WHERE c.estado = 'Activo'
       AND COALESCE((
         SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id
       ), -1) < ?
-    `).get(periodoActual);
+    `).all(periodoActual);
 
-    return result.total;
+    return rows.map(r => r.id);
   }
 
   // Cuentas con saldo a favor: abonos registrados que aún no se han aplicado a meses de sostenimiento
@@ -112,6 +118,40 @@ class DashboardRepository {
     }
 
     return { meses, ingresos, gastos };
+  }
+
+  getUltimosPagos(limite = 5) {
+    return this.db.prepare(`
+      SELECT r.id, r.numero_recibo, r.fecha_recibo, r.total,
+        c.codigo as cuenta_codigo, p.nombre_completo as propietario_nombre
+      FROM recibos r
+      INNER JOIN cuentas c ON c.id = r.cuenta_id
+      INNER JOIN propietarios p ON p.id = r.propietario_id
+      WHERE r.estado != 'Anulado'
+      ORDER BY r.fecha_recibo DESC, r.id DESC
+      LIMIT ?
+    `).all(limite);
+  }
+
+  getUltimosGastos(limite = 5) {
+    return this.db.prepare(`
+      SELECT g.id, g.fecha_gasto, g.concepto,
+        COALESCE(t.nombre_razon_social, g.proveedor) as proveedor, g.valor
+      FROM gastos g
+      LEFT JOIN terceros t ON t.id = g.tercero_id
+      WHERE g.estado != 'Anulado'
+      ORDER BY g.fecha_gasto DESC, g.id DESC
+      LIMIT ?
+    `).all(limite);
+  }
+
+  getUltimosMovimientosCaja(limite = 5) {
+    return this.db.prepare(`
+      SELECT id, tipo, origen, destino, monto, concepto, fecha_movimiento
+      FROM movimientos
+      ORDER BY fecha_movimiento DESC, id DESC
+      LIMIT ?
+    `).all(limite);
   }
 }
 

@@ -21,7 +21,7 @@ const Recibos = {
         </div>
 
         <div id="tableContent">
-          <p style="padding: 24px; text-align: center;">Cargando...</p>
+          ${App.renderSkeletonTable()}
         </div>
       </div>
 
@@ -37,7 +37,7 @@ const Recibos = {
           (error de escritura, tachón, etc.) y por eso nunca generaron cuenta ni valor en el sistema.
         </div>
         <div id="anuladosFisicosContent">
-          <p style="padding: 24px; text-align: center;">Cargando...</p>
+          ${App.renderSkeletonTable()}
         </div>
       </div>
     `;
@@ -48,11 +48,11 @@ const Recibos = {
   },
 
   setupEventListeners() {
-    document.getElementById('searchInput').addEventListener('input', (e) => {
+    document.getElementById('searchInput').addEventListener('input', App.debounce((e) => {
       this.search = e.target.value;
       this.currentPage = 1;
       this.loadRecibos();
-    });
+    }));
 
     document.getElementById('btnRegistrarAnuladoFisico').addEventListener('click', () => {
       this.showRegistrarAnuladoFisicoModal();

@@ -8,7 +8,7 @@ const Configuracion = {
         <p>Datos de la asociación, parámetros generales, seguridad y copias de seguridad</p>
       </div>
       <div id="configContent">
-        <p style="padding: 24px; text-align: center;">Cargando...</p>
+        ${App.renderSkeletonTable()}
       </div>
     `;
 
@@ -144,12 +144,12 @@ const Configuracion = {
           <h2>Usuarios</h2>
           <button type="button" class="btn btn-primary" id="btnNuevoUsuario">+ Nuevo Usuario</button>
         </div>
-        <div id="usuariosContent"><p style="padding: 24px; text-align: center;">Cargando...</p></div>
+        <div id="usuariosContent">${App.renderSkeletonTable()}</div>
       </div>
 
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header"><h2>Auditoría</h2></div>
-        <div id="auditoriaContent"><p style="padding: 24px; text-align: center;">Cargando...</p></div>
+        <div id="auditoriaContent">${App.renderSkeletonTable()}</div>
       </div>
 
       <div class="table-container" style="margin-top: 24px;">

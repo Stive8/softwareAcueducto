@@ -12,6 +12,8 @@ const Propietarios = {
         <p>Gestión de propietarios del acueducto</p>
       </div>
 
+      <div class="stats-grid" id="propietariosStatsGrid"></div>
+
       <div class="table-container">
         <div class="table-header">
           <h2>Listado de Propietarios</h2>
@@ -22,21 +24,41 @@ const Propietarios = {
         </div>
 
         <div id="tableContent">
-          <p style="padding: 24px; text-align: center;">Cargando...</p>
+          ${App.renderSkeletonTable()}
         </div>
       </div>
     `;
 
     this.setupEventListeners();
+    await this.loadStats();
     await this.loadPropietarios();
   },
 
+  async loadStats() {
+    const grid = document.getElementById('propietariosStatsGrid');
+    try {
+      const response = await window.api.propietarios.getStats();
+      if (!response.success) {
+        console.error('Error al cargar métricas de propietarios:', response.error);
+        return;
+      }
+      const { total, conCuenta, sinCuenta } = response.data;
+      grid.innerHTML = App.renderStatsGrid([
+        { titulo: 'Total Propietarios', valor: total, icono: 'users' },
+        { titulo: 'Con Cuenta Asignada', valor: conCuenta, icono: 'home' },
+        { titulo: 'Sin Cuenta Asignada', valor: sinCuenta, icono: 'tag' }
+      ]);
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  },
+
   setupEventListeners() {
-    document.getElementById('searchInput').addEventListener('input', (e) => {
+    document.getElementById('searchInput').addEventListener('input', App.debounce((e) => {
       this.search = e.target.value;
       this.currentPage = 1;
       this.loadPropietarios();
-    });
+    }));
 
     document.getElementById('btnNuevoPropietario').addEventListener('click', () => {
       this.showFormModal();

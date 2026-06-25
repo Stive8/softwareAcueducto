@@ -3,12 +3,14 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('api', {
   dashboard: {
     getStats: () => ipcRenderer.invoke('dashboard:getStats'),
-    getChartData: () => ipcRenderer.invoke('dashboard:getChartData')
+    getChartData: () => ipcRenderer.invoke('dashboard:getChartData'),
+    getActividadReciente: () => ipcRenderer.invoke('dashboard:getActividadReciente')
   },
   cuentas: {
     getAll: (params) => ipcRenderer.invoke('cuentas:getAll', params),
     getById: (id) => ipcRenderer.invoke('cuentas:getById', id),
     getCategorias: () => ipcRenderer.invoke('cuentas:getCategorias'),
+    getStats: () => ipcRenderer.invoke('cuentas:getStats'),
     create: (cuentaData) => ipcRenderer.invoke('cuentas:create', cuentaData),
     update: (id, cuentaData) => ipcRenderer.invoke('cuentas:update', id, cuentaData),
     changeStatus: (id, estado) => ipcRenderer.invoke('cuentas:changeStatus', id, estado)
@@ -16,6 +18,7 @@ contextBridge.exposeInMainWorld('api', {
   propietarios: {
     getAll: (params) => ipcRenderer.invoke('propietarios:getAll', params),
     getById: (id) => ipcRenderer.invoke('propietarios:getById', id),
+    getStats: () => ipcRenderer.invoke('propietarios:getStats'),
     create: (propietarioData) => ipcRenderer.invoke('propietarios:create', propietarioData),
     update: (id, propietarioData) => ipcRenderer.invoke('propietarios:update', id, propietarioData),
     getCuentasActuales: (propietarioId) => ipcRenderer.invoke('propietarios:getCuentasActuales', propietarioId),
@@ -64,6 +67,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   gastos: {
     getAll: (params) => ipcRenderer.invoke('gastos:getAll', params),
+    getStats: (params) => ipcRenderer.invoke('gastos:getStats', params),
     getById: (id) => ipcRenderer.invoke('gastos:getById', id),
     getTiposGasto: () => ipcRenderer.invoke('gastos:getTiposGasto'),
     create: (gastoData) => ipcRenderer.invoke('gastos:create', gastoData),

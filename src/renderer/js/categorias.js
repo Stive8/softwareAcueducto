@@ -17,7 +17,7 @@ const Categorias = {
         </div>
 
         <div id="tableContent">
-          <p style="padding: 24px; text-align: center;">Cargando...</p>
+          ${App.renderSkeletonTable()}
         </div>
       </div>
     `;

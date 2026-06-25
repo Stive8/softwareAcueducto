@@ -21,6 +21,8 @@ const Gastos = {
         <p>Registro de gastos del acueducto y catálogo de proveedores</p>
       </div>
 
+      <div class="stats-grid" id="gastosStatsGrid"></div>
+
       <div class="table-container">
         <div id="gastosModuloBody"></div>
       </div>
@@ -32,8 +34,35 @@ const Gastos = {
   async mostrarTab(tab) {
     this.tabActual = tab;
 
-    if (tab === 'gastos') await this.renderTabGastos();
-    if (tab === 'proveedores') await this.renderTabProveedores();
+    if (tab === 'gastos') {
+      await this.renderTabGastos();
+    } else {
+      document.getElementById('gastosStatsGrid').innerHTML = '';
+      if (tab === 'proveedores') await this.renderTabProveedores();
+    }
+  },
+
+  async loadStats() {
+    const grid = document.getElementById('gastosStatsGrid');
+    try {
+      const response = await window.api.gastos.getStats({
+        search: this.search,
+        tipoGasto: this.tipoGasto,
+        fechaDesde: this.fechaDesde,
+        fechaHasta: this.fechaHasta
+      });
+      if (!response.success) {
+        console.error('Error al cargar métricas de gastos:', response.error);
+        return;
+      }
+      const { totalMes, totalFiltrado, cantidadFiltrado } = response.data;
+      grid.innerHTML = App.renderStatsGrid([
+        { titulo: 'Total Gastos del Mes', valor: `$${this.formatNumber(totalMes)}`, icono: 'trendingDown' },
+        { titulo: 'Total del Filtro Activo', valor: `$${this.formatNumber(totalFiltrado)}`, footer: `${cantidadFiltrado} gastos`, icono: 'barChart' }
+      ]);
+    } catch (error) {
+      console.error('Error:', error);
+    }
   },
 
   async renderTabGastos() {
@@ -56,11 +85,12 @@ const Gastos = {
       </div>
 
       <div id="tableContent">
-        <p style="padding: 24px; text-align: center;">Cargando...</p>
+        ${App.renderSkeletonTable()}
       </div>
     `;
 
     this.setupEventListeners();
+    await this.loadStats();
     await this.loadGastos();
   },
 
@@ -75,27 +105,31 @@ const Gastos = {
   },
 
   setupEventListeners() {
-    document.getElementById('searchInput').addEventListener('input', (e) => {
+    document.getElementById('searchInput').addEventListener('input', App.debounce((e) => {
       this.search = e.target.value;
       this.currentPage = 1;
+      this.loadStats();
       this.loadGastos();
-    });
+    }));
 
     document.getElementById('tipoFilter').addEventListener('change', (e) => {
       this.tipoGasto = e.target.value;
       this.currentPage = 1;
+      this.loadStats();
       this.loadGastos();
     });
 
     document.getElementById('fechaDesdeFilter').addEventListener('change', (e) => {
       this.fechaDesde = e.target.value;
       this.currentPage = 1;
+      this.loadStats();
       this.loadGastos();
     });
 
     document.getElementById('fechaHastaFilter').addEventListener('change', (e) => {
       this.fechaHasta = e.target.value;
       this.currentPage = 1;
+      this.loadStats();
       this.loadGastos();
     });
 
@@ -391,6 +425,7 @@ const Gastos = {
 
       if (response.success) {
         App.closeModal();
+        this.loadStats();
         this.loadGastos();
         App.toast('Gasto registrado con éxito');
       } else {
@@ -443,6 +478,7 @@ const Gastos = {
 
         if (response.success) {
           App.closeModal();
+          this.loadStats();
           this.loadGastos();
           App.toast('Gasto anulado con éxito');
         } else {
@@ -473,14 +509,14 @@ const Gastos = {
       </div>
 
       <div id="proveedoresTableContent">
-        <p style="padding: 24px; text-align: center;">Cargando...</p>
+        ${App.renderSkeletonTable()}
       </div>
     `;
 
-    document.getElementById('proveedoresSearchInput').addEventListener('input', (e) => {
+    document.getElementById('proveedoresSearchInput').addEventListener('input', App.debounce((e) => {
       this.proveedoresSearch = e.target.value;
       this.loadProveedores();
-    });
+    }));
 
     document.getElementById('btnNuevoProveedor').addEventListener('click', () => this.showFormModalProveedor());
 

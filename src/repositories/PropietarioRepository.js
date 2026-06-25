@@ -127,6 +127,19 @@ class PropietarioRepository {
     `).get(cuentaId);
   }
 
+  // Total de propietarios y cuántos tienen al menos una cuenta asignada actualmente (fecha_fin
+  // IS NULL), para la fila de métricas rápidas del listado.
+  getStats() {
+    const total = this.db.prepare('SELECT COUNT(*) as total FROM propietarios').get().total;
+    const conCuenta = this.db.prepare(`
+      SELECT COUNT(DISTINCT propietario_id) as total
+      FROM cuenta_propietarios
+      WHERE fecha_fin IS NULL
+    `).get().total;
+
+    return { total, conCuenta, sinCuenta: total - conCuenta };
+  }
+
   getHistorialPropietariosCuenta(cuentaId) {
     return this.db.prepare(`
       SELECT p.nombre_completo, p.numero_identificacion, 

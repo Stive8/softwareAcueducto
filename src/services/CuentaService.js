@@ -1,12 +1,21 @@
 const CuentaRepository = require('../repositories/CuentaRepository');
+const DashboardRepository = require('../repositories/DashboardRepository');
 
 class CuentaService {
   constructor(dbService) {
     this.repository = new CuentaRepository(dbService);
+    this.dashboardRepo = new DashboardRepository(dbService);
   }
 
   getAll(params) {
     return this.repository.findAll(params);
+  }
+
+  // Métricas rápidas para la fila de stat-cards del listado de Cuentas: reutiliza el mismo
+  // criterio de mora que ya usa el Dashboard (DashboardRepository.getCuentasEnMoraIds).
+  getStats() {
+    const stats = this.repository.getStats();
+    return { ...stats, enMora: this.dashboardRepo.getCuentasEnMoraIds().length };
   }
 
   getById(id) {

@@ -287,6 +287,14 @@ function setupIpcHandlers() {
     }
   });
 
+  envolverHandle('dashboard:getActividadReciente', async () => {
+    try {
+      return { success: true, data: dashboardService.getActividadReciente() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Cuentas
   envolverHandle('cuentas:getAll', async (event, params) => {
     try {
@@ -311,6 +319,14 @@ function setupIpcHandlers() {
   envolverHandle('cuentas:getCategorias', async () => {
     try {
       return { success: true, data: cuentaService.getCategorias() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cuentas:getStats', async () => {
+    try {
+      return { success: true, data: cuentaService.getStats() };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -347,6 +363,14 @@ function setupIpcHandlers() {
   envolverHandle('propietarios:getAll', async (event, params) => {
     try {
       return { success: true, data: propietarioService.getAll(params) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('propietarios:getStats', async () => {
+    try {
+      return { success: true, data: propietarioService.getStats() };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -969,6 +993,14 @@ function setupIpcHandlers() {
   envolverHandle('gastos:getAll', async (event, params) => {
     try {
       return { success: true, data: gastoService.getAll(params) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('gastos:getStats', async (event, params) => {
+    try {
+      return { success: true, data: gastoService.getStats(params) };
     } catch (error) {
       return { success: false, error: error.message };
     }

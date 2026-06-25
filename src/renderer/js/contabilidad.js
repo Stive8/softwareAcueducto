@@ -9,33 +9,33 @@ const Contabilidad = {
     {
       titulo: 'Pagos y Gastos',
       reportes: [
-        { tipo: 'historial_pagos', titulo: 'Historial de Pagos', icon: '💰', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
-        { tipo: 'historial_gastos', titulo: 'Historial de Gastos', icon: '💸', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
-        { tipo: 'ingresos_periodo', titulo: 'Ingresos por Período', icon: '📈', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
-        { tipo: 'gastos_periodo', titulo: 'Gastos por Período', icon: '📉', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true }
+        { tipo: 'historial_pagos', titulo: 'Historial de Pagos', icon: 'wallet', descripcion: 'Listado detallado de los pagos de sostenimiento recibidos en el rango de fechas.', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
+        { tipo: 'historial_gastos', titulo: 'Historial de Gastos', icon: 'trendingDown', descripcion: 'Listado detallado de los gastos registrados en el rango de fechas.', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
+        { tipo: 'ingresos_periodo', titulo: 'Ingresos por Período', icon: 'barChart', descripcion: 'Total de ingresos agrupados por cuenta contable en el período.', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
+        { tipo: 'gastos_periodo', titulo: 'Gastos por Período', icon: 'trendingDown', descripcion: 'Total de gastos agrupados por cuenta contable en el período.', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true }
       ]
     },
     {
       titulo: 'Estados Financieros',
       reportes: [
-        { tipo: 'balance_general', titulo: 'Balance General', icon: '📊', fechaCorte: true },
-        { tipo: 'estado_resultados', titulo: 'Estado de Resultados', icon: '📋', rangoFecha: true },
-        { tipo: 'flujo_caja', titulo: 'Flujo de Caja', icon: '💧', rangoFecha: true }
+        { tipo: 'balance_general', titulo: 'Balance General', icon: 'landmark', descripcion: 'Activos, pasivos y patrimonio a una fecha de corte.', fechaCorte: true, destacado: true },
+        { tipo: 'estado_resultados', titulo: 'Estado de Resultados', icon: 'fileChart', descripcion: 'Ingresos, gastos y utilidad del período.', rangoFecha: true, destacado: true },
+        { tipo: 'flujo_caja', titulo: 'Flujo de Caja', icon: 'wallet', descripcion: 'Entradas y salidas de efectivo en el período.', rangoFecha: true }
       ]
     },
     {
       titulo: 'Doble Partida',
       reportes: [
-        { tipo: 'libro_diario', titulo: 'Libro Diario', icon: '📖', rangoFecha: true, filtroTipoCuenta: true },
-        { tipo: 'libro_mayor', titulo: 'Libro Mayor', icon: '📚', rangoFecha: true, requiereCuentaContable: true },
-        { tipo: 'balance_prueba', titulo: 'Balance de Prueba', icon: '⚖️', rangoFecha: true, filtroTipoCuenta: true },
-        { tipo: 'balance_prueba_tercero', titulo: 'Balance de Prueba por Tercero', icon: '🧾', rangoFecha: true, rangoCuentaContable: true, filtroTercero: true, previaPantalla: true }
+        { tipo: 'libro_diario', titulo: 'Libro Diario', icon: 'book', descripcion: 'Registro cronológico de los movimientos contables del período.', rangoFecha: true, filtroTipoCuenta: true, destacado: true },
+        { tipo: 'libro_mayor', titulo: 'Libro Mayor', icon: 'book', descripcion: 'Movimientos y saldo de una cuenta contable específica en el período.', rangoFecha: true, requiereCuentaContable: true, destacado: true },
+        { tipo: 'balance_prueba', titulo: 'Balance de Prueba', icon: 'barChart', descripcion: 'Saldos de todas las cuentas contables al cierre del período.', rangoFecha: true, filtroTipoCuenta: true },
+        { tipo: 'balance_prueba_tercero', titulo: 'Balance de Prueba por Tercero', icon: 'fileText', descripcion: 'Saldo de las cuentas de un tercero específico en un rango de cuentas.', rangoFecha: true, rangoCuentaContable: true, filtroTercero: true }
       ]
     },
     {
       titulo: 'Informe de Gestión',
       reportes: [
-        { tipo: 'informe_empalme', titulo: 'Informe de Empalme', icon: '🤝', rangoFecha: true }
+        { tipo: 'informe_empalme', titulo: 'Informe de Empalme', icon: 'fileChart', descripcion: 'Resumen de gestión para entrega y recepción de la administración.', rangoFecha: true }
       ]
     }
   ],
@@ -80,7 +80,7 @@ const Contabilidad = {
       <div style="padding: 16px 20px; display: flex; justify-content: flex-end;">
         <button class="btn btn-primary" id="btnNuevaCuenta">+ Nueva Cuenta</button>
       </div>
-      <div id="catalogoTableContent"><p style="padding: 24px; text-align: center;">Cargando...</p></div>
+      <div id="catalogoTableContent">${App.renderSkeletonTable()}</div>
     `;
 
     document.getElementById('btnNuevaCuenta').addEventListener('click', () => this.showFormModal());
@@ -274,7 +274,7 @@ const Contabilidad = {
         </p>
         <button class="btn btn-primary" id="btnAgregarTipoGasto" style="white-space: nowrap;">+ Agregar Tipo de Gasto</button>
       </div>
-      <div id="mapeoTableContent"><p style="padding: 24px; text-align: center;">Cargando...</p></div>
+      <div id="mapeoTableContent">${App.renderSkeletonTable()}</div>
     `;
 
     document.getElementById('btnAgregarTipoGasto').addEventListener('click', () => this.showAgregarTipoGastoModal());
@@ -458,7 +458,7 @@ const Contabilidad = {
         </div>
         <button class="btn btn-primary" id="btnNuevoAsientoManual">+ Nueva Nota Contable</button>
       </div>
-      <div id="asientosTableContent"><p style="padding: 24px; text-align: center;">Cargando...</p></div>
+      <div id="asientosTableContent">${App.renderSkeletonTable()}</div>
     `;
 
     document.getElementById('btnFiltrarAsientos').addEventListener('click', () => this.loadListaAsientos());
@@ -789,7 +789,28 @@ const Contabilidad = {
   async loadReportesContables() {
     const body = document.getElementById('contabilidadBody');
 
+    // Las tarjetas destacadas duplican la de su categoría pero con un idSufijo propio (prefijo
+    // "d_"): son el mismo reporte, pero necesitan ids de DOM distintos para no chocar con los
+    // inputs de la tarjeta original más abajo en la página.
+    const destacados = [];
+    this.gruposReportes.forEach((grupo, gi) => {
+      grupo.reportes.forEach((r, ri) => {
+        if (r.destacado) destacados.push(this.renderCard(r, `d_${gi}_${ri}`, { destacado: true }));
+      });
+    });
+
     let html = '';
+    if (destacados.length > 0) {
+      html += `
+        <div style="padding: 16px 20px;">
+          <h3 style="margin: 0 0 12px 0; color: #334155; font-size: 1rem;">Más usados</h3>
+          <div class="reportes-grid reportes-grid-destacados">
+            ${destacados.join('')}
+          </div>
+        </div>
+      `;
+    }
+
     this.gruposReportes.forEach((grupo, gi) => {
       html += `
         <div style="padding: 16px 20px;">
@@ -850,16 +871,51 @@ const Contabilidad = {
     });
   },
 
-  renderCard(reporte, idSufijo) {
+  renderCard(reporte, idSufijo, opciones = {}) {
     const hoy = new Date().toISOString().split('T')[0];
     const inicioMes = new Date();
     inicioMes.setDate(1);
     const inicioMesStr = inicioMes.toISOString().split('T')[0];
 
+    // Filtros "avanzados": opcionales y menos usados que el rango de fechas, se ocultan detrás
+    // de "Más filtros" para que la tarjeta no se vea como un formulario completo de entrada.
+    // La cuenta contable obligatoria (Libro Mayor) y el filtro de tercero (la razón de ser de
+    // ese reporte) se quedan siempre visibles.
+    const filtrosAvanzados = `
+      ${reporte.filtroCuentaContable ? `
+        <select id="cuentaContable_${idSufijo}" data-select-cuenta-contable style="width: 100%; margin-bottom: 8px;">
+          <option value="">Todas las cuentas contables</option>
+        </select>
+      ` : ''}
+      ${reporte.filtroTipoCuenta ? `
+        <select id="tipoCuenta_${idSufijo}" style="width: 100%; margin-bottom: 8px;">
+          <option value="">Todos los tipos de cuenta</option>
+          <option value="Activo">Activo</option>
+          <option value="Pasivo">Pasivo</option>
+          <option value="Patrimonio">Patrimonio</option>
+          <option value="Ingreso">Ingreso</option>
+          <option value="Gasto">Gasto</option>
+          <option value="Costo">Costo</option>
+        </select>
+      ` : ''}
+      ${reporte.rangoCuentaContable ? `
+        <div style="display: flex; gap: 8px;">
+          <select id="cuentaDesde_${idSufijo}" data-select-cuenta-contable data-placeholder="Cuenta desde (todas)" style="width: 50%;">
+            <option value="">Cuenta desde (todas)</option>
+          </select>
+          <select id="cuentaHasta_${idSufijo}" data-select-cuenta-contable data-placeholder="Cuenta hasta (todas)" style="width: 50%;">
+            <option value="">Cuenta hasta (todas)</option>
+          </select>
+        </div>
+      ` : ''}
+    `;
+    const tieneFiltrosAvanzados = !!(reporte.filtroCuentaContable || reporte.filtroTipoCuenta || reporte.rangoCuentaContable);
+
     return `
-      <div class="reporte-card" ${reporte.previaPantalla ? 'style="grid-column: 1 / -1;"' : ''}>
-        <div class="reporte-card-icon">${reporte.icon}</div>
+      <div class="reporte-card${opciones.destacado ? ' reporte-card-destacado' : ''}">
+        <div class="reporte-card-icon">${renderIcon(reporte.icon)}</div>
         <div class="reporte-card-titulo">${reporte.titulo}</div>
+        <p class="reporte-card-descripcion">${reporte.descripcion || ''}</p>
         ${reporte.rangoFecha ? `
           <div class="reporte-card-fechas">
             <input type="date" id="desde_${idSufijo}" value="${inicioMesStr}">
@@ -871,48 +927,32 @@ const Contabilidad = {
             <input type="date" id="corte_${idSufijo}" value="${hoy}" title="Fecha de corte">
           </div>
         ` : ''}
-        ${reporte.filtroCuentaContable || reporte.requiereCuentaContable ? `
-          <select id="cuentaContable_${idSufijo}" data-select-cuenta-contable data-requerida="${!!reporte.requiereCuentaContable}" style="width: 100%; margin-bottom: 8px;" ${reporte.requiereCuentaContable ? 'required' : ''}>
-            <option value="">Todas las cuentas contables</option>
+        ${reporte.requiereCuentaContable ? `
+          <select id="cuentaContable_${idSufijo}" data-select-cuenta-contable data-requerida="true" style="width: 100%; margin-bottom: 8px;" required>
+            <option value="">Seleccione una cuenta contable</option>
           </select>
-        ` : ''}
-        ${reporte.filtroTipoCuenta ? `
-          <select id="tipoCuenta_${idSufijo}" style="width: 100%; margin-bottom: 8px;">
-            <option value="">Todos los tipos de cuenta</option>
-            <option value="Activo">Activo</option>
-            <option value="Pasivo">Pasivo</option>
-            <option value="Patrimonio">Patrimonio</option>
-            <option value="Ingreso">Ingreso</option>
-            <option value="Gasto">Gasto</option>
-            <option value="Costo">Costo</option>
-          </select>
-        ` : ''}
-        ${reporte.rangoCuentaContable ? `
-          <div style="display: flex; gap: 8px;">
-            <select id="cuentaDesde_${idSufijo}" data-select-cuenta-contable data-placeholder="Cuenta desde (todas)" style="width: 50%;">
-              <option value="">Cuenta desde (todas)</option>
-            </select>
-            <select id="cuentaHasta_${idSufijo}" data-select-cuenta-contable data-placeholder="Cuenta hasta (todas)" style="width: 50%;">
-              <option value="">Cuenta hasta (todas)</option>
-            </select>
-          </div>
         ` : ''}
         ${reporte.filtroTercero ? `
-          <input type="text" id="tercero_${idSufijo}" list="tercerosSugeridos" placeholder="Identificación o nombre del tercero (opcional)" style="width: 100%; padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12px;">
+          <input type="text" id="tercero_${idSufijo}" list="tercerosSugeridos" placeholder="Identificación o nombre del tercero (opcional)" style="width: 100%; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 6px; font-size: 12px;">
           <datalist id="tercerosSugeridos"></datalist>
         ` : ''}
+        ${tieneFiltrosAvanzados ? `
+          <button type="button" class="reporte-card-mas-filtros" onclick="Contabilidad.toggleFiltrosAvanzados('${idSufijo}')">Más filtros ▾</button>
+          <div class="reporte-card-filtros-avanzados" id="filtrosAvanzados_${idSufijo}">${filtrosAvanzados}</div>
+        ` : ''}
         <div class="reporte-card-actions">
-          ${reporte.previaPantalla ? `<button class="btn btn-primary" onclick="Contabilidad.buscarReporte('${idSufijo}')">Buscar</button>` : ''}
-          <button class="btn btn-secondary btn-icon" onclick="Contabilidad.exportarReporte('${idSufijo}', 'pdf')">PDF</button>
-          <button class="btn btn-success btn-icon" onclick="Contabilidad.exportarReporte('${idSufijo}', 'excel')">Excel</button>
+          <button class="btn btn-primary" id="btnVistaPrevia_${idSufijo}" onclick="Contabilidad.buscarReporte('${idSufijo}')">Vista previa</button>
         </div>
-        ${reporte.previaPantalla ? `<div id="resultados_${idSufijo}"></div>` : ''}
       </div>
     `;
   },
 
+  toggleFiltrosAvanzados(idSufijo) {
+    document.getElementById(`filtrosAvanzados_${idSufijo}`).classList.toggle('open');
+  },
+
   obtenerReportePorSufijo(idSufijo) {
-    const [gi, ri] = idSufijo.split('_').map(Number);
+    const [gi, ri] = idSufijo.replace(/^d_/, '').split('_').map(Number);
     return this.gruposReportes[gi].reportes[ri];
   },
 
@@ -960,25 +1000,80 @@ const Contabilidad = {
     return params;
   },
 
+  // La vista previa se muestra en un modal (igual que los formularios de Cuenta/Propietario)
+  // en vez de inline dentro de la tarjeta: una tabla con muchas columnas necesita todo el ancho
+  // disponible, no el ancho angosto de una celda del grid de tarjetas, y así tampoco empuja
+  // hacia abajo a las tarjetas vecinas cuando el reporte resulta muy largo.
   async buscarReporte(idSufijo) {
     const reporte = this.obtenerReportePorSufijo(idSufijo);
     const params = this.obtenerParametrosReporte(idSufijo, reporte);
     if (!params) return;
 
-    const contenedor = document.getElementById(`resultados_${idSufijo}`);
-    contenedor.innerHTML = '<p style="padding: 12px; color: #64748b;">Buscando...</p>';
+    const boton = document.getElementById(`btnVistaPrevia_${idSufijo}`);
+    const textoOriginal = boton.textContent;
+    boton.disabled = true;
+    boton.textContent = 'Buscando...';
 
     try {
       const response = await window.api.reportes.getDatos(reporte.tipo, params);
       if (!response.success) {
-        contenedor.innerHTML = `<div class="error-message">${response.error}</div>`;
+        App.toast('Error al generar la vista previa: ' + response.error, 'error');
         return;
       }
-      contenedor.innerHTML = this.renderTablaReporte(response.data);
+      this.mostrarVistaPrevia(idSufijo, reporte, response.data);
     } catch (error) {
       console.error('Error:', error);
-      contenedor.innerHTML = '<div class="error-message">Error al buscar el reporte</div>';
+      App.toast('Error al generar la vista previa', 'error');
+    } finally {
+      boton.disabled = false;
+      boton.textContent = textoOriginal;
     }
+  },
+
+  mostrarVistaPrevia(idSufijo, reporte, datos) {
+    const content = `
+      <div class="modal-header"><h2>${reporte.titulo}</h2></div>
+      <div class="reporte-preview">${this.renderReporte(datos)}</div>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+        <button type="button" class="btn btn-secondary btn-icon" onclick="Contabilidad.exportarReporte('${idSufijo}', 'pdf')">Exportar PDF</button>
+        <button type="button" class="btn btn-success btn-icon" onclick="Contabilidad.exportarReporte('${idSufijo}', 'excel')">Exportar Excel</button>
+      </div>
+    `;
+    // 'xlarge' en vez de 'large': estos reportes pueden traer tablas con muchas columnas
+    // (Libro Diario, Historial de Pagos con todos sus filtros, etc.) y un ancho fijo de 900px
+    // las dejaba con scroll horizontal aunque la pantalla tuviera espacio de sobra.
+    App.openModal(content, 'xlarge');
+  },
+
+  // Despacha según la forma que devolvió el backend (ver ReporteService.getReporte): 'tabla'
+  // para listados, 'resumen' para estados financieros (secciones de label/valor), y 'compuesto'
+  // para el Informe de Empalme (varias partes, cada una tabla o resumen).
+  renderReporte(reporte) {
+    if (reporte.tipo === 'compuesto') {
+      return reporte.partes.map(parte => `
+        <h3 class="reporte-preview-subtitulo">${parte.titulo}</h3>
+        ${parte.tipo === 'resumen' ? this.renderResumen(parte) : this.renderTablaReporte(parte)}
+      `).join('');
+    }
+    if (reporte.tipo === 'resumen') return this.renderResumen(reporte);
+    return this.renderTablaReporte(reporte);
+  },
+
+  renderResumen(reporte) {
+    return reporte.secciones.map(seccion => `
+      <div class="reporte-preview-resumen-seccion">
+        <h4>${seccion.titulo}</h4>
+        ${seccion.items.map(item => `
+          <div class="reporte-preview-resumen-row"><span>${item.label}</span><span>${this.formatValorResumen(item)}</span></div>
+        `).join('')}
+        <div class="reporte-preview-resumen-total"><span>Total ${seccion.titulo}</span><span>${this.formatValorResumen({ valor: seccion.total, tipo: seccion.tipoValor })}</span></div>
+      </div>
+    `).join('');
+  },
+
+  formatValorResumen(item) {
+    return item.tipo === 'numero' ? String(item.valor) : `$${this.formatNumber(item.valor)}`;
   },
 
   renderTablaReporte(reporte) {

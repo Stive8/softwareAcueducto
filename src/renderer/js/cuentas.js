@@ -15,6 +15,8 @@ const Cuentas = {
         <p>Gestión de cuentas del acueducto</p>
       </div>
 
+      <div class="stats-grid" id="cuentasStatsGrid"></div>
+
       <div class="table-container">
         <div class="table-header">
           <h2>Listado de Cuentas</h2>
@@ -35,13 +37,34 @@ const Cuentas = {
         </div>
 
         <div id="tableContent">
-          <p style="padding: 24px; text-align: center;">Cargando...</p>
+          ${App.renderSkeletonTable()}
         </div>
       </div>
     `;
 
     this.setupEventListeners();
+    await this.loadStats();
     await this.loadCuentas();
+  },
+
+  async loadStats() {
+    const grid = document.getElementById('cuentasStatsGrid');
+    try {
+      const response = await window.api.cuentas.getStats();
+      if (!response.success) {
+        console.error('Error al cargar métricas de cuentas:', response.error);
+        return;
+      }
+      const { total, activas, suspendidas, enMora } = response.data;
+      grid.innerHTML = App.renderStatsGrid([
+        { titulo: 'Total Cuentas', valor: total, icono: 'home' },
+        { titulo: 'Activas', valor: activas, icono: 'tag' },
+        { titulo: 'Suspendidas', valor: suspendidas, icono: 'fileText' },
+        { titulo: 'En Mora', valor: enMora, icono: 'trendingDown' }
+      ]);
+    } catch (error) {
+      console.error('Error:', error);
+    }
   },
 
   async getCategoriasOptions() {
@@ -55,11 +78,11 @@ const Cuentas = {
   },
 
   setupEventListeners() {
-    document.getElementById('searchInput').addEventListener('input', (e) => {
+    document.getElementById('searchInput').addEventListener('input', App.debounce((e) => {
       this.search = e.target.value;
       this.currentPage = 1;
       this.loadCuentas();
-    });
+    }));
 
     document.getElementById('estadoFilter').addEventListener('change', (e) => {
       this.estado = e.target.value;
