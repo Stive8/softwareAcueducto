@@ -62,7 +62,6 @@ const PREFIJOS_LECTURA = ['get', 'find', 'simular', 'tiene', 'imprimir', 'export
 const CANALES_SOLO_ADMIN = new Set([
   'usuarios:getAll', 'usuarios:crear', 'usuarios:toggleActivo', 'usuarios:resetearPassword',
   'config:actualizar', 'backup:restaurar',
-  'devtools:cargarDatosEjemplo', 'devtools:eliminarDatosOperativos',
   'auditoria:getAll',
   'plancuentas:create', 'plancuentas:update', 'plancuentas:toggleActivo',
   'mapeocontable:actualizar', 'mapeocontable:crear',
@@ -1543,20 +1542,4 @@ function setupIpcHandlers() {
     }
   });
 
-  envolverHandle('devtools:cargarDatosEjemplo', async () => {
-    try {
-      return { success: true, data: devToolsService.cargarDatosEjemplo() };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('devtools:eliminarDatosOperativos', async () => {
-    try {
-      devToolsService.eliminarDatosOperativos();
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
 }

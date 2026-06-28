@@ -36,6 +36,7 @@
       "preload.js",
       "src/**/*",
       "assets/**/*",
+      "config/google-credentials.json",
       "node_modules/**/*",
       "!node_modules/**/*.{md,markdown}",
       "!node_modules/**/test/**",

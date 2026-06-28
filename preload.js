@@ -139,9 +139,7 @@ contextBridge.exposeInMainWorld('api', {
     exportarPDF: (id) => ipcRenderer.invoke('asientos:exportarPDF', id)
   },
   devtools: {
-    tieneDatosOperativos: () => ipcRenderer.invoke('devtools:tieneDatosOperativos'),
-    cargarDatosEjemplo: () => ipcRenderer.invoke('devtools:cargarDatosEjemplo'),
-    eliminarDatosOperativos: () => ipcRenderer.invoke('devtools:eliminarDatosOperativos')
+    tieneDatosOperativos: () => ipcRenderer.invoke('devtools:tieneDatosOperativos')
   },
   cloudBackup: {
     getEstado: () => ipcRenderer.invoke('cloudBackup:getEstado'),
