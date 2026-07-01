@@ -1,4 +1,4 @@
-// Módulo de Pagos
+﻿// MÃ³dulo de Pagos
 const Pagos = {
   currentPage: 1,
   limit: 10,
@@ -9,18 +9,18 @@ const Pagos = {
     const content = document.getElementById('page-content');
     content.innerHTML = `
       <div class="page-header">
-        <h1>Pagos</h1>
-        <p>Registro de pagos de sostenimiento y abonos. Los pagos se hacen por mes calendario completo.</p>
+        <h1>Aportes</h1>
+        <p>Registro de aportes de sostenimiento y abonos. Los aportes se hacen por mes calendario completo.</p>
       </div>
 
       <div class="table-container">
         <div class="table-header">
           <h2>Estado de Cuentas</h2>
           <div class="table-controls">
-            <input type="text" id="searchInput" class="search-box" placeholder="Buscar por código, dirección, propietario o identificación...">
+            <input type="text" id="searchInput" class="search-box" placeholder="Buscar por cÃ³digo, direcciÃ³n, propietario o identificaciÃ³n...">
             <select id="filtroPagoSelect" class="filter-select">
               <option value="">Todas las cuentas</option>
-              <option value="al_dia">Solo al día</option>
+              <option value="al_dia">Solo al dÃ­a</option>
               <option value="en_mora">Solo en mora</option>
               <option value="saldo_favor">Solo con saldo a favor</option>
             </select>
@@ -83,13 +83,13 @@ const Pagos = {
       <table>
         <thead>
           <tr>
-            <th>Código</th>
-            <th>Dirección</th>
+            <th>CÃ³digo</th>
+            <th>DirecciÃ³n</th>
             <th>Propietario</th>
             <th>Pagado Hasta</th>
             <th>Estado</th>
             <th>Saldo a Favor</th>
-            <th>Conexión</th>
+            <th>ConexiÃ³n</th>
             <th>Acciones</th>
           </tr>
         </thead>
@@ -99,18 +99,18 @@ const Pagos = {
               <td><strong>${c.codigo}</strong></td>
               <td>${c.direccion}</td>
               <td>${c.propietario_actual || '<em>Sin asignar</em>'}</td>
-              <td>${c.pagado_hasta || '<em>Sin pagos</em>'}</td>
+              <td>${c.pagado_hasta || '<em>Sin aportes</em>'}</td>
               <td>
                 ${c.meses_mora > 0
                   ? `<span class="badge badge-mora">En mora (${c.meses_mora} ${c.meses_mora === 1 ? 'mes' : 'meses'})</span>`
-                  : '<span class="badge badge-aldia">Al día</span>'}
+                  : '<span class="badge badge-aldia">Al dÃ­a</span>'}
               </td>
               <td>${c.saldo_favor > 0 ? `<span class="badge badge-favor">$${this.formatNumber(c.saldo_favor)}</span>` : '-'}</td>
-              <td>${c.conexion_pendiente > 0 ? `<span class="badge badge-mora">🔧 $${this.formatNumber(c.conexion_pendiente)}</span>` : '-'}</td>
+              <td>${c.conexion_pendiente > 0 ? `<span class="badge badge-mora">ðŸ”§ $${this.formatNumber(c.conexion_pendiente)}</span>` : '-'}</td>
               <td>
                 <div class="table-actions">
                   <button class="btn btn-primary btn-icon" onclick="Pagos.showDetalleModal(${c.id})">Ver</button>
-                  <button class="btn btn-success btn-icon" onclick="Pagos.showRegistrarPagoModal(${c.id})">Registrar Pago</button>
+                  <button class="btn btn-success btn-icon" onclick="Pagos.showRegistrarPagoModal(${c.id})">Registrar Aporte</button>
                 </div>
               </td>
             </tr>
@@ -158,21 +158,21 @@ const Pagos = {
 
       const content = `
         <div class="modal-header">
-          <h2>Estado de Pagos</h2>
+          <h2>Estado de Aportes</h2>
         </div>
 
         <div class="detail-section">
           <div class="detail-row">
-            <div class="detail-label">Pagado Hasta:</div>
-            <div class="detail-value">${estado.pagadoHasta ? `<strong>${estado.pagadoHasta.label}</strong>` : '<em>Sin pagos registrados</em>'}</div>
+            <div class="detail-label">Aportado Hasta:</div>
+            <div class="detail-value">${estado.pagadoHasta ? `<strong>${estado.pagadoHasta.label}</strong>` : '<em>Sin aportes registrados</em>'}</div>
           </div>
           <div class="detail-row">
-            <div class="detail-label">Próximo Período:</div>
+            <div class="detail-label">PrÃ³ximo PerÃ­odo:</div>
             <div class="detail-value">${estado.siguientePeriodo.label}</div>
           </div>
           <div class="detail-row">
             <div class="detail-label">Estado:</div>
-            <div class="detail-value">${estado.estadoMora === 'En mora' ? `<span class="badge badge-mora">En mora (${estado.mesesMora} ${estado.mesesMora === 1 ? 'mes' : 'meses'})</span>` : '<span class="badge badge-aldia">Al día</span>'}</div>
+            <div class="detail-value">${estado.estadoMora === 'En mora' ? `<span class="badge badge-mora">En mora (${estado.mesesMora} ${estado.mesesMora === 1 ? 'mes' : 'meses'})</span>` : '<span class="badge badge-aldia">Al dÃ­a</span>'}</div>
           </div>
           <div class="detail-row">
             <div class="detail-label">Saldo a Favor:</div>
@@ -193,11 +193,11 @@ const Pagos = {
         </div>
 
         <div class="detail-section">
-          <h3>Historial de Pagos</h3>
+          <h3>Historial de Aportes</h3>
           ${historial.length > 0 ? `
             <table style="width: 100%; margin-top: 12px;">
               <thead>
-                <tr><th>Período</th><th>Valor</th><th>Fecha de Pago</th><th>Recibo</th></tr>
+                <tr><th>PerÃ­odo</th><th>Valor</th><th>Fecha de Aporte</th><th>Recibo</th></tr>
               </thead>
               <tbody>
                 ${historial.map(h => `
@@ -210,13 +210,13 @@ const Pagos = {
                 `).join('')}
               </tbody>
             </table>
-          ` : '<p style="color: #64748b; margin-top: 12px;">Sin pagos registrados</p>'}
+          ` : '<p style="color: #64748b; margin-top: 12px;">Sin aportes registrados</p>'}
         </div>
 
         <div class="detail-section">
           <div style="display: flex; justify-content: space-between; align-items: center;">
-            <h3>Conexión (Nuevo Punto)</h3>
-            ${!conexionActiva ? `<button class="btn btn-secondary btn-icon" onclick="App.closeModal(); Pagos.showAgregarConexionModal(${cuentaId})">Agregar Cargo de Conexión</button>` : ''}
+            <h3>ConexiÃ³n (Nuevo Punto)</h3>
+            ${!conexionActiva ? `<button class="btn btn-secondary btn-icon" onclick="App.closeModal(); Pagos.showAgregarConexionModal(${cuentaId})">Agregar Cargo de ConexiÃ³n</button>` : ''}
           </div>
           ${this.renderConexionDetalle(conexionActiva, cuentaId)}
         </div>
@@ -225,20 +225,20 @@ const Pagos = {
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
           <button class="btn btn-secondary" onclick="Pagos.imprimirEstadoCuenta(${cuentaId})">Imprimir Estado de Cuenta</button>
           <button class="btn btn-secondary" onclick="Pagos.exportarEstadoCuentaPDF(${cuentaId})">Exportar PDF</button>
-          <button class="btn btn-success" onclick="App.closeModal(); Pagos.showRegistrarPagoModal(${cuentaId})">Registrar Pago</button>
+          <button class="btn btn-success" onclick="App.closeModal(); Pagos.showRegistrarPagoModal(${cuentaId})">Registrar Aporte</button>
         </div>
       `;
 
       App.openModal(content, 'large');
     } catch (error) {
       console.error('Error:', error);
-      App.toast('Error al cargar el estado de pagos', 'error');
+      App.toast('Error al cargar el estado de aportes', 'error');
     }
   },
 
   renderConexionDetalle(punto, cuentaId) {
     if (!punto) {
-      return '<p style="color: #64748b; margin-top: 12px;">Esta cuenta no tiene un cargo de conexión registrado.</p>';
+      return '<p style="color: #64748b; margin-top: 12px;">Esta cuenta no tiene un cargo de conexiÃ³n registrado.</p>';
     }
 
     const badgeClase = punto.estado === 'Pagado' ? 'badge-activo' : (punto.estado === 'Cancelado' ? 'badge-inactivo' : 'badge-mora');
@@ -263,8 +263,8 @@ const Pagos = {
       </div>
       ${punto.estado === 'Pendiente' ? `
         <div class="form-actions" style="justify-content: flex-start; margin-top: 12px;">
-          <button class="btn btn-success btn-icon" onclick="App.closeModal(); Pagos.showAbonoConexionModal(${punto.id}, ${cuentaId})">Abonar Conexión</button>
-          <button class="btn btn-warning btn-icon" onclick="App.closeModal(); Pagos.showCancelarConexionModal(${punto.id}, ${cuentaId})">Cancelar Conexión</button>
+          <button class="btn btn-success btn-icon" onclick="App.closeModal(); Pagos.showAbonoConexionModal(${punto.id}, ${cuentaId})">Abonar ConexiÃ³n</button>
+          <button class="btn btn-warning btn-icon" onclick="App.closeModal(); Pagos.showCancelarConexionModal(${punto.id}, ${cuentaId})">Cancelar ConexiÃ³n</button>
         </div>
       ` : ''}
     `;
@@ -276,7 +276,7 @@ const Pagos = {
     const hoy = new Date().toISOString().split('T')[0];
 
     const content = `
-      <div class="modal-header"><h2>Agregar Cargo de Conexión</h2></div>
+      <div class="modal-header"><h2>Agregar Cargo de ConexiÃ³n</h2></div>
       <div id="formError"></div>
       <form id="conexionForm">
         <div class="form-group">
@@ -323,14 +323,14 @@ const Pagos = {
         const response = await window.api.nuevosPuntos.create(datos);
         if (response.success) {
           App.closeModal();
-          App.toast('Cargo de conexión registrado con éxito');
+          App.toast('Cargo de conexiÃ³n registrado con Ã©xito');
           this.showDetalleModal(cuentaId);
         } else {
           errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
         }
       } catch (error) {
         console.error('Error:', error);
-        errorDiv.innerHTML = `<div class="error-message">Error al registrar el cargo de conexión</div>`;
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar el cargo de conexiÃ³n</div>`;
       }
     });
   },
@@ -338,18 +338,18 @@ const Pagos = {
   async showAbonoConexionModal(nuevoPuntoId, cuentaId) {
     const response = await window.api.nuevosPuntos.getById(nuevoPuntoId);
     if (!response.success) {
-      App.toast('Error al cargar la conexión: ' + response.error, 'error');
+      App.toast('Error al cargar la conexiÃ³n: ' + response.error, 'error');
       return;
     }
     const punto = response.data;
     const hoy = new Date().toISOString().split('T')[0];
 
     const content = `
-      <div class="modal-header"><h2>Abonar Conexión</h2></div>
+      <div class="modal-header"><h2>Abonar ConexiÃ³n</h2></div>
 
       <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
         <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
-          <strong>Saldo Pendiente de Conexión:</strong> $${this.formatNumber(punto.saldo_pendiente)}
+          <strong>Saldo Pendiente de ConexiÃ³n:</strong> $${this.formatNumber(punto.saldo_pendiente)}
         </p>
       </div>
 
@@ -370,7 +370,7 @@ const Pagos = {
         </div>
 
         <div class="form-group">
-          <label for="metodo_pago_conexion">Método de Pago <span style="color: #ef4444;">*</span></label>
+          <label for="metodo_pago_conexion">MÃ©todo de Pago <span style="color: #ef4444;">*</span></label>
           <select id="metodo_pago_conexion" name="metodo_pago_conexion" required>
             <option value="Efectivo">Efectivo</option>
             <option value="Transferencia">Transferencia</option>
@@ -409,7 +409,7 @@ const Pagos = {
         const response = await window.api.nuevosPuntos.registrarAbono(payload);
         if (response.success) {
           App.closeModal();
-          App.toast(`Abono de conexión registrado. Recibo No. ${response.data.numeroRecibo}`);
+          App.toast(`Abono de conexiÃ³n registrado. Recibo No. ${response.data.numeroRecibo}`);
           this.showDetalleModal(cuentaId);
           this.loadCuentas();
         } else {
@@ -424,7 +424,7 @@ const Pagos = {
 
   showCancelarConexionModal(nuevoPuntoId, cuentaId) {
     const content = `
-      <div class="modal-header"><h2>Cancelar Cargo de Conexión</h2></div>
+      <div class="modal-header"><h2>Cancelar Cargo de ConexiÃ³n</h2></div>
 
       <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
         <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
@@ -436,13 +436,13 @@ const Pagos = {
 
       <form id="cancelarConexionForm">
         <div class="form-group">
-          <label for="motivo_cancelacion_conexion">Motivo de la Cancelación <span style="color: #ef4444;">*</span></label>
+          <label for="motivo_cancelacion_conexion">Motivo de la CancelaciÃ³n <span style="color: #ef4444;">*</span></label>
           <textarea id="motivo_cancelacion_conexion" name="motivo_cancelacion_conexion" required></textarea>
         </div>
 
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
-          <button type="submit" class="btn btn-warning">Confirmar Cancelación</button>
+          <button type="submit" class="btn btn-warning">Confirmar CancelaciÃ³n</button>
         </div>
       </form>
     `;
@@ -458,7 +458,7 @@ const Pagos = {
         const response = await window.api.nuevosPuntos.cancelar(nuevoPuntoId, motivo);
         if (response.success) {
           App.closeModal();
-          App.toast('Cargo de conexión cancelado con éxito');
+          App.toast('Cargo de conexiÃ³n cancelado con Ã©xito');
           this.showDetalleModal(cuentaId);
           this.loadCuentas();
         } else {
@@ -466,7 +466,7 @@ const Pagos = {
         }
       } catch (error) {
         console.error('Error:', error);
-        errorDiv.innerHTML = `<div class="error-message">Error al cancelar el cargo de conexión</div>`;
+        errorDiv.innerHTML = `<div class="error-message">Error al cancelar el cargo de conexiÃ³n</div>`;
       }
     });
   },
@@ -487,13 +487,13 @@ const Pagos = {
 
     const content = `
       <div class="modal-header">
-        <h2>Registrar Pago</h2>
+        <h2>Registrar Aporte</h2>
       </div>
 
       <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
         <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
-          ${estado.pagadoHasta ? `<strong>Pagado hasta:</strong> ${estado.pagadoHasta.label}.` : '<strong>Sin pagos previos.</strong>'}
-          <strong>Próximo período sugerido:</strong> ${estado.siguientePeriodo.label}.
+          ${estado.pagadoHasta ? `<strong>Aportado hasta:</strong> ${estado.pagadoHasta.label}.` : '<strong>Sin aportes previos.</strong>'}
+          <strong>PrÃ³ximo perÃ­odo sugerido:</strong> ${estado.siguientePeriodo.label}.
           ${estado.saldoAFavor > 0 ? `<br><strong>Saldo a favor disponible:</strong> $${this.formatNumber(estado.saldoAFavor)}` : ''}
         </p>
       </div>
@@ -502,7 +502,7 @@ const Pagos = {
 
       <form id="sostenimientoForm">
         <div class="form-group">
-          <label>Mes y Año de Inicio <span style="color: #ef4444;">*</span></label>
+          <label>Mes y AÃ±o de Inicio <span style="color: #ef4444;">*</span></label>
           <div style="display: flex; gap: 12px;">
             <select id="mes_inicio" name="mes_inicio" style="flex: 1;">
               ${this.opcionesMeses(estado.siguientePeriodo.mes)}
@@ -512,9 +512,9 @@ const Pagos = {
         </div>
 
         <div class="form-group">
-          <label for="cantidad_meses">Cantidad de Meses a Pagar <span style="color: #ef4444;">*</span></label>
+          <label for="cantidad_meses">Cantidad de Meses a Aportar <span style="color: #ef4444;">*</span></label>
           <input type="number" id="cantidad_meses" name="cantidad_meses" value="1" min="1" max="120" required>
-          <small style="color: #64748b; font-size: 0.875rem;">Puede pagar uno o varios meses, incluso de años distintos, atrasados, actuales o por adelantado.</small>
+          <small style="color: #64748b; font-size: 0.875rem;">Puede aportar uno o varios meses, incluso de aÃ±os distintos, atrasados, actuales o por adelantado.</small>
         </div>
 
         <div class="form-group">
@@ -525,25 +525,25 @@ const Pagos = {
 
         ${conexionPendiente ? `
           <div class="form-group">
-            <label for="abono_conexion">Abono a Conexión Pendiente (opcional)</label>
+            <label for="abono_conexion">Abono a ConexiÃ³n Pendiente (opcional)</label>
             <div class="input-currency">
               <span class="currency-symbol">$</span>
               <input type="text" inputmode="numeric" id="abono_conexion" name="abono_conexion">
             </div>
             <small style="color: #64748b; font-size: 0.875rem;">
-              Saldo pendiente de conexión: $${this.formatNumber(conexionPendiente.saldo_pendiente)}.
-              Si la persona también paga esto hoy, se incluye en el mismo recibo.
+              Saldo pendiente de conexiÃ³n: $${this.formatNumber(conexionPendiente.saldo_pendiente)}.
+              Si la persona tambiÃ©n paga esto hoy, se incluye en el mismo recibo.
             </small>
           </div>
         ` : ''}
 
         <div class="form-group">
-          <label for="fecha_pago_sost">Fecha de Pago <span style="color: #ef4444;">*</span></label>
+          <label for="fecha_pago_sost">Fecha de Aporte <span style="color: #ef4444;">*</span></label>
           <input type="date" id="fecha_pago_sost" name="fecha_pago_sost" value="${hoy}" required>
         </div>
 
         <div class="form-group">
-          <label for="metodo_pago_sost">Método de Pago <span style="color: #ef4444;">*</span></label>
+          <label for="metodo_pago_sost">MÃ©todo de Pago <span style="color: #ef4444;">*</span></label>
           <select id="metodo_pago_sost" name="metodo_pago_sost" required>
             <option value="Efectivo">Efectivo</option>
             <option value="Transferencia">Transferencia</option>
@@ -557,7 +557,7 @@ const Pagos = {
 
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Registrar Pago y Generar Recibo</button>
+          <button type="submit" class="btn btn-primary">Registrar Aporte y Generar Recibo</button>
         </div>
       </form>
     `;
@@ -636,13 +636,13 @@ const Pagos = {
       if (response.success) {
         App.closeModal();
         this.loadCuentas();
-        App.toast(`Pago registrado con éxito. Recibo No. ${response.data.numeroRecibo}`);
+        App.toast(`Aporte registrado con éxito. Recibo No. ${response.data.numeroRecibo}`);
       } else {
         errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
       }
     } catch (error) {
       console.error('Error:', error);
-      errorDiv.innerHTML = `<div class="error-message">Error al registrar el pago</div>`;
+      errorDiv.innerHTML = `<div class="error-message">Error al registrar el aporte</div>`;
     }
   },
 

@@ -99,8 +99,8 @@ const Dashboard = {
     document.getElementById('stats-grid-operativo').innerHTML = App.renderStatsGrid([
       { titulo: 'Cuentas Activas', valor: stats.cuentasActivas, footer: `${stats.totalCuentas} en total`, icono: 'home' },
       { titulo: 'Cuentas Suspendidas', valor: stats.cuentasSuspendidas, footer: 'Requieren atención', icono: 'tag' },
-      { titulo: 'Pagos Vencidos', valor: stats.cuentasEnMora, footer: 'Cuentas en mora', icono: 'fileText' },
-      { titulo: 'Saldo a Favor', valor: stats.cuentasConSaldoAFavor, footer: 'Cuentas con pagos adelantados', icono: 'users' }
+      { titulo: 'Aportes Vencidos', valor: stats.cuentasEnMora, footer: 'Cuentas en mora', icono: 'fileText' },
+      { titulo: 'Saldo a Favor', valor: stats.cuentasConSaldoAFavor, footer: 'Cuentas con aportes adelantados', icono: 'users' }
     ]);
   },
 

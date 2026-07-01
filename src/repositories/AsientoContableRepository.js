@@ -95,11 +95,11 @@ class AsientoContableRepository {
   // Crea el encabezado y sus líneas en una sola operación. La validación de que las líneas
   // sumen lo mismo en débito y crédito ocurre en el Service, antes de llegar aquí: este método
   // confía en que ya está balanceado.
-  crear({ numero, fecha, concepto, tipoOrigen, referenciaId = null, referenciaTipo = null, usuarioId = null, lineas }) {
+  crear({ numero, fecha, concepto, tipoOrigen, tipoComprobante = null, referenciaId = null, referenciaTipo = null, usuarioId = null, lineas }) {
     const asientoId = this.db.prepare(`
-      INSERT INTO asientos_contables (numero, fecha, concepto, tipo_origen, referencia_id, referencia_tipo, usuario_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(numero, fecha, concepto, tipoOrigen, referenciaId, referenciaTipo, usuarioId).lastInsertRowid;
+      INSERT INTO asientos_contables (numero, fecha, concepto, tipo_origen, tipo_comprobante, referencia_id, referencia_tipo, usuario_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(numero, fecha, concepto, tipoOrigen, tipoComprobante, referenciaId, referenciaTipo, usuarioId).lastInsertRowid;
 
     const insertarLinea = this.db.prepare(`
       INSERT INTO movimientos_contables

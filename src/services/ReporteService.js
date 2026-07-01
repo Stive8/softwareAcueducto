@@ -140,7 +140,7 @@ class ReporteService {
 
     return {
       tipo: 'tabla',
-      titulo: 'Historial de Pagos',
+      titulo: 'Historial de Aportes',
       periodo: (fechaDesde || fechaHasta) ? { tipo: 'rango', fechaDesde, fechaHasta } : null,
       filtros: [
         this._nombreCuentaContable(cuentaContableId) && { label: 'Cuenta Contable', valor: this._nombreCuentaContable(cuentaContableId) },

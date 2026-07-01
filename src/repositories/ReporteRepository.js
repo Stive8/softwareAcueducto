@@ -192,7 +192,7 @@ class ReporteRepository {
         p.nombre_completo as propietario,
         (SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id) as ultimo_periodo_num,
         (SELECT MAX(r.fecha_recibo) FROM pago_periodos pp
-           INNER JOIN recibo_detalles rd ON rd.recibo_id = pp.recibo_id
+           INNER JOIN recibo_detalles rd ON rd.id = pp.recibo_detalle_id
            INNER JOIN recibos r ON r.id = rd.recibo_id AND r.estado != 'Anulado'
            WHERE pp.cuenta_id = c.id) as fecha_ultimo_pago,
         (SELECT MIN(fecha_inicio) FROM cuenta_categorias WHERE cuenta_id = c.id) as fecha_inicio_facturacion,

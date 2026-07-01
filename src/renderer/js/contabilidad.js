@@ -16,9 +16,9 @@ const Contabilidad = {
       ]
     },
     {
-      titulo: 'Pagos y Gastos',
+      titulo: 'Aportes y Gastos',
       reportes: [
-        { tipo: 'historial_pagos', titulo: 'Historial de Pagos', icon: 'wallet', descripcion: 'Listado detallado de los pagos de sostenimiento recibidos en el rango de fechas.', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
+        { tipo: 'historial_pagos', titulo: 'Historial de Aportes', icon: 'wallet', descripcion: 'Listado detallado de los aportes de sostenimiento recibidos en el rango de fechas.', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
         { tipo: 'historial_gastos', titulo: 'Historial de Gastos', icon: 'trendingDown', descripcion: 'Listado detallado de los gastos registrados en el rango de fechas.', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
         { tipo: 'ingresos_periodo', titulo: 'Ingresos por Período', icon: 'barChart', descripcion: 'Total de ingresos agrupados por cuenta contable en el período.', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true },
         { tipo: 'gastos_periodo', titulo: 'Gastos por Período', icon: 'trendingDown', descripcion: 'Total de gastos agrupados por cuenta contable en el período.', rangoFecha: true, filtroCuentaContable: true, filtroTipoCuenta: true }
@@ -813,7 +813,7 @@ const Contabilidad = {
             <th>No.</th>
             <th>Fecha</th>
             <th>Concepto</th>
-            <th>Origen</th>
+            <th>Tipo</th>
             <th>Total</th>
             <th>Estado</th>
             <th>Acciones</th>
@@ -825,7 +825,7 @@ const Contabilidad = {
               <td>${a.numero}</td>
               <td>${this.formatDate(a.fecha)}</td>
               <td>${a.concepto}</td>
-              <td>${nombresOrigen[a.tipo_origen] || a.tipo_origen}</td>
+              <td style="font-size:0.82rem;">${a.tipo_comprobante || nombresOrigen[a.tipo_origen] || a.tipo_origen}</td>
               <td>$${this.formatNumber(a.total_debito)}</td>
               <td><span class="badge badge-${a.estado === 'Activo' ? 'activo' : 'inactivo'}">${a.estado}</span></td>
               <td>
@@ -971,13 +971,32 @@ const Contabilidad = {
 
     const hoy = new Date().toISOString().split('T')[0];
 
+    const TIPOS_COMPROBANTE = [
+      'Asiento Contable',
+      'Nota de Contabilidad',
+      'Nota de Crédito',
+      'Nota de Débito',
+      'Nota de Depreciación',
+      'Nota de Amortización',
+      'Comprobante de Nómina',
+      'Ajuste de Inventario'
+    ];
+
     const content = `
       <div class="modal-header"><h2>Nueva Nota Contable</h2></div>
       <div id="formError"></div>
       <form id="asientoManualForm">
-        <div class="form-group">
-          <label for="am_fecha">Fecha <span style="color: #ef4444;">*</span></label>
-          <input type="date" id="am_fecha" name="am_fecha" value="${hoy}" required>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group">
+            <label for="am_fecha">Fecha <span style="color: #ef4444;">*</span></label>
+            <input type="date" id="am_fecha" name="am_fecha" value="${hoy}" required>
+          </div>
+          <div class="form-group">
+            <label for="am_tipo_comprobante">Tipo de comprobante <span style="color: #ef4444;">*</span></label>
+            <select id="am_tipo_comprobante" class="form-control">
+              ${TIPOS_COMPROBANTE.map(t => `<option value="${t}">${t}</option>`).join('')}
+            </select>
+          </div>
         </div>
         <div class="form-group">
           <label for="am_concepto">Concepto <span style="color: #ef4444;">*</span></label>
@@ -1020,6 +1039,7 @@ const Contabilidad = {
       try {
         const response = await window.api.asientos.crearManual({
           fecha: document.getElementById('am_fecha').value,
+          tipoComprobante: document.getElementById('am_tipo_comprobante').value,
           concepto: document.getElementById('am_concepto').value.trim(),
           lineas
         });
