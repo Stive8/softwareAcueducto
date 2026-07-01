@@ -30,6 +30,18 @@ class ReporteRepository {
     return this.db.prepare(query).all(...params);
   }
 
+  // es_sistema = 0 excluye al tercero protegido "Tercero no identificado": su falta de datos es
+  // intencional, no un vacío administrativo pendiente de completar.
+  getTercerosIncompletos() {
+    return this.db.prepare(`
+      SELECT nombre_razon_social, tipo_identificacion, numero_identificacion, telefono, email, direccion
+      FROM terceros
+      WHERE activo = 1 AND es_sistema = 0
+        AND (numero_identificacion IS NULL OR telefono IS NULL OR telefono = '' OR direccion IS NULL OR direccion = '' OR email IS NULL OR email = '')
+      ORDER BY nombre_razon_social ASC
+    `).all();
+  }
+
   getPropietarios() {
     return this.db.prepare(`
       SELECT p.nombre_completo, p.numero_identificacion, p.telefono, p.email,
@@ -166,6 +178,136 @@ class ReporteRepository {
 
   getGastosPorPeriodo(fechaDesde = '', fechaHasta = '', cuentaContableId = '', tipoCuenta = '') {
     return this.getHistorialGastos(fechaDesde, fechaHasta, cuentaContableId, tipoCuenta).filter(g => g.estado !== 'Anulado');
+  }
+
+  // Cartera por edades (Aging): una fila por cuenta activa con mora, indicando en qué rango
+  // de antigüedad cae su deuda. Los rangos son: 1-3 meses, 4-6 meses, 7-12 meses, >12 meses.
+  // El valor se estima con la tarifa vigente actual (no histórica mes a mes).
+  getCartedaPorEdades() {
+    const hoy = new Date();
+    const periodoActual = hoy.getFullYear() * 12 + hoy.getMonth(); // año*12 + (mes-1, 0-indexed)
+
+    const rows = this.db.prepare(`
+      SELECT c.id, c.codigo, c.direccion,
+        p.nombre_completo as propietario,
+        (SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id) as ultimo_periodo_num,
+        (SELECT MAX(r.fecha_recibo) FROM pago_periodos pp
+           INNER JOIN recibo_detalles rd ON rd.recibo_id = pp.recibo_id
+           INNER JOIN recibos r ON r.id = rd.recibo_id AND r.estado != 'Anulado'
+           WHERE pp.cuenta_id = c.id) as fecha_ultimo_pago,
+        (SELECT MIN(fecha_inicio) FROM cuenta_categorias WHERE cuenta_id = c.id) as fecha_inicio_facturacion,
+        (
+          SELECT ct.tarifa_sostenimiento
+          FROM cuenta_categorias cc
+          INNER JOIN categoria_tarifas ct ON ct.categoria_id = cc.categoria_id
+          WHERE cc.cuenta_id = c.id AND cc.fecha_fin IS NULL
+            AND ct.fecha_vigencia_hasta IS NULL
+          LIMIT 1
+        ) as tarifa_actual
+      FROM cuentas c
+      LEFT JOIN cuenta_propietarios cp ON cp.cuenta_id = c.id AND cp.fecha_fin IS NULL
+      LEFT JOIN propietarios p ON p.id = cp.propietario_id
+      WHERE c.estado = 'Activo'
+      ORDER BY c.codigo ASC
+    `).all();
+
+    const filas = [];
+    for (const row of rows) {
+      let siguienteCod;
+      if (row.ultimo_periodo_num !== null && row.ultimo_periodo_num !== undefined) {
+        siguienteCod = row.ultimo_periodo_num + 1;
+      } else {
+        const inicio = anioMesDeFecha(row.fecha_inicio_facturacion || '2000-01-01');
+        siguienteCod = inicio.anio * 12 + (inicio.mes - 1);
+      }
+      const mesesMora = Math.max(periodoActual - siguienteCod + 1, 0);
+      if (mesesMora === 0) continue; // sin mora, no va en el reporte
+
+      const tarifa = row.tarifa_actual || 0;
+      const valorEstimado = mesesMora * tarifa;
+
+      let rango;
+      if (mesesMora <= 3) rango = '1-3 meses';
+      else if (mesesMora <= 6) rango = '4-6 meses';
+      else if (mesesMora <= 12) rango = '7-12 meses';
+      else rango = 'Más de 12 meses';
+
+      filas.push({
+        codigo: row.codigo,
+        direccion: row.direccion,
+        propietario: row.propietario,
+        fecha_ultimo_pago: row.fecha_ultimo_pago || null,
+        meses_mora: mesesMora,
+        rango_mora: rango,
+        tarifa_mensual: tarifa,
+        valor_estimado: valorEstimado
+      });
+    }
+
+    return filas;
+  }
+
+  // Dashboard contable: KPIs del período actual para la pantalla de inicio del módulo.
+  getDashboardContable() {
+    const hoy = new Date();
+    const anio = hoy.getFullYear();
+    const mes = hoy.getMonth() + 1;
+    const primerDiaMes = `${anio}-${String(mes).padStart(2, '0')}-01`;
+    const ultimoDiaMes = new Date(anio, mes, 0).toISOString().split('T')[0];
+
+    const ingresosMes = this.db.prepare(`
+      SELECT COALESCE(SUM(total), 0) as total
+      FROM recibos
+      WHERE estado != 'Anulado'
+        AND fecha_recibo BETWEEN ? AND ?
+    `).get(primerDiaMes, ultimoDiaMes).total;
+
+    const gastosMes = this.db.prepare(`
+      SELECT COALESCE(SUM(valor), 0) as total
+      FROM gastos
+      WHERE estado != 'Anulado'
+        AND fecha_gasto BETWEEN ? AND ?
+    `).get(primerDiaMes, ultimoDiaMes).total;
+
+    const saldoCaja = this.db.prepare(`
+      SELECT COALESCE(
+        SUM(CASE WHEN tipo = 'Ingreso' THEN monto ELSE -monto END), 0
+      ) as saldo
+      FROM movimientos
+      WHERE origen = 'Caja'
+    `).get().saldo;
+
+    const saldoBanco = this.db.prepare(`
+      SELECT COALESCE(
+        SUM(CASE WHEN tipo = 'Ingreso' THEN monto ELSE -monto END), 0
+      ) as saldo
+      FROM movimientos
+      WHERE origen = 'Banco'
+    `).get().saldo;
+
+    const cuentasMora = this.db.prepare(`
+      SELECT COUNT(*) as total
+      FROM cuentas c
+      WHERE c.estado = 'Activo'
+        AND (SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id)
+          < (? * 12 + ? - 1)
+    `).get(anio, mes).total;
+
+    const periodoActual = this.db.prepare(`
+      SELECT * FROM periodos_contables WHERE anio = ? AND mes = ?
+    `).get(anio, mes);
+
+    return {
+      anio, mes, primerDiaMes, ultimoDiaMes,
+      ingresosMes,
+      gastosMes,
+      resultadoMes: ingresosMes - gastosMes,
+      saldoCaja,
+      saldoBanco,
+      saldoDisponible: saldoCaja + saldoBanco,
+      cuentasMora,
+      periodoActual: periodoActual || { anio, mes, estado: 'Sin registro' }
+    };
   }
 
   // --- Datos base para los reportes contables simplificados ---

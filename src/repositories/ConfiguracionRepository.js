@@ -19,11 +19,15 @@ class ConfiguracionRepository {
   getMaxNumeroRecibo() {
     // Incluye tanto recibos reales como anulados del talonario físico: comparten la misma
     // numeración consecutiva, así que ninguno de los dos puede quedar por delante del contador.
+    // Excluye el rango sintético (90000+) usado para corregir el histórico importado de
+    // 2017-2026 (recibos cuyo número de talonario real chocaba con la numeración en curso y se
+    // reasignaron a 90000+original — ver log_correccion_rango_sintetico): esos números nunca
+    // fueron emitidos en el papel y no deben impedir configurar el consecutivo real más abajo.
     const row = this.db.prepare(`
       SELECT MAX(numero) as max FROM (
-        SELECT MAX(numero_recibo) as numero FROM recibos
+        SELECT MAX(numero_recibo) as numero FROM recibos WHERE numero_recibo < 90000
         UNION ALL
-        SELECT MAX(numero_recibo) as numero FROM recibos_anulados_fisicos
+        SELECT MAX(numero_recibo) as numero FROM recibos_anulados_fisicos WHERE numero_recibo < 90000
       )
     `).get();
     return row.max || 0;

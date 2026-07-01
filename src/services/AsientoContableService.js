@@ -1,5 +1,9 @@
 const AsientoContableRepository = require('../repositories/AsientoContableRepository');
 const PlanCuentaRepository = require('../repositories/PlanCuentaRepository');
+const CuentaAutomaticaRepository = require('../repositories/CuentaAutomaticaRepository');
+const PeriodoContableRepository = require('../repositories/PeriodoContableRepository');
+const PeriodoContableService = require('./PeriodoContableService');
+const MotorContabilizacionService = require('./MotorContabilizacionService');
 
 // Centavos de tolerancia al comparar sumas de débito/crédito (los valores siempre son pesos
 // colombianos sin decimales en este sistema, pero se deja margen por seguridad ante redondeos).
@@ -27,6 +31,21 @@ class AsientoContableService {
   constructor(dbService) {
     this.repository = new AsientoContableRepository(dbService);
     this.planCuentaRepository = new PlanCuentaRepository(dbService);
+    this.cuentaAutomaticaRepository = new CuentaAutomaticaRepository(dbService);
+    this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService));
+    this.motorService = new MotorContabilizacionService(dbService);
+  }
+
+  // Códigos PUC de Caja y Banco cacheados para la sesión (evitar un SELECT por cada línea
+  // en sincronizarLineaConCajaBanco). Se invalidan con _codigosCajaBancoCache = null.
+  _getCodigosCajaBanco() {
+    if (!this._codigosCajaBancoCache) {
+      this._codigosCajaBancoCache = {
+        caja: this.cuentaAutomaticaRepository.getCodigoByClave('CAJA'),
+        banco: this.cuentaAutomaticaRepository.getCodigoByClave('BANCO')
+      };
+    }
+    return this._codigosCajaBancoCache;
   }
 
   getAll(params = {}) {
@@ -182,6 +201,13 @@ class AsientoContableService {
     if (!concepto || !concepto.trim()) throw new Error('El concepto del asiento es obligatorio');
     if (!Array.isArray(lineas) || lineas.length < 2) throw new Error('Un asiento debe tener al menos 2 líneas');
 
+    // Verifica que el período contable de la fecha esté Abierto.
+    // Si el período no existe aún se crea automáticamente como Abierto.
+    // Las reversiones (tipoOrigen = 'Reversion') siempre usan la fecha actual (hoy),
+    // que normalmente es un período Abierto; si también está Cerrado/Bloqueado el
+    // administrador deberá reabrirlo antes de continuar.
+    this.periodoContableService.validarFechaPermitida(fecha);
+
     let totalDebito = 0;
     let totalCredito = 0;
     const cuentasPorLinea = [];
@@ -225,12 +251,15 @@ class AsientoContableService {
     });
   }
 
-  // Si la cuenta de una línea es Caja (1105) o Bancos (1110, incluidas sus subcuentas), refleja
-  // ese mismo movimiento en la tabla `movimientos` para que el saldo que ve el resto de la app
-  // (Dashboard, Caja/Banco) coincida con el de la contabilidad de doble partida.
+  // Si la cuenta de una línea es Caja o Banco (según cuentas_automaticas), refleja ese mismo
+  // movimiento en la tabla `movimientos` para que el saldo que ve el resto de la app (Dashboard,
+  // Caja/Banco) coincida con el de la contabilidad de doble partida. La detección se hace por
+  // prefijo de código: si el código PUC de la cuenta empieza por el código configurado en
+  // cuentas_automaticas, cubre también todas las subcuentas auxiliares bajo ese nodo.
   sincronizarLineaConCajaBanco(cuenta, linea, fecha, concepto, asientoId) {
-    const esCaja = cuenta.codigo.startsWith('1105');
-    const esBanco = cuenta.codigo.startsWith('1110');
+    const { caja, banco } = this._getCodigosCajaBanco();
+    const esCaja = caja && cuenta.codigo.startsWith(caja);
+    const esBanco = banco && cuenta.codigo.startsWith(banco);
     if (!esCaja && !esBanco) return;
 
     const debito = Number(linea.debito || 0);
@@ -257,67 +286,48 @@ class AsientoContableService {
   // cambia cómo se clasifica un concepto, esta lógica no necesita tocarse.
 
   generarDesdeGasto(gastoId, usuarioId = null) {
-    const gasto = this.repository.obtenerGastoParaAsiento(gastoId);
-    if (!gasto) throw new Error('Gasto no encontrado para generar el asiento contable');
-    if (!gasto.cuenta_contable_id) throw new Error('El gasto no tiene una cuenta contable asignada');
+    const contexto = this.repository.obtenerGastoParaAsiento(gastoId);
+    if (!contexto) throw new Error('Gasto no encontrado para generar el asiento contable');
+    if (!contexto.cuenta_contable_id) throw new Error('El gasto no tiene una cuenta contable asignada');
 
-    const cuentaCajaBanco = this.repository.resolverCuentaContable('Movimiento', gasto.metodo_pago === 'Efectivo' ? 'Caja' : 'Banco');
-    if (!cuentaCajaBanco) throw new Error('No hay una cuenta contable mapeada para Caja/Banco');
+    const subtipo   = this.motorService.resolverSubtipo('Gasto', contexto);
+    const plantilla = this.motorService.resolverPlantilla('Gasto', subtipo, contexto.fecha);
+    const lineas    = this.motorService.generarLineas(plantilla, contexto);
 
     return this.crear({
-      fecha: gasto.fecha,
-      concepto: `Gasto: ${gasto.concepto}`,
+      fecha: contexto.fecha,
+      concepto: `Gasto: ${contexto.concepto}`,
       tipoOrigen: 'Gasto',
       referenciaId: gastoId,
       referenciaTipo: 'Gasto',
       usuarioId,
-      lineas: [
-        // El tercero (proveedor) va solo en la línea del gasto, no en Caja/Banco: esa es una
-        // cuenta de disponible, no un saldo por cobrar/pagar de ese proveedor en particular.
-        { cuentaContableId: gasto.cuenta_contable_id, debito: gasto.valor, terceroIdentificacion: gasto.tercero_identificacion, terceroNombre: gasto.tercero_nombre },
-        { cuentaContableId: cuentaCajaBanco, credito: gasto.valor }
-      ]
+      lineas
     });
   }
 
-  // Un recibo puede tener varios renglones (meses de sostenimiento, abono a conexión,
-  // aplicación de saldo a favor) cobrados en un solo movimiento de caja/banco. Cada renglón
-  // positivo es un crédito a su cuenta (normalmente un ingreso); uno negativo (como la
-  // aplicación de saldo a favor, que no es un ingreso nuevo sino el uso de algo ya cobrado
-  // antes) se registra como débito por su valor absoluto. La suma de las dos cosas siempre
-  // coincide con el total del recibo, que es lo que entra a caja o banco.
   generarDesdeRecibo(reciboId, usuarioId = null) {
-    const recibo = this.repository.obtenerReciboParaAsiento(reciboId);
-    if (!recibo) throw new Error('Recibo no encontrado para generar el asiento contable');
+    const contexto = this.repository.obtenerReciboParaAsiento(reciboId);
+    if (!contexto) throw new Error('Recibo no encontrado para generar el asiento contable');
 
-    const detallesConValor = recibo.detalles.filter(d => d.valor !== 0);
+    const detallesConValor = (contexto.detalles || []).filter(d => d.valor !== 0);
     if (detallesConValor.length === 0) return null;
     if (detallesConValor.some(d => !d.cuenta_contable_id)) {
       throw new Error('Uno de los renglones del recibo no tiene una cuenta contable asignada');
     }
 
-    // El tercero (propietario que paga) va en los renglones de cartera, no en la línea de
-    // Caja/Banco que se agrega abajo: esa es una cuenta de disponible, no un saldo de ESE
-    // propietario en particular.
-    const lineas = detallesConValor.map(d => d.valor >= 0
-      ? { cuentaContableId: d.cuenta_contable_id, credito: d.valor, terceroIdentificacion: recibo.tercero_identificacion, terceroNombre: recibo.tercero_nombre }
-      : { cuentaContableId: d.cuenta_contable_id, debito: -d.valor, terceroIdentificacion: recibo.tercero_identificacion, terceroNombre: recibo.tercero_nombre }
-    );
+    // El motor procesa detalles ya con valor != 0; pasamos el contexto completo con
+    // el subconjunto filtrado para que PorSigno funcione sobre los valores originales.
+    const contextoFiltrado = { ...contexto, detalles: detallesConValor };
 
-    // El total cobrado en efectivo/banco puede ser menor a la suma de los renglones (si parte
-    // se cubrió con saldo a favor) o incluso cero (si se cubrió todo con saldo a favor): en ese
-    // caso no hay línea de Caja/Banco, y los renglones del recibo ya quedan balanceados entre sí.
-    if (recibo.total > 0) {
-      const cuentaCajaBanco = this.repository.resolverCuentaContable('Movimiento', recibo.metodo_pago === 'Efectivo' ? 'Caja' : 'Banco');
-      if (!cuentaCajaBanco) throw new Error('No hay una cuenta contable mapeada para Caja/Banco');
-      lineas.push({ cuentaContableId: cuentaCajaBanco, debito: recibo.total });
-    }
+    const subtipo   = this.motorService.resolverSubtipo('Recibo', contextoFiltrado);
+    const plantilla = this.motorService.resolverPlantilla('Recibo', subtipo, contextoFiltrado.fecha);
+    const lineas    = this.motorService.generarLineas(plantilla, contextoFiltrado);
 
     if (lineas.length < 2) return null;
 
     return this.crear({
-      fecha: recibo.fecha,
-      concepto: `Recibo No. ${recibo.numero_recibo}`,
+      fecha: contextoFiltrado.fecha,
+      concepto: `Recibo No. ${contextoFiltrado.numero_recibo}`,
       tipoOrigen: 'Recibo',
       referenciaId: reciboId,
       referenciaTipo: 'Recibo',
@@ -326,28 +336,22 @@ class AsientoContableService {
     });
   }
 
-  // Traslado de caja a banco (consignación): no hay ingreso ni gasto real, solo cambia dónde
-  // está la plata, así que ambos lados son las mismas dos cuentas de Disponible.
   generarDesdeMovimientoTraslado(movimientoId, usuarioId = null) {
-    const movimiento = this.repository.obtenerMovimientoParaAsiento(movimientoId);
-    if (!movimiento) throw new Error('Movimiento no encontrado para generar el asiento contable');
-    if (movimiento.tipo !== 'Traslado') throw new Error('Solo los movimientos de tipo Traslado generan este asiento');
+    const contexto = this.repository.obtenerMovimientoParaAsiento(movimientoId);
+    if (!contexto) throw new Error('Movimiento no encontrado para generar el asiento contable');
+    if (contexto.tipo !== 'Traslado') throw new Error('Solo los movimientos de tipo Traslado generan este asiento');
 
-    const cuentaOrigen = this.repository.resolverCuentaContable('Movimiento', movimiento.origen);
-    const cuentaDestino = this.repository.resolverCuentaContable('Movimiento', movimiento.destino);
-    if (!cuentaOrigen || !cuentaDestino) throw new Error('No hay cuentas contables mapeadas para el traslado');
+    const plantilla = this.motorService.resolverPlantilla('Movimiento', 'Traslado', contexto.fecha);
+    const lineas    = this.motorService.generarLineas(plantilla, contexto);
 
     return this.crear({
-      fecha: movimiento.fecha,
-      concepto: movimiento.concepto,
+      fecha: contexto.fecha,
+      concepto: contexto.concepto,
       tipoOrigen: 'Movimiento',
       referenciaId: movimientoId,
       referenciaTipo: 'Movimiento',
       usuarioId,
-      lineas: [
-        { cuentaContableId: cuentaDestino, debito: movimiento.monto },
-        { cuentaContableId: cuentaOrigen, credito: movimiento.monto }
-      ]
+      lineas
     });
   }
 
@@ -386,7 +390,9 @@ class AsientoContableService {
           debito: l.credito,
           credito: l.debito,
           terceroIdentificacion: l.tercero_identificacion,
-          terceroNombre: l.tercero_nombre
+          terceroNombre: l.tercero_nombre,
+          terceroId: l.tercero_id || null,
+          propietarioId: l.propietario_id || null
         }))
       });
 

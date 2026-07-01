@@ -232,6 +232,8 @@ const Gastos = {
       }
 
       const gasto = response.data;
+      const soportesResponse = await window.api.gastos.getSoportes(id);
+      const soportes = soportesResponse.success ? soportesResponse.data : [];
 
       const content = `
         <div class="modal-header">
@@ -250,6 +252,10 @@ const Gastos = {
           <div class="detail-row">
             <div class="detail-label">Tipo de Gasto:</div>
             <div class="detail-value">${gasto.tipo_gasto || '-'}</div>
+          </div>
+          <div class="detail-row">
+            <div class="detail-label">Tipo de Operación:</div>
+            <div class="detail-value">${gasto.tipo_operacion}</div>
           </div>
           <div class="detail-row">
             <div class="detail-label">Proveedor:</div>
@@ -283,10 +289,29 @@ const Gastos = {
               <div class="detail-value">${gasto.motivo_anulacion} (${this.formatDate(gasto.fecha_anulacion)})</div>
             </div>
           ` : ''}
+          ${gasto.motivo_correccion_pago ? `
+            <div class="detail-row">
+              <div class="detail-label">Corrección Método de Pago:</div>
+              <div class="detail-value">${gasto.motivo_correccion_pago} (${this.formatDate(gasto.fecha_correccion_pago)})</div>
+            </div>
+          ` : ''}
+          <div class="detail-row">
+            <div class="detail-label">Soportes:</div>
+            <div class="detail-value">
+              ${soportes.length === 0 ? 'Sin soportes adjuntos' : soportes.map(s => `
+                <div style="margin-bottom: 4px;">
+                  <span class="badge badge-activo">${s.tipo_soporte}</span> ${s.nombre_archivo}
+                  <button class="btn btn-secondary btn-icon" onclick="Gastos.verSoporte(${gasto.id}, ${s.id})">Ver</button>
+                </div>
+              `).join('')}
+            </div>
+          </div>
         </div>
 
         <div class="form-actions">
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+          ${gasto.estado !== 'Anulado' ? `<button class="btn btn-secondary" onclick="Gastos.agregarSoporte(${gasto.id})">+ Agregar Soporte</button>` : ''}
+          ${gasto.estado !== 'Anulado' ? `<button class="btn btn-secondary" onclick="Gastos.showCorregirMetodoPagoModal(${gasto.id}, '${gasto.metodo_pago}')">Corregir Método de Pago</button>` : ''}
           ${gasto.estado !== 'Anulado' ? `<button class="btn btn-warning" onclick="App.closeModal(); Gastos.showAnularModal(${gasto.id})">Anular</button>` : ''}
         </div>
       `;
@@ -295,6 +320,62 @@ const Gastos = {
     } catch (error) {
       console.error('Error:', error);
       App.toast('Error al cargar el gasto', 'error');
+    }
+  },
+
+  async agregarSoporte(gastoId) {
+    const opciones = this.TIPOS_SOPORTE.map(t => `<option value="${t}">${t}</option>`).join('');
+    const content = `
+      <div class="modal-header"><h2>Agregar Soporte</h2></div>
+      <div id="formError"></div>
+      <form id="soporteForm">
+        <div class="form-group">
+          <label for="tipo_soporte">Tipo de Soporte <span style="color: #ef4444;">*</span></label>
+          <select id="tipo_soporte" required>${opciones}</select>
+        </div>
+        <p style="color: #64748b; font-size: 0.875rem;">Al continuar se abrirá el explorador de archivos para elegir el PDF o imagen (máx. 15 MB).</p>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Seleccionar archivo</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('soporteForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const tipoSoporte = document.getElementById('tipo_soporte').value;
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.gastos.adjuntarSoporte(gastoId, tipoSoporte);
+
+        if (response.canceled) return;
+
+        if (response.success) {
+          App.toast('Soporte adjuntado con éxito');
+          this.showDetailModal(gastoId);
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = '<div class="error-message">Error al adjuntar el soporte</div>';
+      }
+    });
+  },
+
+  async verSoporte(gastoId, soporteId) {
+    App.toast('Abriendo soporte...');
+    try {
+      const response = await window.api.gastos.getSoporte(gastoId, soporteId);
+      if (!response.success) {
+        App.toast('Error: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al abrir el soporte', 'error');
     }
   },
 
@@ -308,7 +389,7 @@ const Gastos = {
       ? mapeoResponse.data.filter(m => m.concepto !== '__default__').sort((a, b) => a.concepto.localeCompare(b.concepto))
       : [];
 
-    const proveedoresResponse = await window.api.terceros.getAll({ soloActivos: true, soloProveedores: true });
+    const proveedoresResponse = await window.api.terceros.getAll({ soloActivos: true });
     const proveedores = proveedoresResponse.success ? proveedoresResponse.data : [];
 
     const content = `
@@ -336,14 +417,25 @@ const Gastos = {
             ${tiposDisponibles.map(t => `<option value="${t.concepto}" ${prefill?.tipo_gasto === t.concepto ? 'selected' : ''}>${t.concepto} (${t.cuenta_codigo} - ${t.cuenta_nombre})</option>`).join('')}
           </select>
           <small style="color: #64748b; font-size: 0.875rem;">¿No encuentras el tipo que necesitas? Agrégalo en Contabilidad → Mapeo de Conceptos.</small>
+          <div id="avisoGastosDiversos" style="display: none; margin-top: 8px; padding: 10px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; font-size: 0.875rem; color: #92400e;">
+            Si existe un concepto más específico, te recomendamos usarlo en vez de "Gastos Diversos" para mejorar la calidad de los reportes.
+          </div>
         </div>
 
         <div class="form-group">
-          <label for="tercero_id">Proveedor</label>
+          <label for="tipo_operacion">Tipo de Operación <span style="color: #ef4444;">*</span></label>
+          <select id="tipo_operacion" name="tipo_operacion" required>
+            <option value="Compra directa" ${(prefill?.tipo_operacion || 'Compra directa') === 'Compra directa' ? 'selected' : ''}>Compra directa</option>
+            <option value="Reembolso" ${prefill?.tipo_operacion === 'Reembolso' ? 'selected' : ''}>Reembolso</option>
+          </select>
+          <small style="color: #64748b; font-size: 0.875rem;">Reembolso: alguien pagó con su propio dinero y el acueducto le devolvió el valor; el tercero debe ser esa persona, no el proveedor original.</small>
+        </div>
+
+        <div class="form-group">
+          <label for="tercero_id">Tercero <span style="color: #ef4444;">*</span></label>
           <div style="display: flex; gap: 8px;">
-            <select id="tercero_id" style="flex: 1;">
-              <option value="">Sin proveedor específico</option>
-              ${proveedores.map(t => `<option value="${t.id}" ${prefill?.terceroId == t.id ? 'selected' : ''}>${t.nombre_razon_social} - ${t.numero_identificacion}</option>`).join('')}
+            <select id="tercero_id" style="flex: 1;" required>
+              ${proveedores.map(t => `<option value="${t.id}" ${prefill?.terceroId == t.id ? 'selected' : ''}>${t.nombre_razon_social}${t.numero_identificacion ? ' - ' + t.numero_identificacion : ''}</option>`).join('')}
             </select>
             <button type="button" class="btn btn-secondary" id="btnNuevoProveedorDesdeGasto">+ Nuevo</button>
           </div>
@@ -370,12 +462,6 @@ const Gastos = {
           <textarea id="observaciones" name="observaciones">${prefill?.observaciones || ''}</textarea>
         </div>
 
-        <div class="form-group">
-          <label for="soporte">Soporte (PDF o imagen)</label>
-          <input type="file" id="soporte" name="soporte" disabled accept=".pdf,.png,.jpg,.jpeg">
-          <small style="color: #64748b; font-size: 0.875rem;">Función disponible próximamente. El campo ya está preparado en el sistema.</small>
-        </div>
-
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
           <button type="submit" class="btn btn-primary">Registrar Gasto</button>
@@ -385,12 +471,19 @@ const Gastos = {
 
     App.openModal(content);
     App.attachMoneyInput(document.getElementById('valor'));
+    Combobox.attach('tipo_gasto');
+    Combobox.attach('tercero_id');
+
+    document.getElementById('tipo_gasto').addEventListener('change', (e) => {
+      document.getElementById('avisoGastosDiversos').style.display = e.target.value === 'Gastos Diversos' ? 'block' : 'none';
+    });
 
     document.getElementById('btnNuevoProveedorDesdeGasto').addEventListener('click', () => {
       const snapshot = {
         fecha_gasto: document.getElementById('fecha_gasto').value,
         concepto: document.getElementById('concepto').value,
         tipo_gasto: document.getElementById('tipo_gasto').value,
+        tipo_operacion: document.getElementById('tipo_operacion').value,
         valorTexto: document.getElementById('valor').value,
         metodo_pago: document.getElementById('metodo_pago').value,
         observaciones: document.getElementById('observaciones').value
@@ -409,12 +502,12 @@ const Gastos = {
   },
 
   async saveGasto() {
-    const terceroIdValue = document.getElementById('tercero_id').value;
     const formData = {
       fechaGasto: document.getElementById('fecha_gasto').value,
       concepto: document.getElementById('concepto').value.trim(),
       tipoGasto: document.getElementById('tipo_gasto').value.trim(),
-      terceroId: terceroIdValue ? parseInt(terceroIdValue, 10) : null,
+      tipoOperacion: document.getElementById('tipo_operacion').value,
+      terceroId: parseInt(document.getElementById('tercero_id').value, 10),
       valor: App.parseMoneyValue(document.getElementById('valor').value),
       metodoPago: document.getElementById('metodo_pago').value,
       observaciones: document.getElementById('observaciones').value.trim()
@@ -491,9 +584,71 @@ const Gastos = {
     });
   },
 
+  showCorregirMetodoPagoModal(id, metodoActual) {
+    const otroMetodo = metodoActual === 'Efectivo' ? 'Transferencia' : 'Efectivo';
+    const content = `
+      <div class="modal-header">
+        <h2>Corregir Método de Pago</h2>
+      </div>
+
+      <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+          <strong>Nota:</strong> Esto NO anula el gasto. El número, fecha, valor y proveedor quedan intactos; solo se corrige a qué cuenta (Caja o Banco) quedó asociado el dinero, y se ajustan el movimiento y el asiento contable.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="corregirMetodoPagoForm">
+        <div class="form-group">
+          <label for="nuevo_metodo_pago">Método de Pago Correcto <span style="color: #ef4444;">*</span></label>
+          <select id="nuevo_metodo_pago" required>
+            <option value="${otroMetodo}" selected>${otroMetodo}</option>
+            <option value="${metodoActual}">${metodoActual} (actual)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="motivo_correccion">Motivo de la Corrección <span style="color: #ef4444;">*</span></label>
+          <textarea id="motivo_correccion" name="motivo_correccion" required></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Confirmar Corrección</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('corregirMetodoPagoForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const nuevoMetodoPago = document.getElementById('nuevo_metodo_pago').value;
+      const motivo = document.getElementById('motivo_correccion').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.gastos.corregirMetodoPago(id, nuevoMetodoPago, motivo);
+
+        if (response.success) {
+          App.closeModal();
+          this.loadStats();
+          this.loadGastos();
+          App.toast('Método de pago corregido con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al corregir el método de pago</div>`;
+      }
+    });
+  },
+
   // --- Proveedores (catálogo de Terceros) ---
 
-  TIPOS_IDENTIFICACION: ['Cédula de Ciudadanía', 'NIT', 'Cédula de Extranjería', 'Pasaporte', 'Registro Civil', 'Otro'],
+  TIPOS_IDENTIFICACION: ['Cédula de Ciudadanía', 'NIT', 'Cédula de Extranjería', 'Pasaporte', 'Registro Civil', 'Otro', 'No informado'],
+  TIPOS_SOPORTE: ['Factura electrónica', 'Factura física', 'Recibo simple', 'Comprobante interno', 'Imagen', 'PDF'],
   proveedoresSearch: '',
 
   async renderTabProveedores() {
@@ -562,12 +717,13 @@ const Gastos = {
               <td><strong>${t.nombre_razon_social}</strong>${t.nombre_comercial ? `<br><small style="color:#64748b;">${t.nombre_comercial}</small>` : ''}</td>
               <td>${t.tipo_identificacion}: ${t.numero_identificacion}</td>
               <td>${t.telefono || '-'}</td>
-              <td>${[t.es_proveedor ? 'Proveedor' : '', t.es_otro ? 'Otro' : ''].filter(Boolean).join(' / ')}</td>
+              <td>${[t.es_proveedor ? 'Proveedor' : '', t.es_contratista ? 'Contratista' : '', t.es_aliado ? 'Aliado' : '', t.es_otro ? 'Otro' : ''].filter(Boolean).join(' / ')}</td>
               <td><span class="badge badge-${t.activo ? 'activo' : 'inactivo'}">${t.activo ? 'Activo' : 'Inactivo'}</span></td>
               <td>
                 <div class="table-actions">
-                  <button class="btn btn-secondary btn-icon" onclick="Gastos.showFormModalProveedor(${t.id})">Editar</button>
-                  <button class="btn btn-${t.activo ? 'warning' : 'info'} btn-icon" onclick="Gastos.toggleActivoProveedor(${t.id})">${t.activo ? 'Desactivar' : 'Activar'}</button>
+                  <button class="btn btn-secondary btn-icon" onclick="Gastos.showHistorialModal(${t.id})">Historial</button>
+                  ${t.es_sistema ? '' : `<button class="btn btn-secondary btn-icon" onclick="Gastos.showFormModalProveedor(${t.id})">Editar</button>
+                  <button class="btn btn-${t.activo ? 'warning' : 'info'} btn-icon" onclick="Gastos.toggleActivoProveedor(${t.id})">${t.activo ? 'Desactivar' : 'Activar'}</button>`}
                 </div>
               </td>
             </tr>
@@ -603,8 +759,8 @@ const Gastos = {
         </div>
         <div class="form-group">
           <label for="p_numeroIdentificacion">Número de Identificación <span style="color: #ef4444;">*</span></label>
-          <input type="text" id="p_numeroIdentificacion" value="${tercero?.numero_identificacion || ''}" required>
-          <small style="color: #64748b; font-size: 0.875rem;">Para Cédula de Ciudadanía, NIT y Registro Civil: solo números, entre 3 y 13 dígitos</small>
+          <input type="text" id="p_numeroIdentificacion" value="${tercero?.numero_identificacion || ''}" ${tercero?.tipo_identificacion === 'No informado' ? 'disabled' : 'required'}>
+          <small style="color: #64748b; font-size: 0.875rem;">Para Cédula de Ciudadanía, NIT y Registro Civil: solo números, entre 3 y 13 dígitos. "No informado" no requiere número.</small>
         </div>
         <div class="form-group">
           <label for="p_nombreRazonSocial">Nombre o Razón Social <span style="color: #ef4444;">*</span></label>
@@ -632,7 +788,13 @@ const Gastos = {
             <input type="checkbox" id="p_esProveedor" ${tercero ? (tercero.es_proveedor ? 'checked' : '') : 'checked'}> Proveedor
           </label>
           <label class="form-check">
-            <input type="checkbox" id="p_esOtro" ${tercero?.es_otro ? 'checked' : ''}> Otro (contratista, aliado, etc.)
+            <input type="checkbox" id="p_esContratista" ${tercero?.es_contratista ? 'checked' : ''}> Contratista
+          </label>
+          <label class="form-check">
+            <input type="checkbox" id="p_esAliado" ${tercero?.es_aliado ? 'checked' : ''}> Aliado
+          </label>
+          <label class="form-check">
+            <input type="checkbox" id="p_esOtro" ${tercero?.es_otro ? 'checked' : ''}> Otro
           </label>
         </div>
         <div class="form-group">
@@ -648,6 +810,18 @@ const Gastos = {
 
     App.openModal(content);
 
+    document.getElementById('p_tipoIdentificacion').addEventListener('change', (e) => {
+      const numeroInput = document.getElementById('p_numeroIdentificacion');
+      if (e.target.value === 'No informado') {
+        numeroInput.value = '';
+        numeroInput.disabled = true;
+        numeroInput.required = false;
+      } else {
+        numeroInput.disabled = false;
+        numeroInput.required = true;
+      }
+    });
+
     document.getElementById('proveedorForm').addEventListener('submit', (e) => {
       e.preventDefault();
       this.saveProveedor(id, onSaved);
@@ -655,9 +829,10 @@ const Gastos = {
   },
 
   async saveProveedor(id, onSaved = null) {
+    const tipoIdentificacion = document.getElementById('p_tipoIdentificacion').value;
     const formData = {
-      tipoIdentificacion: document.getElementById('p_tipoIdentificacion').value,
-      numeroIdentificacion: document.getElementById('p_numeroIdentificacion').value.trim(),
+      tipoIdentificacion,
+      numeroIdentificacion: tipoIdentificacion === 'No informado' ? null : document.getElementById('p_numeroIdentificacion').value.trim(),
       nombreRazonSocial: document.getElementById('p_nombreRazonSocial').value.trim(),
       nombreComercial: document.getElementById('p_nombreComercial').value.trim(),
       telefono: document.getElementById('p_telefono').value.trim(),
@@ -665,6 +840,8 @@ const Gastos = {
       direccion: document.getElementById('p_direccion').value.trim(),
       observaciones: document.getElementById('p_observaciones').value.trim(),
       esProveedor: document.getElementById('p_esProveedor').checked,
+      esContratista: document.getElementById('p_esContratista').checked,
+      esAliado: document.getElementById('p_esAliado').checked,
       esOtro: document.getElementById('p_esOtro').checked
     };
 
@@ -687,6 +864,47 @@ const Gastos = {
     } catch (error) {
       console.error('Error:', error);
       document.getElementById('formError').innerHTML = '<div class="error-message">Error al guardar el proveedor</div>';
+    }
+  },
+
+  async showHistorialModal(terceroId) {
+    try {
+      const response = await window.api.terceros.getHistorialMovimientos(terceroId);
+      if (!response.success) {
+        App.toast('Error al cargar el historial: ' + response.error, 'error');
+        return;
+      }
+
+      const movimientos = response.data;
+      const content = `
+        <div class="modal-header"><h2>Historial de Movimientos</h2></div>
+        ${movimientos.length === 0 ? '<p style="color: #64748b;">Este tercero no tiene gastos asociados.</p>' : `
+          <table>
+            <thead>
+              <tr><th>Fecha</th><th>Concepto</th><th>Tipo de Gasto</th><th>Valor</th><th>Estado</th></tr>
+            </thead>
+            <tbody>
+              ${movimientos.map(m => `
+                <tr>
+                  <td>${this.formatDate(m.fecha_gasto)}</td>
+                  <td>${m.concepto}</td>
+                  <td>${m.tipo_gasto || '-'}</td>
+                  <td>$${this.formatNumber(m.valor)}</td>
+                  <td><span class="badge badge-${m.estado === 'Anulado' ? 'inactivo' : 'activo'}">${m.estado}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `}
+        <div class="form-actions">
+          <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+        </div>
+      `;
+
+      App.openModal(content);
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al cargar el historial', 'error');
     }
   },
 

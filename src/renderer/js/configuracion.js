@@ -44,6 +44,11 @@ const Configuracion = {
             </div>
 
             <div class="form-group">
+              <label for="ciudad">Ciudad</label>
+              <input type="text" id="ciudad" name="ciudad" value="${config.ciudad || ''}">
+            </div>
+
+            <div class="form-group">
               <label for="telefono">Teléfono</label>
               <input type="text" id="telefono" name="telefono" value="${config.telefono || ''}">
             </div>
@@ -51,6 +56,18 @@ const Configuracion = {
             <div class="form-group">
               <label for="email">Correo Electrónico</label>
               <input type="email" id="email" name="email" value="${config.email || ''}">
+            </div>
+
+            <div style="margin: 8px 0 20px 0; padding-top: 16px; border-top: 1px solid #e2e8f0;">
+              <label style="display: block; margin-bottom: 8px;">Logo (aparece en el encabezado de los reportes en PDF/Excel)</label>
+              <div style="display: flex; align-items: center; gap: 16px;">
+                <div id="logoPreview" style="width: 80px; height: 80px; border: 1px dashed #cbd5e1; border-radius: 6px; display: flex; align-items: center; justify-content: center; overflow: hidden; color: #94a3b8; font-size: 0.75rem; text-align: center;">Cargando...</div>
+                <div style="display: flex; gap: 8px;">
+                  <button type="button" class="btn btn-secondary" id="btnSubirLogo">Subir Logo</button>
+                  <button type="button" class="btn btn-warning" id="btnQuitarLogo">Quitar Logo</button>
+                </div>
+              </div>
+              <small style="color: #64748b; font-size: 0.875rem;">PNG o JPG, máximo 500 KB. Se sube de inmediato, no requiere "Guardar Configuración".</small>
             </div>
 
             <h3 style="color: #1e40af; font-size: 16px; margin: 24px 0 16px 0; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">Parámetros Generales</h3>
@@ -168,6 +185,10 @@ const Configuracion = {
       document.getElementById('btnRestaurarBackup').addEventListener('click', () => this.restaurarBackup());
       document.getElementById('btnNuevoUsuario').addEventListener('click', () => this.showNuevoUsuarioModal());
 
+      document.getElementById('btnSubirLogo').addEventListener('click', () => this.subirLogo());
+      document.getElementById('btnQuitarLogo').addEventListener('click', () => this.quitarLogo());
+      this.cargarLogoPreview();
+
       await this.renderUsuarios();
       await this.renderAuditoria();
     }
@@ -188,11 +209,57 @@ const Configuracion = {
     return App.formatMoneyValue(value);
   },
 
+  async cargarLogoPreview() {
+    const preview = document.getElementById('logoPreview');
+    try {
+      const response = await window.api.config.getLogoBase64();
+      preview.innerHTML = (response.success && response.data)
+        ? `<img src="${response.data}" alt="Logo" style="max-width: 100%; max-height: 100%; object-fit: contain;">`
+        : 'Sin logo';
+    } catch (error) {
+      console.error('Error:', error);
+      preview.textContent = 'Sin logo';
+    }
+  },
+
+  async subirLogo() {
+    try {
+      const response = await window.api.config.subirLogo();
+      if (response.canceled) return;
+
+      if (response.success) {
+        App.toast('Logo actualizado con éxito');
+        this.cargarLogoPreview();
+      } else {
+        App.toast('Error: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al subir el logo', 'error');
+    }
+  },
+
+  async quitarLogo() {
+    try {
+      const response = await window.api.config.quitarLogo();
+      if (response.success) {
+        App.toast('Logo eliminado');
+        this.cargarLogoPreview();
+      } else {
+        App.toast('Error: ' + response.error, 'error');
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      App.toast('Error al quitar el logo', 'error');
+    }
+  },
+
   async guardarConfiguracion() {
     const datos = {
       nombre_asociacion: document.getElementById('nombre_asociacion').value.trim(),
       nit: document.getElementById('nit').value.trim(),
       direccion: document.getElementById('direccion').value.trim(),
+      ciudad: document.getElementById('ciudad').value.trim(),
       telefono: document.getElementById('telefono').value.trim(),
       email: document.getElementById('email').value.trim(),
       consecutivo_recibos: document.getElementById('consecutivo_recibos').value,

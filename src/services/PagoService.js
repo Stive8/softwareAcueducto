@@ -3,6 +3,8 @@ const CuentaRepository = require('../repositories/CuentaRepository');
 const PropietarioRepository = require('../repositories/PropietarioRepository');
 const NuevoPuntoRepository = require('../repositories/NuevoPuntoRepository');
 const AsientoContableService = require('./AsientoContableService');
+const PeriodoContableRepository = require('../repositories/PeriodoContableRepository');
+const PeriodoContableService = require('./PeriodoContableService');
 
 const NOMBRES_MES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -56,6 +58,7 @@ class PagoService {
     this.propietarioRepository = new PropietarioRepository(dbService);
     this.nuevoPuntoRepository = new NuevoPuntoRepository(dbService);
     this.asientoContableService = new AsientoContableService(dbService);
+    this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService));
   }
 
   formatPeriodo(anio, mes) {
@@ -189,6 +192,9 @@ class PagoService {
     this.validarDatosComunes({ cuentaId, fechaPago, metodoPago });
     if (!anioInicio || !mesInicio) throw new Error('El período inicial es obligatorio');
     if (!cantidadMeses || cantidadMeses < 1) throw new Error('La cantidad de meses debe ser al menos 1');
+
+    // Valida que el período contable de la fecha de pago esté Abierto (fail-fast antes de escrituras).
+    this.periodoContableService.validarFechaPermitida(fechaPago);
 
     let puntoConexion = null;
     if (abonoConexion > 0) {

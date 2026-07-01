@@ -296,6 +296,12 @@ const Recibos = {
               <div class="detail-value">${recibo.motivo_anulacion} (${this.formatDate(recibo.fecha_anulacion)})</div>
             </div>
           ` : ''}
+          ${recibo.motivo_correccion_pago ? `
+            <div class="detail-row">
+              <div class="detail-label">Corrección Método de Pago:</div>
+              <div class="detail-value">${recibo.motivo_correccion_pago} (${this.formatDate(recibo.fecha_correccion_pago)})</div>
+            </div>
+          ` : ''}
         </div>
 
         <div class="detail-section">
@@ -324,6 +330,7 @@ const Recibos = {
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
           <button class="btn btn-secondary" onclick="Recibos.imprimir(${recibo.id})">Imprimir</button>
           <button class="btn btn-success" onclick="Recibos.exportarPDF(${recibo.id})">Exportar PDF</button>
+          ${recibo.estado !== 'Anulado' ? `<button class="btn btn-secondary" onclick="Recibos.showCorregirMetodoPagoModal(${recibo.id}, '${recibo.metodo_pago}')">Corregir Método de Pago</button>` : ''}
           ${recibo.estado !== 'Anulado' ? `<button class="btn btn-warning" onclick="App.closeModal(); Recibos.showAnularModal(${recibo.id})">Anular</button>` : ''}
         </div>
       `;
@@ -383,6 +390,66 @@ const Recibos = {
       } catch (error) {
         console.error('Error:', error);
         errorDiv.innerHTML = `<div class="error-message">Error al anular el recibo</div>`;
+      }
+    });
+  },
+
+  showCorregirMetodoPagoModal(id, metodoActual) {
+    const otroMetodo = metodoActual === 'Efectivo' ? 'Transferencia' : 'Efectivo';
+    const content = `
+      <div class="modal-header">
+        <h2>Corregir Método de Pago</h2>
+      </div>
+
+      <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+          <strong>Nota:</strong> Esto NO anula el recibo. El número, fecha, valor y propietario quedan intactos; solo se corrige a qué cuenta (Caja o Banco) quedó asociado el dinero, y se ajustan el movimiento y el asiento contable.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="corregirMetodoPagoForm">
+        <div class="form-group">
+          <label for="nuevo_metodo_pago">Método de Pago Correcto <span style="color: #ef4444;">*</span></label>
+          <select id="nuevo_metodo_pago" required>
+            <option value="${otroMetodo}" selected>${otroMetodo}</option>
+            <option value="${metodoActual}">${metodoActual} (actual)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="motivo_correccion">Motivo de la Corrección <span style="color: #ef4444;">*</span></label>
+          <textarea id="motivo_correccion" name="motivo_correccion" required></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Confirmar Corrección</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('corregirMetodoPagoForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const nuevoMetodoPago = document.getElementById('nuevo_metodo_pago').value;
+      const motivo = document.getElementById('motivo_correccion').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.recibos.corregirMetodoPago(id, nuevoMetodoPago, motivo);
+
+        if (response.success) {
+          App.closeModal();
+          this.loadRecibos();
+          App.toast('Método de pago corregido con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al corregir el método de pago</div>`;
       }
     });
   },

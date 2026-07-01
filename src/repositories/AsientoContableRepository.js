@@ -20,6 +20,7 @@ class AsientoContableRepository {
   obtenerGastoParaAsiento(gastoId) {
     return this.db.prepare(`
       SELECT g.id, g.fecha_gasto as fecha, g.concepto, g.valor, g.metodo_pago, g.cuenta_contable_id,
+        g.tercero_id,
         COALESCE(t.nombre_razon_social, g.proveedor) as tercero_nombre,
         COALESCE(t.numero_identificacion, g.nit_cedula) as tercero_identificacion
       FROM gastos g
@@ -31,6 +32,7 @@ class AsientoContableRepository {
   obtenerReciboParaAsiento(reciboId) {
     const recibo = this.db.prepare(`
       SELECT r.id, r.fecha_recibo as fecha, r.numero_recibo, r.total, r.metodo_pago,
+        r.propietario_id,
         p.nombre_completo as tercero_nombre, p.numero_identificacion as tercero_identificacion
       FROM recibos r
       INNER JOIN propietarios p ON p.id = r.propietario_id
@@ -100,12 +102,19 @@ class AsientoContableRepository {
     `).run(numero, fecha, concepto, tipoOrigen, referenciaId, referenciaTipo, usuarioId).lastInsertRowid;
 
     const insertarLinea = this.db.prepare(`
-      INSERT INTO movimientos_contables (fecha, cuenta_id, debito, credito, concepto, referencia_id, referencia_tipo, asiento_id, tercero_identificacion, tercero_nombre)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO movimientos_contables
+        (fecha, cuenta_id, debito, credito, concepto, referencia_id, referencia_tipo, asiento_id,
+         tercero_identificacion, tercero_nombre, tercero_id, propietario_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     for (const linea of lineas) {
-      insertarLinea.run(fecha, linea.cuentaContableId, linea.debito || 0, linea.credito || 0, concepto, referenciaId, referenciaTipo, asientoId, linea.terceroIdentificacion || null, linea.terceroNombre || null);
+      insertarLinea.run(
+        fecha, linea.cuentaContableId, linea.debito || 0, linea.credito || 0,
+        concepto, referenciaId, referenciaTipo, asientoId,
+        linea.terceroIdentificacion || null, linea.terceroNombre || null,
+        linea.terceroId || null, linea.propietarioId || null
+      );
     }
 
     return asientoId;

@@ -19,6 +19,8 @@ function formatFecha(fechaString) {
   return fecha.toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+const METODOS_PAGO_VALIDOS = ['Efectivo', 'Transferencia'];
+
 class ReciboService {
   constructor(dbService) {
     this.repository = new ReciboRepository(dbService);
@@ -79,6 +81,48 @@ class ReciboService {
       }
 
       this.asientoContableService.revertirPorReferencia('Recibo', id, motivoAnulacion, usuarioId);
+    });
+  }
+
+  // Corrige a qué cuenta (Caja/Banco) quedó asociado el dinero de un recibo, sin anularlo: el
+  // número, fecha, valor y propietario quedan intactos. Espejo de GastoService.corregirMetodoPago
+  // pero invertido (el recibo es un Ingreso, su reversión es un Egreso).
+  corregirMetodoPago(id, nuevoMetodoPago, motivo, usuarioId = null) {
+    const recibo = this.repository.findById(id);
+    if (!recibo) throw new Error('Recibo no encontrado');
+    if (recibo.estado === 'Anulado') throw new Error('No se puede corregir el método de pago de un recibo anulado');
+    if (!METODOS_PAGO_VALIDOS.includes(nuevoMetodoPago)) throw new Error('Método de pago inválido');
+    if (nuevoMetodoPago === recibo.metodo_pago) throw new Error('El método de pago indicado es igual al actual');
+    if (!motivo || !motivo.trim()) throw new Error('Debe indicar el motivo de la corrección');
+    if (recibo.total <= 0) throw new Error('Este recibo se cubrió completamente con saldo a favor: no tiene movimiento de caja/banco asociado para corregir');
+
+    return this.repository.transaccion(() => {
+      this.repository.crearMovimiento({
+        tipo: 'Egreso',
+        origen: recibo.metodo_pago === 'Efectivo' ? 'Caja' : 'Banco',
+        monto: recibo.total,
+        concepto: `Corrección método de pago (reversión): Recibo No. ${recibo.numero_recibo}`,
+        referenciaId: id,
+        referenciaTipo: 'Recibo',
+        fechaMovimiento: new Date().toISOString().split('T')[0],
+        observaciones: motivo
+      });
+
+      this.repository.crearMovimiento({
+        tipo: 'Ingreso',
+        origen: nuevoMetodoPago === 'Efectivo' ? 'Caja' : 'Banco',
+        monto: recibo.total,
+        concepto: `Corrección método de pago: Recibo No. ${recibo.numero_recibo}`,
+        referenciaId: id,
+        referenciaTipo: 'Recibo',
+        fechaMovimiento: new Date().toISOString().split('T')[0],
+        observaciones: motivo
+      });
+
+      this.repository.actualizarMetodoPago(id, nuevoMetodoPago, motivo);
+
+      this.asientoContableService.revertirPorReferencia('Recibo', id, `Corrección método de pago: ${motivo}`, usuarioId);
+      this.asientoContableService.generarDesdeRecibo(id, usuarioId);
     });
   }
 

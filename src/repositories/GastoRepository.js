@@ -8,14 +8,19 @@ class GastoRepository {
   // saber cuál de los dos aplica.
   _selectConTercero() {
     return `
-      SELECT g.id, g.fecha_gasto, g.concepto, g.tipo_gasto,
+      SELECT g.id, g.fecha_gasto, g.concepto, g.tipo_gasto, g.tipo_operacion,
         COALESCE(t.nombre_razon_social, g.proveedor) as proveedor,
         COALESCE(t.numero_identificacion, g.nit_cedula) as nit_cedula,
         g.valor, g.metodo_pago, g.observaciones, g.ruta_soporte, g.fecha_creacion,
-        g.estado, g.fecha_anulacion, g.motivo_anulacion, g.cuenta_contable_id, g.tercero_id
+        g.estado, g.fecha_anulacion, g.motivo_anulacion, g.cuenta_contable_id, g.tercero_id,
+        g.fecha_correccion_pago, g.motivo_correccion_pago
       FROM gastos g
       LEFT JOIN terceros t ON t.id = g.tercero_id
     `;
+  }
+
+  findByTerceroId(terceroId) {
+    return this.db.prepare(this._selectConTercero() + ' WHERE g.tercero_id = ? ORDER BY g.fecha_gasto DESC').all(terceroId);
   }
 
   findAll(params = {}) {
@@ -152,13 +157,14 @@ class GastoRepository {
     const cuentaContableId = this.resolverCuentaContable('Gasto', gasto.tipoGasto || '__default__');
 
     const result = this.db.prepare(`
-      INSERT INTO gastos (fecha_gasto, concepto, tipo_gasto, tercero_id, valor, metodo_pago, observaciones, ruta_soporte, cuenta_contable_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO gastos (fecha_gasto, concepto, tipo_gasto, tipo_operacion, tercero_id, valor, metodo_pago, observaciones, ruta_soporte, cuenta_contable_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       gasto.fechaGasto,
       gasto.concepto,
       gasto.tipoGasto || null,
-      gasto.terceroId || null,
+      gasto.tipoOperacion,
+      gasto.terceroId,
       gasto.valor,
       gasto.metodoPago,
       gasto.observaciones || null,
@@ -167,6 +173,30 @@ class GastoRepository {
     );
 
     return result.lastInsertRowid;
+  }
+
+  crearSoporte(gastoId, { tipoSoporte, driveFileId, nombreArchivo }) {
+    const result = this.db.prepare(`
+      INSERT INTO gastos_soportes (gasto_id, tipo_soporte, drive_file_id, nombre_archivo)
+      VALUES (?, ?, ?, ?)
+    `).run(gastoId, tipoSoporte, driveFileId, nombreArchivo);
+    return result.lastInsertRowid;
+  }
+
+  getSoportes(gastoId) {
+    return this.db.prepare('SELECT * FROM gastos_soportes WHERE gasto_id = ? ORDER BY fecha_adjuntado').all(gastoId);
+  }
+
+  getSoporteById(soporteId) {
+    return this.db.prepare('SELECT * FROM gastos_soportes WHERE id = ?').get(soporteId);
+  }
+
+  actualizarMetodoPago(id, metodoPago, motivo) {
+    this.db.prepare(`
+      UPDATE gastos
+      SET metodo_pago = ?, fecha_correccion_pago = CURRENT_TIMESTAMP, motivo_correccion_pago = ?
+      WHERE id = ?
+    `).run(metodoPago, motivo, id);
   }
 
   anular(id, motivoAnulacion) {

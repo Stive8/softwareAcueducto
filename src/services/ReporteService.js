@@ -1,29 +1,9 @@
 const ReporteRepository = require('../repositories/ReporteRepository');
 const CajaRepository = require('../repositories/CajaRepository');
 const AuditoriaRepository = require('../repositories/AuditoriaRepository');
+const PlanCuentaRepository = require('../repositories/PlanCuentaRepository');
 const AsientoContableService = require('./AsientoContableService');
-
-function formatValorResumen(item) {
-  return item.tipo === 'numero' ? String(item.valor) : `$${formatNumber(item.valor)}`;
-}
-
-function escapeHtml(value) {
-  if (value === null || value === undefined) return '';
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function formatNumber(num) {
-  return Number(num || 0).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-}
-
-function formatFecha(fechaString) {
-  if (!fechaString) return '-';
-  return new Date(fechaString).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' });
-}
+const PlantillaReporteService = require('./PlantillaReporteService');
 
 const NOMBRES_MES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
@@ -39,7 +19,16 @@ class ReporteService {
     this.repository = new ReporteRepository(dbService);
     this.cajaRepository = new CajaRepository(dbService);
     this.auditoriaRepository = new AuditoriaRepository(dbService);
+    this.planCuentaRepository = new PlanCuentaRepository(dbService);
     this.asientoContableService = new AsientoContableService(dbService);
+    this.plantillaReporteService = new PlantillaReporteService(dbService);
+  }
+
+  // Para mostrar en "Filtros utilizados" el nombre de la cuenta en vez de solo su id interno.
+  _nombreCuentaContable(cuentaContableId) {
+    if (!cuentaContableId) return null;
+    const cuenta = this.planCuentaRepository.findById(cuentaContableId);
+    return cuenta ? `${cuenta.codigo} - ${cuenta.nombre}` : null;
   }
 
   // Devuelve un objeto estructurado { tipo: 'tabla'|'resumen', titulo, columnas, filas, secciones }
@@ -82,6 +71,10 @@ class ReporteService {
         return this.reporteBalancePruebaPorTercero(params);
       case 'informe_empalme':
         return this.reporteInformeEmpalme(params);
+      case 'terceros_incompletos':
+        return this.reporteTercerosIncompletos();
+      case 'cartera_por_edades':
+        return this.reporteCarteraPorEdades();
       default:
         throw new Error('Tipo de reporte no reconocido');
     }
@@ -92,6 +85,8 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: estado ? `Cuentas ${estado}s` : 'Todas las Cuentas',
+      periodo: null,
+      filtros: estado ? [{ label: 'Estado', valor: estado }] : [],
       columnas: [
         { key: 'codigo', label: 'Código' },
         { key: 'direccion', label: 'Dirección' },
@@ -104,10 +99,31 @@ class ReporteService {
     };
   }
 
+  reporteTercerosIncompletos() {
+    const filas = this.repository.getTercerosIncompletos();
+    return {
+      tipo: 'tabla',
+      titulo: 'Terceros con Información Incompleta',
+      periodo: null,
+      filtros: [],
+      columnas: [
+        { key: 'nombre_razon_social', label: 'Nombre / Razón Social' },
+        { key: 'tipo_identificacion', label: 'Tipo de Identificación' },
+        { key: 'numero_identificacion', label: 'Número de Identificación' },
+        { key: 'telefono', label: 'Teléfono' },
+        { key: 'email', label: 'Correo' },
+        { key: 'direccion', label: 'Dirección' }
+      ],
+      filas
+    };
+  }
+
   reportePropietarios() {
     return {
       tipo: 'tabla',
       titulo: 'Propietarios',
+      periodo: null,
+      filtros: [],
       columnas: [
         { key: 'nombre_completo', label: 'Nombre Completo' },
         { key: 'numero_identificacion', label: 'Identificación' },
@@ -125,6 +141,11 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: 'Historial de Pagos',
+      periodo: (fechaDesde || fechaHasta) ? { tipo: 'rango', fechaDesde, fechaHasta } : null,
+      filtros: [
+        this._nombreCuentaContable(cuentaContableId) && { label: 'Cuenta Contable', valor: this._nombreCuentaContable(cuentaContableId) },
+        tipoCuenta && { label: 'Tipo de Cuenta', valor: tipoCuenta }
+      ].filter(Boolean),
       columnas: [
         { key: 'cuenta', label: 'Cuenta' },
         { key: 'propietario', label: 'Propietario' },
@@ -145,6 +166,11 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: 'Historial de Gastos',
+      periodo: (fechaDesde || fechaHasta) ? { tipo: 'rango', fechaDesde, fechaHasta } : null,
+      filtros: [
+        this._nombreCuentaContable(cuentaContableId) && { label: 'Cuenta Contable', valor: this._nombreCuentaContable(cuentaContableId) },
+        tipoCuenta && { label: 'Tipo de Cuenta', valor: tipoCuenta }
+      ].filter(Boolean),
       columnas: [
         { key: 'fecha_gasto', label: 'Fecha', tipo: 'fecha' },
         { key: 'concepto', label: 'Concepto' },
@@ -189,6 +215,8 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: 'Cuentas al Día',
+      periodo: null,
+      filtros: [],
       columnas: [
         { key: 'codigo', label: 'Código' },
         { key: 'direccion', label: 'Dirección' },
@@ -204,6 +232,8 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: 'Cuentas en Mora',
+      periodo: null,
+      filtros: [],
       columnas: [
         { key: 'codigo', label: 'Código' },
         { key: 'direccion', label: 'Dirección' },
@@ -219,6 +249,8 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: 'Cuentas con Saldo a Favor',
+      periodo: null,
+      filtros: [],
       columnas: [
         { key: 'codigo', label: 'Código' },
         { key: 'direccion', label: 'Dirección' },
@@ -233,6 +265,8 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: 'Estado de Nuevos Puntos',
+      periodo: null,
+      filtros: [],
       columnas: [
         { key: 'cuenta', label: 'Cuenta' },
         { key: 'direccion', label: 'Dirección' },
@@ -254,6 +288,11 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: 'Ingresos por Período',
+      periodo: (fechaDesde || fechaHasta) ? { tipo: 'rango', fechaDesde, fechaHasta } : null,
+      filtros: [
+        this._nombreCuentaContable(cuentaContableId) && { label: 'Cuenta Contable', valor: this._nombreCuentaContable(cuentaContableId) },
+        tipoCuenta && { label: 'Tipo de Cuenta', valor: tipoCuenta }
+      ].filter(Boolean),
       columnas: [
         { key: 'fecha_recibo', label: 'Fecha', tipo: 'fecha' },
         { key: 'numero_recibo', label: 'No. Recibo' },
@@ -273,6 +312,11 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: 'Gastos por Período',
+      periodo: (fechaDesde || fechaHasta) ? { tipo: 'rango', fechaDesde, fechaHasta } : null,
+      filtros: [
+        this._nombreCuentaContable(cuentaContableId) && { label: 'Cuenta Contable', valor: this._nombreCuentaContable(cuentaContableId) },
+        tipoCuenta && { label: 'Tipo de Cuenta', valor: tipoCuenta }
+      ].filter(Boolean),
       columnas: [
         { key: 'fecha_gasto', label: 'Fecha', tipo: 'fecha' },
         { key: 'concepto', label: 'Concepto' },
@@ -313,6 +357,8 @@ class ReporteService {
       tipo: 'resumen',
       titulo: 'Balance General',
       fecha: corte,
+      periodo: { tipo: 'corte', fecha: corte },
+      filtros: [],
       secciones: [
         {
           titulo: 'Activos',
@@ -376,7 +422,8 @@ class ReporteService {
     return {
       tipo: 'resumen',
       titulo: 'Estado de Resultados',
-      periodo: { fechaDesde, fechaHasta },
+      periodo: { tipo: 'rango', fechaDesde, fechaHasta },
+      filtros: [],
       secciones: [
         {
           titulo: 'Ingresos',
@@ -402,7 +449,8 @@ class ReporteService {
     return {
       tipo: 'resumen',
       titulo: 'Flujo de Caja',
-      periodo: { fechaDesde, fechaHasta },
+      periodo: { tipo: 'rango', fechaDesde, fechaHasta },
+      filtros: [],
       secciones: [
         {
           titulo: 'Saldo Inicial (Caja + Banco)',
@@ -438,6 +486,8 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: tipoCuenta ? `Libro Diario - Cuentas de ${tipoCuenta}` : 'Libro Diario',
+      periodo: (fechaDesde || fechaHasta) ? { tipo: 'rango', fechaDesde, fechaHasta } : null,
+      filtros: tipoCuenta ? [{ label: 'Tipo de Cuenta', valor: tipoCuenta }] : [],
       columnas: [
         { key: 'numero_asiento', label: 'Asiento No.' },
         { key: 'fecha', label: 'Fecha', tipo: 'fecha' },
@@ -464,6 +514,8 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: `Libro Mayor - ${cuenta.codigo} ${cuenta.nombre}`,
+      periodo: (fechaDesde || fechaHasta) ? { tipo: 'rango', fechaDesde, fechaHasta } : null,
+      filtros: [{ label: 'Cuenta Contable', valor: `${cuenta.codigo} - ${cuenta.nombre}` }],
       columnas: [
         { key: 'fecha', label: 'Fecha', tipo: 'fecha' },
         { key: 'numero_asiento', label: 'Asiento No.' },
@@ -490,6 +542,8 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: tipoCuenta ? `Balance de Prueba - Cuentas de ${tipoCuenta}` : 'Balance de Prueba',
+      periodo: (fechaDesde || fechaHasta) ? { tipo: 'rango', fechaDesde, fechaHasta } : null,
+      filtros: tipoCuenta ? [{ label: 'Tipo de Cuenta', valor: tipoCuenta }] : [],
       columnas: [
         { key: 'codigo', label: 'Código Cuenta Contable' },
         { key: 'nombre', label: 'Nombre Cuenta Contable' },
@@ -513,6 +567,11 @@ class ReporteService {
     return {
       tipo: 'tabla',
       titulo: 'Balance de Prueba por Tercero',
+      periodo: { tipo: 'rango', fechaDesde, fechaHasta },
+      filtros: [
+        (cuentaCodigoDesde || cuentaCodigoHasta) && { label: 'Rango de Cuentas', valor: `${cuentaCodigoDesde || 'inicio'} - ${cuentaCodigoHasta || 'fin'}` },
+        terceroQuery && { label: 'Tercero', valor: terceroQuery }
+      ].filter(Boolean),
       columnas: [
         { key: 'nivel', label: 'Nivel' },
         { key: 'transaccional', label: 'Transaccional' },
@@ -553,7 +612,8 @@ class ReporteService {
     return {
       tipo: 'compuesto',
       titulo: 'Informe de Empalme',
-      periodo: { fechaDesde, fechaHasta },
+      periodo: { tipo: 'rango', fechaDesde, fechaHasta },
+      filtros: [],
       partes: [
         {
           titulo: 'Resumen de Cartera (estado actual)',
@@ -599,100 +659,48 @@ class ReporteService {
     };
   }
 
-  // --- Generación de HTML imprimible (para exportar a PDF) ---
+  // --- Generación de HTML imprimible (para exportar a PDF y para la vista previa) ---
+  // El armado real del documento (encabezado institucional, filtros, contenido, pie) vive en
+  // PlantillaReporteService, compartido por todos los reportes — ver ese archivo.
 
-  generarHTML(tipoReporte, params = {}) {
+  generarHTML(tipoReporte, params = {}, nombreUsuario = null) {
     const reporte = this.getReporte(tipoReporte, params);
-    let cuerpo;
-    if (reporte.tipo === 'compuesto') {
-      cuerpo = reporte.partes.map(parte => `
-        <h2 style="color:#1e40af; font-size:16px; margin: 24px 0 8px 0; border-bottom: 2px solid #1e40af; padding-bottom: 6px;">${escapeHtml(parte.titulo)}</h2>
-        ${parte.tipo === 'resumen' ? this.renderResumenHTML(parte) : this.renderTablaHTML(parte)}
-      `).join('');
-    } else {
-      cuerpo = reporte.tipo === 'resumen' ? this.renderResumenHTML(reporte) : this.renderTablaHTML(reporte);
-    }
-
-    return `
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<title>${escapeHtml(reporte.titulo)}</title>
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; padding: 28px; color: #1f2937; }
-  .header { text-align: center; margin-bottom: 24px; border-bottom: 2px solid #1e40af; padding-bottom: 14px; }
-  .header h1 { color: #1e40af; font-size: 20px; margin: 0 0 4px 0; }
-  .header p { font-size: 12px; color: #64748b; margin: 0; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-  th, td { border: 1px solid #cbd5e1; padding: 8px 10px; font-size: 12px; text-align: left; }
-  th { background: #f1f5f9; color: #334155; }
-  .text-right { text-align: right; }
-  .total-row td { font-weight: bold; background: #eff6ff; }
-  .resumen-section { margin-bottom: 20px; }
-  .resumen-section h3 { color: #1e40af; font-size: 14px; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; }
-  .resumen-row { display: flex; justify-content: space-between; padding: 4px 0; font-size: 13px; }
-  .resumen-total { display: flex; justify-content: space-between; font-weight: bold; padding-top: 6px; border-top: 1px solid #cbd5e1; margin-top: 4px; font-size: 13px; }
-  .footer { margin-top: 28px; font-size: 10px; color: #94a3b8; text-align: center; }
-</style>
-</head>
-<body>
-  <div class="header">
-    <h1>${escapeHtml(reporte.titulo)}</h1>
-    <p>Generado el ${formatFecha(new Date().toISOString())}</p>
-  </div>
-  ${cuerpo}
-  <div class="footer">Documento generado por el sistema administrativo del acueducto.</div>
-</body>
-</html>
-    `;
+    const config = this.plantillaReporteService.obtenerConfiguracionInstitucional();
+    return this.plantillaReporteService.construirHTML(reporte, config, nombreUsuario);
   }
 
-  renderTablaHTML(reporte) {
-    const filasHtml = reporte.filas.map(fila => `
-      <tr>
-        ${reporte.columnas.map(col => {
-          const valor = fila[col.key];
-          if (col.tipo === 'moneda') return `<td class="text-right">$${formatNumber(valor)}</td>`;
-          if (col.tipo === 'fecha') return `<td>${formatFecha(valor)}</td>`;
-          return `<td>${escapeHtml(valor)}</td>`;
-        }).join('')}
-      </tr>
-    `).join('');
+  // Cartera por Edades (Aging): cuentas activas con mora, clasificadas por antigüedad de deuda.
+  reporteCarteraPorEdades() {
+    const filas = this.repository.getCartedaPorEdades();
+    const totalEstimado = filas.reduce((s, f) => s + f.valor_estimado, 0);
 
-    const filaTotales = reporte.totales ? `
-      <tr class="total-row">
-        ${reporte.columnas.map((col, i) => {
-          if (i === 0) return '<td>TOTAL</td>';
-          if (reporte.totales[col.key] !== undefined) return `<td class="text-right">$${formatNumber(reporte.totales[col.key])}</td>`;
-          return '<td></td>';
-        }).join('')}
-      </tr>
-    ` : '';
-
-    if (reporte.filas.length === 0) {
-      return '<p style="text-align:center; color:#64748b; padding: 24px;">No hay datos para mostrar con los filtros seleccionados</p>';
-    }
-
-    return `
-      <table>
-        <thead><tr>${reporte.columnas.map(c => `<th>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>
-        <tbody>${filasHtml}${filaTotales}</tbody>
-      </table>
-    `;
+    return {
+      tipo: 'tabla',
+      titulo: 'Cartera por Edades (Aging)',
+      periodo: null,
+      filtros: [],
+      columnas: [
+        { key: 'codigo', label: 'Código' },
+        { key: 'direccion', label: 'Dirección' },
+        { key: 'propietario', label: 'Propietario' },
+        { key: 'fecha_ultimo_pago', label: 'Último Pago', tipo: 'fecha' },
+        { key: 'meses_mora', label: 'Meses en Mora', tipo: 'numero' },
+        { key: 'rango_mora', label: 'Rango de Mora' },
+        { key: 'tarifa_mensual', label: 'Tarifa Mensual', tipo: 'moneda' },
+        { key: 'valor_estimado', label: 'Valor Estimado', tipo: 'moneda' }
+      ],
+      filas,
+      totales: [
+        { label: 'Total cuentas en mora', valor: filas.length, tipo: 'numero' },
+        { label: 'Total cartera estimada', valor: totalEstimado, tipo: 'moneda' }
+      ]
+    };
   }
 
-  renderResumenHTML(reporte) {
-    return reporte.secciones.map(seccion => `
-      <div class="resumen-section">
-        <h3>${escapeHtml(seccion.titulo)}</h3>
-        ${seccion.items.map(item => `
-          <div class="resumen-row"><span>${escapeHtml(item.label)}</span><span>${formatValorResumen(item)}</span></div>
-        `).join('')}
-        <div class="resumen-total"><span>Total ${escapeHtml(seccion.titulo)}</span><span>${formatValorResumen({ valor: seccion.total, tipo: seccion.tipoValor })}</span></div>
-      </div>
-    `).join('');
+  // KPIs del módulo de Contabilidad para el Dashboard. Los saldos de Caja/Banco vienen del
+  // ledger simple (movimientos), consistente con el Dashboard general.
+  getDashboardContable() {
+    return this.repository.getDashboardContable();
   }
 }
 

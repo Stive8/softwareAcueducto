@@ -100,6 +100,14 @@ class ReciboRepository {
     `).run(tipo, origen, monto, concepto, referenciaId, referenciaTipo, fechaMovimiento, observaciones || null, cuentaContableId).lastInsertRowid;
   }
 
+  actualizarMetodoPago(id, metodoPago, motivo) {
+    this.db.prepare(`
+      UPDATE recibos
+      SET metodo_pago = ?, fecha_correccion_pago = CURRENT_TIMESTAMP, motivo_correccion_pago = ?
+      WHERE id = ?
+    `).run(metodoPago, motivo, id);
+  }
+
   // Anular un recibo libera los meses/abonos/conexión que cubría, para que se puedan volver
   // a cobrar, pero conserva el recibo y su detalle como constancia de que existió y se anuló.
   anular(id, motivo) {

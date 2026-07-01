@@ -44,7 +44,8 @@ contextBridge.exposeInMainWorld('api', {
     getById: (id) => ipcRenderer.invoke('terceros:getById', id),
     create: (terceroData) => ipcRenderer.invoke('terceros:create', terceroData),
     update: (id, terceroData) => ipcRenderer.invoke('terceros:update', id, terceroData),
-    toggleActivo: (id) => ipcRenderer.invoke('terceros:toggleActivo', id)
+    toggleActivo: (id) => ipcRenderer.invoke('terceros:toggleActivo', id),
+    getHistorialMovimientos: (id) => ipcRenderer.invoke('terceros:getHistorialMovimientos', id)
   },
   pagos: {
     getCuentasConEstado: (params) => ipcRenderer.invoke('pagos:getCuentasConEstado', params),
@@ -59,6 +60,7 @@ contextBridge.exposeInMainWorld('api', {
     getAll: (params) => ipcRenderer.invoke('recibos:getAll', params),
     getById: (id) => ipcRenderer.invoke('recibos:getById', id),
     anular: (id, motivo) => ipcRenderer.invoke('recibos:anular', id, motivo),
+    corregirMetodoPago: (id, nuevoMetodoPago, motivo) => ipcRenderer.invoke('recibos:corregirMetodoPago', id, nuevoMetodoPago, motivo),
     registrarAnuladoFisico: (datos) => ipcRenderer.invoke('recibos:registrarAnuladoFisico', datos),
     getConsecutivo: () => ipcRenderer.invoke('recibos:getConsecutivo'),
     getAnuladosFisicos: () => ipcRenderer.invoke('recibos:getAnuladosFisicos'),
@@ -71,7 +73,11 @@ contextBridge.exposeInMainWorld('api', {
     getById: (id) => ipcRenderer.invoke('gastos:getById', id),
     getTiposGasto: () => ipcRenderer.invoke('gastos:getTiposGasto'),
     create: (gastoData) => ipcRenderer.invoke('gastos:create', gastoData),
-    anular: (id, motivo) => ipcRenderer.invoke('gastos:anular', id, motivo)
+    anular: (id, motivo) => ipcRenderer.invoke('gastos:anular', id, motivo),
+    corregirMetodoPago: (id, nuevoMetodoPago, motivo) => ipcRenderer.invoke('gastos:corregirMetodoPago', id, nuevoMetodoPago, motivo),
+    adjuntarSoporte: (gastoId, tipoSoporte) => ipcRenderer.invoke('gastos:adjuntarSoporte', gastoId, tipoSoporte),
+    getSoportes: (gastoId) => ipcRenderer.invoke('gastos:getSoportes', gastoId),
+    getSoporte: (gastoId, soporteId) => ipcRenderer.invoke('gastos:getSoporte', gastoId, soporteId)
   },
   caja: {
     getSaldos: () => ipcRenderer.invoke('caja:getSaldos'),
@@ -95,7 +101,10 @@ contextBridge.exposeInMainWorld('api', {
   },
   config: {
     getAll: () => ipcRenderer.invoke('config:getAll'),
-    actualizar: (datos) => ipcRenderer.invoke('config:actualizar', datos)
+    actualizar: (datos) => ipcRenderer.invoke('config:actualizar', datos),
+    subirLogo: () => ipcRenderer.invoke('config:subirLogo'),
+    quitarLogo: () => ipcRenderer.invoke('config:quitarLogo'),
+    getLogoBase64: () => ipcRenderer.invoke('config:getLogoBase64')
   },
   backup: {
     crear: () => ipcRenderer.invoke('backup:crear'),
@@ -112,6 +121,7 @@ contextBridge.exposeInMainWorld('api', {
   },
   reportes: {
     getDatos: (tipoReporte, params) => ipcRenderer.invoke('reportes:getDatos', tipoReporte, params),
+    getVistaPreviaHTML: (tipoReporte, params) => ipcRenderer.invoke('reportes:getVistaPreviaHTML', tipoReporte, params),
     generarPDF: (tipoReporte, params) => ipcRenderer.invoke('reportes:generarPDF', tipoReporte, params),
     generarExcel: (tipoReporte, params) => ipcRenderer.invoke('reportes:generarExcel', tipoReporte, params)
   },
@@ -137,6 +147,38 @@ contextBridge.exposeInMainWorld('api', {
     getBalancePrueba: (fechaDesde, fechaHasta) => ipcRenderer.invoke('asientos:getBalancePrueba', fechaDesde, fechaHasta),
     imprimir: (id) => ipcRenderer.invoke('asientos:imprimir', id),
     exportarPDF: (id) => ipcRenderer.invoke('asientos:exportarPDF', id)
+  },
+  cuentasAutomaticas: {
+    getAll: () => ipcRenderer.invoke('cuentasautomaticas:getAll'),
+    actualizar: (clave, cuentaContableId) => ipcRenderer.invoke('cuentasautomaticas:actualizar', clave, cuentaContableId)
+  },
+  periodos: {
+    getAll: () => ipcRenderer.invoke('periodos:getAll'),
+    getByAnioMes: (anio, mes) => ipcRenderer.invoke('periodos:getByAnioMes', anio, mes),
+    cerrar: (id, motivoCierre) => ipcRenderer.invoke('periodos:cerrar', id, motivoCierre),
+    bloquear: (id, motivoCierre) => ipcRenderer.invoke('periodos:bloquear', id, motivoCierre),
+    reabrir: (id) => ipcRenderer.invoke('periodos:reabrir', id),
+    actualizarNotas: (id, notas) => ipcRenderer.invoke('periodos:actualizarNotas', id, notas)
+  },
+  contabilidad: {
+    getDashboard: () => ipcRenderer.invoke('contabilidad:getDashboard')
+  },
+  plantillas: {
+    getAll: () => ipcRenderer.invoke('plantillas:getAll'),
+    getById: (id) => ipcRenderer.invoke('plantillas:getById', id),
+    getVersiones: (codigo) => ipcRenderer.invoke('plantillas:getVersiones', codigo),
+    actualizarLineas: (id, nuevasLineas) => ipcRenderer.invoke('plantillas:actualizarLineas', id, nuevasLineas),
+    simularContabilizacion: (plantillaId, contextoJson) => ipcRenderer.invoke('plantillas:simularContabilizacion', plantillaId, contextoJson)
+  },
+  impuestos: {
+    getAll: () => ipcRenderer.invoke('impuestos:getAll'),
+    getById: (id) => ipcRenderer.invoke('impuestos:getById', id),
+    create: (datos) => ipcRenderer.invoke('impuestos:create', datos),
+    update: (id, datos) => ipcRenderer.invoke('impuestos:update', id, datos),
+    toggleActivo: (id) => ipcRenderer.invoke('impuestos:toggleActivo', id),
+    asignarAPlantilla: (plantillaId, impuestoId, orden) => ipcRenderer.invoke('impuestos:asignarAPlantilla', plantillaId, impuestoId, orden),
+    quitarDePlantilla: (plantillaId, impuestoId) => ipcRenderer.invoke('impuestos:quitarDePlantilla', plantillaId, impuestoId),
+    getPlantillasAsignadas: (impuestoId) => ipcRenderer.invoke('impuestos:getPlantillasAsignadas', impuestoId)
   },
   devtools: {
     tieneDatosOperativos: () => ipcRenderer.invoke('devtools:tieneDatosOperativos')

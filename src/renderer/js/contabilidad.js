@@ -3,9 +3,18 @@
 // contabilidad de doble partida: aquí solo se administra el catálogo y se generan reportes,
 // sin generar asientos todavía.
 const Contabilidad = {
-  tabActual: 'plancuentas',
+  tabActual: 'dashboard',
 
   gruposReportes: [
+    {
+      titulo: 'Cartera',
+      reportes: [
+        { tipo: 'cartera_por_edades', titulo: 'Cartera por Edades (Aging)', icon: 'clock', descripcion: 'Cuentas activas con mora, clasificadas por rango de antigüedad de la deuda.', destacado: true },
+        { tipo: 'cuentas_en_mora', titulo: 'Cuentas en Mora', icon: 'alertTriangle', descripcion: 'Listado de cuentas que tienen pagos pendientes.' },
+        { tipo: 'cuentas_al_dia', titulo: 'Cuentas al Día', icon: 'checkCircle', descripcion: 'Cuentas activas sin deuda pendiente.' },
+        { tipo: 'cuentas_saldo_favor', titulo: 'Cuentas con Saldo a Favor', icon: 'wallet', descripcion: 'Cuentas que tienen saldo a favor acumulado.' }
+      ]
+    },
     {
       titulo: 'Pagos y Gastos',
       reportes: [
@@ -61,14 +70,318 @@ const Contabilidad = {
   async mostrarTab(tab) {
     this.tabActual = tab;
 
-    if (tab === 'plancuentas') {
+    if (tab === 'dashboard') {
+      await this.loadDashboard();
+    } else if (tab === 'periodos') {
+      await this.loadPeriodos();
+    } else if (tab === 'plancuentas') {
       await this.loadCatalogo();
+    } else if (tab === 'cuentasautomaticas') {
+      await this.loadCuentasAutomaticas();
+    } else if (tab === 'plantillas') {
+      await this.loadPlantillas();
+    } else if (tab === 'impuestos') {
+      await this.loadImpuestos();
     } else if (tab === 'mapeo') {
       await this.loadMapeo();
     } else if (tab === 'asientos') {
       await this.loadAsientos();
     } else {
       await this.loadReportesContables();
+    }
+  },
+
+  // --- Dashboard Financiero ---
+
+  async loadDashboard() {
+    const body = document.getElementById('contabilidadBody');
+    body.innerHTML = `<div id="dashboardContent" style="padding: 24px;">${App.renderSkeletonTable()}</div>`;
+
+    try {
+      const res = await window.api.contabilidad.getDashboard();
+      if (!res.success) { App.toast('Error al cargar el dashboard: ' + res.error, 'error'); return; }
+      this.renderDashboard(res.data);
+    } catch (e) {
+      console.error(e);
+    }
+  },
+
+  renderDashboard(data) {
+    const body = document.getElementById('contabilidadBody');
+    const fmt = n => Number(n || 0).toLocaleString('es-CO', { minimumFractionDigits: 0 });
+    const mes = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'][data.mes - 1];
+    const estadoPeriodo = data.periodoActual.estado || 'Sin registro';
+    const colorEstado = estadoPeriodo === 'Abierto' ? '#16a34a' : estadoPeriodo === 'Cerrado' ? '#d97706' : '#dc2626';
+    const utilidadColor = data.resultadoMes >= 0 ? '#16a34a' : '#dc2626';
+
+    body.innerHTML = `
+      <div style="padding: 24px;">
+        <div style="display:flex; align-items:center; justify-content:space-between; margin-bottom:24px;">
+          <div>
+            <h2 style="margin:0; color:#1e293b;">Dashboard Financiero</h2>
+            <p style="margin:4px 0 0; color:#64748b; font-size:0.875rem;">${mes} ${data.anio}</p>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px; background:#f8fafc; border:1px solid #e2e8f0; border-radius:8px; padding:8px 16px;">
+            <span style="width:10px; height:10px; border-radius:50%; background:${colorEstado}; display:inline-block;"></span>
+            <span style="font-size:0.875rem; color:#334155;">Período: <strong>${estadoPeriodo}</strong></span>
+            ${estadoPeriodo === 'Abierto' ? '<button class="btn btn-secondary btn-icon" style="margin-left:8px;" onclick="Contabilidad.mostrarTab(\'periodos\')">Gestionar</button>' : ''}
+          </div>
+        </div>
+
+        <div class="kpi-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin-bottom:32px;">
+          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid #16a34a;">
+            <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Ingresos del Mes</div>
+            <div style="font-size:1.75rem; font-weight:700; color:#16a34a;">$${fmt(data.ingresosMes)}</div>
+          </div>
+          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid #dc2626;">
+            <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Gastos del Mes</div>
+            <div style="font-size:1.75rem; font-weight:700; color:#dc2626;">$${fmt(data.gastosMes)}</div>
+          </div>
+          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid ${utilidadColor};">
+            <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Resultado del Mes</div>
+            <div style="font-size:1.75rem; font-weight:700; color:${utilidadColor};">${data.resultadoMes < 0 ? '-' : ''}$${fmt(Math.abs(data.resultadoMes))}</div>
+          </div>
+          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid #3b82f6;">
+            <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Saldo Disponible</div>
+            <div style="font-size:1.75rem; font-weight:700; color:#1e293b;">$${fmt(data.saldoDisponible)}</div>
+            <div style="font-size:0.75rem; color:#64748b; margin-top:4px;">Caja $${fmt(data.saldoCaja)} + Banco $${fmt(data.saldoBanco)}</div>
+          </div>
+          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid #f59e0b; cursor:pointer;" onclick="Contabilidad.mostrarTab('reportes')">
+            <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Cuentas en Mora</div>
+            <div style="font-size:1.75rem; font-weight:700; color:#d97706;">${data.cuentasMora}</div>
+            <div style="font-size:0.75rem; color:#3b82f6; margin-top:4px;">Ver Cartera por Edades →</div>
+          </div>
+        </div>
+
+        <div style="display:flex; gap:12px; flex-wrap:wrap;">
+          <button class="btn btn-primary" onclick="Contabilidad.mostrarTab('periodos')">Gestionar Períodos</button>
+          <button class="btn btn-secondary" onclick="Contabilidad.mostrarTab('reportes')">Ver Reportes Contables</button>
+          <button class="btn btn-secondary" onclick="Contabilidad.mostrarTab('asientos')">Asientos Contables</button>
+        </div>
+      </div>
+    `;
+  },
+
+  // --- Períodos Contables ---
+
+  async loadPeriodos() {
+    const body = document.getElementById('contabilidadBody');
+    body.innerHTML = `
+      <div style="padding: 16px 20px; display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <h2 style="margin:0; color:#1e293b;">Períodos Contables</h2>
+          <p style="margin:4px 0 0; color:#64748b; font-size:0.875rem;">Controla qué períodos están abiertos para registrar movimientos.</p>
+        </div>
+      </div>
+      <div id="periodosContent" style="padding:0 20px 24px;">${App.renderSkeletonTable()}</div>
+    `;
+
+    try {
+      const res = await window.api.periodos.getAll();
+      if (!res.success) { App.toast('Error al cargar los períodos: ' + res.error, 'error'); return; }
+      this.renderPeriodos(res.data);
+    } catch (e) { console.error(e); }
+  },
+
+  renderPeriodos(periodos) {
+    const cont = document.getElementById('periodosContent');
+    const meses = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
+    const badgeEstado = e => e === 'Abierto' ? 'badge-activo' : e === 'Cerrado' ? 'badge-warning' : 'badge-inactivo';
+
+    if (!periodos.length) {
+      cont.innerHTML = `<div class="empty-state"><p>No hay períodos registrados aún. Se crean automáticamente al registrar el primer movimiento de cada mes.</p></div>`;
+      return;
+    }
+
+    cont.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Período</th>
+            <th>Estado</th>
+            <th>Fecha Apertura</th>
+            <th>Fecha Cierre</th>
+            <th>Cerrado por</th>
+            <th>Motivo</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${periodos.map(p => `
+            <tr>
+              <td><strong>${meses[p.mes]} ${p.anio}</strong></td>
+              <td><span class="badge ${badgeEstado(p.estado)}">${p.estado}</span></td>
+              <td>${p.fecha_apertura ? p.fecha_apertura.substring(0,10) : '-'}</td>
+              <td>${p.fecha_cierre ? p.fecha_cierre.substring(0,10) : '-'}</td>
+              <td>${p.usuario_cierre_nombre || '-'}</td>
+              <td style="max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${p.motivo_cierre || ''}">${p.motivo_cierre || '-'}</td>
+              <td>
+                <div class="table-actions">
+                  ${p.estado === 'Abierto' ? `<button class="btn btn-warning btn-icon" onclick="Contabilidad.cerrarPeriodo(${p.id})">Cerrar</button>` : ''}
+                  ${p.estado === 'Abierto' ? `<button class="btn btn-danger btn-icon" onclick="Contabilidad.bloquearPeriodo(${p.id})">Bloquear</button>` : ''}
+                  ${p.estado === 'Cerrado' ? `<button class="btn btn-info btn-icon" onclick="Contabilidad.reabrirPeriodo(${p.id})">Reabrir</button>` : ''}
+                  ${p.estado === 'Cerrado' ? `<button class="btn btn-danger btn-icon" onclick="Contabilidad.bloquearPeriodo(${p.id})">Bloquear</button>` : ''}
+                </div>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+  },
+
+  cerrarPeriodo(id) {
+    App.openModal(`
+      <div class="modal-header"><h2>Cerrar Período</h2></div>
+      <div id="formError"></div>
+      <p style="color:#64748b; font-size:0.875rem; margin-bottom:16px;">Al cerrar el período no se podrán registrar nuevos movimientos con fecha en ese mes. Puede reabrirlo si es necesario.</p>
+      <div class="form-group">
+        <label>Motivo del cierre <span style="color:#ef4444;">*</span></label>
+        <input type="text" id="motivoCierrePeriodo" placeholder="Ej: Cierre mensual de período">
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+        <button class="btn btn-warning" onclick="Contabilidad._confirmarCierrePeriodo(${id})">Cerrar Período</button>
+      </div>
+    `);
+    setTimeout(() => document.getElementById('motivoCierrePeriodo')?.focus(), 100);
+  },
+
+  async _confirmarCierrePeriodo(id) {
+    const motivo = document.getElementById('motivoCierrePeriodo')?.value?.trim();
+    if (!motivo) { document.getElementById('formError').innerHTML = '<div class="alert alert-error">El motivo del cierre es obligatorio.</div>'; return; }
+    const res = await window.api.periodos.cerrar(id, motivo);
+    if (res.success) { App.closeModal(); App.toast('Período cerrado correctamente.', 'success'); await this.loadPeriodos(); }
+    else { document.getElementById('formError').innerHTML = `<div class="alert alert-error">${res.error}</div>`; }
+  },
+
+  bloquearPeriodo(id) {
+    App.openModal(`
+      <div class="modal-header"><h2>Bloquear Período</h2></div>
+      <div id="formError"></div>
+      <div style="background:#fef2f2; border-left:4px solid #dc2626; border-radius:4px; padding:12px 16px; margin-bottom:16px;">
+        <p style="margin:0; font-size:0.875rem; color:#991b1b;"><strong>Advertencia:</strong> El bloqueo es definitivo. Un período Bloqueado no puede reabrirse desde la aplicación.</p>
+      </div>
+      <div class="form-group">
+        <label>Motivo del bloqueo <span style="color:#ef4444;">*</span></label>
+        <input type="text" id="motivoBloqueo" placeholder="Ej: Cierre de ejercicio fiscal 2025">
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+        <button class="btn btn-danger" onclick="Contabilidad._confirmarBloqueo(${id})">Bloquear Definitivamente</button>
+      </div>
+    `);
+    setTimeout(() => document.getElementById('motivoBloqueo')?.focus(), 100);
+  },
+
+  async _confirmarBloqueo(id) {
+    const motivo = document.getElementById('motivoBloqueo')?.value?.trim();
+    if (!motivo) { document.getElementById('formError').innerHTML = '<div class="alert alert-error">El motivo del bloqueo es obligatorio.</div>'; return; }
+    const res = await window.api.periodos.bloquear(id, motivo);
+    if (res.success) { App.closeModal(); App.toast('Período bloqueado definitivamente.', 'success'); await this.loadPeriodos(); }
+    else { document.getElementById('formError').innerHTML = `<div class="alert alert-error">${res.error}</div>`; }
+  },
+
+  async reabrirPeriodo(id) {
+    if (!confirm('¿Está seguro de reabrir este período? Se podrán registrar nuevos movimientos con fecha en ese mes.')) return;
+    const res = await window.api.periodos.reabrir(id);
+    if (res.success) { App.toast('Período reabierto correctamente.', 'success'); await this.loadPeriodos(); }
+    else App.toast('Error: ' + res.error, 'error');
+  },
+
+  // --- Cuentas Automáticas ---
+
+  async loadCuentasAutomaticas() {
+    const body = document.getElementById('contabilidadBody');
+    body.innerHTML = `
+      <div style="padding: 16px 20px 8px;">
+        <h2 style="margin:0; color:#1e293b;">Cuentas Automáticas</h2>
+        <p style="margin:4px 0 16px; color:#64748b; font-size:0.875rem;">Cuentas contables que el sistema usa automáticamente en los asientos generados. Solo el administrador puede cambiar a qué cuenta del Plan de Cuentas apunta cada clave.</p>
+        <div style="background:#eff6ff; border-left:4px solid #3b82f6; border-radius:4px; padding:12px 16px; margin-bottom:20px;">
+          <p style="margin:0; font-size:0.875rem; color:#1e40af;"><strong>Nota:</strong> Cambiar una cuenta automática solo afecta los nuevos movimientos; los asientos ya registrados mantienen las cuentas con las que fueron creados.</p>
+        </div>
+      </div>
+      <div id="cuentasAutoContent" style="padding:0 20px 24px;">${App.renderSkeletonTable()}</div>
+    `;
+
+    try {
+      const [resCA, resPlan] = await Promise.all([
+        window.api.cuentasAutomaticas.getAll(),
+        window.api.planCuentas.getImputables({})
+      ]);
+      if (!resCA.success) { App.toast('Error: ' + resCA.error, 'error'); return; }
+      this.renderCuentasAutomaticas(resCA.data, resPlan.success ? resPlan.data : []);
+    } catch (e) { console.error(e); }
+  },
+
+  renderCuentasAutomaticas(cuentas, imputables) {
+    const cont = document.getElementById('cuentasAutoContent');
+    cont.innerHTML = `
+      <table>
+        <thead>
+          <tr>
+            <th>Clave</th>
+            <th>Nombre</th>
+            <th>Cuenta Asignada</th>
+            <th>Código PUC</th>
+            <th>Descripción</th>
+            <th>Última Actualización</th>
+            <th>Acción</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cuentas.map(ca => `
+            <tr>
+              <td><code>${ca.clave}</code></td>
+              <td><strong>${ca.nombre}</strong></td>
+              <td>${ca.nombre_cuenta}</td>
+              <td><code>${ca.codigo}</code></td>
+              <td style="font-size:0.8rem; color:#64748b; max-width:250px;">${ca.descripcion || '-'}</td>
+              <td style="font-size:0.8rem;">${ca.fecha_actualizacion ? ca.fecha_actualizacion.substring(0,10) : '-'}</td>
+              <td>
+                <button class="btn btn-secondary btn-icon" onclick="Contabilidad.editarCuentaAutomatica('${ca.clave}', ${ca.cuenta_contable_id})">Cambiar</button>
+              </td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    `;
+    this._imputablesCache = imputables;
+    this._cuentasAutoCache = cuentas;
+  },
+
+  async editarCuentaAutomatica(clave, cuentaActualId) {
+    const imputables = this._imputablesCache || [];
+    const ca = (this._cuentasAutoCache || []).find(c => c.clave === clave);
+    if (!ca) return;
+
+    const content = `
+      <div class="modal-header"><h2>Cambiar Cuenta Automática: ${ca.nombre}</h2></div>
+      <div id="formError"></div>
+      <p style="color:#64748b; font-size:0.875rem; margin-bottom:20px;">${ca.descripcion || ''}</p>
+      <div class="form-group">
+        <label>Cuenta Contable (solo imputables)</label>
+        <select id="nuevaCuentaId">
+          ${imputables.map(i => `<option value="${i.id}" ${i.id === cuentaActualId ? 'selected' : ''}>${i.codigo} - ${i.nombre}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+        <button class="btn btn-primary" onclick="Contabilidad.guardarCuentaAutomatica('${clave}')">Guardar</button>
+      </div>
+    `;
+    App.openModal(content);
+  },
+
+  async guardarCuentaAutomatica(clave) {
+    const cuentaId = parseInt(document.getElementById('nuevaCuentaId').value);
+    const res = await window.api.cuentasAutomaticas.actualizar(clave, cuentaId);
+    if (res.success) {
+      App.toast('Cuenta automática actualizada.', 'success');
+      App.closeModal();
+      await this.loadCuentasAutomaticas();
+    } else {
+      document.getElementById('formError').innerHTML = `<div class="alert alert-error">${res.error}</div>`;
     }
   },
 
@@ -1000,10 +1313,10 @@ const Contabilidad = {
     return params;
   },
 
-  // La vista previa se muestra en un modal (igual que los formularios de Cuenta/Propietario)
-  // en vez de inline dentro de la tarjeta: una tabla con muchas columnas necesita todo el ancho
-  // disponible, no el ancho angosto de una celda del grid de tarjetas, y así tampoco empuja
-  // hacia abajo a las tarjetas vecinas cuando el reporte resulta muy largo.
+  // La vista previa pide al backend el HTML YA ARMADO (PlantillaReporteService) — el mismo
+  // documento que produce el PDF, no una reimplementación aparte — y lo muestra en un iframe
+  // dentro del modal (igual que los formularios de Cuenta/Propietario, pero con todo el ancho
+  // disponible: una tabla con muchas columnas no cabe en el ancho angosto de una tarjeta).
   async buscarReporte(idSufijo) {
     const reporte = this.obtenerReportePorSufijo(idSufijo);
     const params = this.obtenerParametrosReporte(idSufijo, reporte);
@@ -1015,7 +1328,7 @@ const Contabilidad = {
     boton.textContent = 'Buscando...';
 
     try {
-      const response = await window.api.reportes.getDatos(reporte.tipo, params);
+      const response = await window.api.reportes.getVistaPreviaHTML(reporte.tipo, params);
       if (!response.success) {
         App.toast('Error al generar la vista previa: ' + response.error, 'error');
         return;
@@ -1030,10 +1343,10 @@ const Contabilidad = {
     }
   },
 
-  mostrarVistaPrevia(idSufijo, reporte, datos) {
+  mostrarVistaPrevia(idSufijo, reporte, html) {
     const content = `
       <div class="modal-header"><h2>${reporte.titulo}</h2></div>
-      <div class="reporte-preview">${this.renderReporte(datos)}</div>
+      <iframe class="reporte-preview-frame" srcdoc="${App.escapeAttr(html)}"></iframe>
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
         <button type="button" class="btn btn-secondary btn-icon" onclick="Contabilidad.exportarReporte('${idSufijo}', 'pdf')">Exportar PDF</button>
@@ -1044,75 +1357,11 @@ const Contabilidad = {
     // (Libro Diario, Historial de Pagos con todos sus filtros, etc.) y un ancho fijo de 900px
     // las dejaba con scroll horizontal aunque la pantalla tuviera espacio de sobra.
     App.openModal(content, 'xlarge');
-  },
 
-  // Despacha según la forma que devolvió el backend (ver ReporteService.getReporte): 'tabla'
-  // para listados, 'resumen' para estados financieros (secciones de label/valor), y 'compuesto'
-  // para el Informe de Empalme (varias partes, cada una tabla o resumen).
-  renderReporte(reporte) {
-    if (reporte.tipo === 'compuesto') {
-      return reporte.partes.map(parte => `
-        <h3 class="reporte-preview-subtitulo">${parte.titulo}</h3>
-        ${parte.tipo === 'resumen' ? this.renderResumen(parte) : this.renderTablaReporte(parte)}
-      `).join('');
-    }
-    if (reporte.tipo === 'resumen') return this.renderResumen(reporte);
-    return this.renderTablaReporte(reporte);
-  },
-
-  renderResumen(reporte) {
-    return reporte.secciones.map(seccion => `
-      <div class="reporte-preview-resumen-seccion">
-        <h4>${seccion.titulo}</h4>
-        ${seccion.items.map(item => `
-          <div class="reporte-preview-resumen-row"><span>${item.label}</span><span>${this.formatValorResumen(item)}</span></div>
-        `).join('')}
-        <div class="reporte-preview-resumen-total"><span>Total ${seccion.titulo}</span><span>${this.formatValorResumen({ valor: seccion.total, tipo: seccion.tipoValor })}</span></div>
-      </div>
-    `).join('');
-  },
-
-  formatValorResumen(item) {
-    return item.tipo === 'numero' ? String(item.valor) : `$${this.formatNumber(item.valor)}`;
-  },
-
-  renderTablaReporte(reporte) {
-    if (reporte.filas.length === 0) {
-      return '<p style="padding: 16px; color: #64748b; text-align: center;">No hay datos para mostrar con los filtros seleccionados</p>';
-    }
-
-    const celda = (fila, col) => {
-      const valor = fila[col.key];
-      if (col.tipo === 'moneda') return `<td style="text-align: right;">$${this.formatNumber(valor)}</td>`;
-      if (col.tipo === 'fecha') return `<td>${this.formatDate(valor)}</td>`;
-      return `<td>${valor ?? ''}</td>`;
-    };
-
-    const filaTotales = reporte.totales ? `
-      <tr style="font-weight: 600; background: #eff6ff;">
-        ${reporte.columnas.map((col, i) => {
-          if (i === 0) return '<td>TOTAL</td>';
-          if (reporte.totales[col.key] !== undefined) return `<td style="text-align: right;">$${this.formatNumber(reporte.totales[col.key])}</td>`;
-          return '<td></td>';
-        }).join('')}
-      </tr>
-    ` : '';
-
-    return `
-      <div style="overflow-x: auto; margin-top: 4px;">
-        <table style="width: 100%; border-collapse: collapse; font-size: 0.8rem;">
-          <thead>
-            <tr style="background: #f1f5f9;">
-              ${reporte.columnas.map(c => `<th style="padding: 6px 8px; text-align: left; border: 1px solid #e2e8f0;">${c.label}</th>`).join('')}
-            </tr>
-          </thead>
-          <tbody>
-            ${reporte.filas.map(fila => `<tr>${reporte.columnas.map(col => celda(fila, col)).join('')}</tr>`).join('')}
-            ${filaTotales}
-          </tbody>
-        </table>
-      </div>
-    `;
+    const iframe = document.querySelector('.reporte-preview-frame');
+    iframe.addEventListener('load', () => {
+      iframe.style.height = iframe.contentWindow.document.documentElement.scrollHeight + 'px';
+    });
   },
 
   async exportarReporte(idSufijo, formato) {
@@ -1148,5 +1397,340 @@ const Contabilidad = {
     if (!dateString) return '-';
     const [anio, mes, dia] = dateString.split(' ')[0].split('-');
     return `${dia}/${mes}/${anio}`;
+  },
+
+  // --- Plantillas de Contabilización ---
+
+  async loadPlantillas() {
+    const body = document.getElementById('contabilidadBody');
+    body.innerHTML = `<div style="padding:24px;">${App.renderSkeletonTable()}</div>`;
+    try {
+      const res = await window.api.plantillas.getAll();
+      if (!res.success) { App.toast('Error: ' + res.error, 'error'); return; }
+      this.renderPlantillas(res.data);
+    } catch (e) { console.error(e); App.toast('Error al cargar plantillas', 'error'); }
+  },
+
+  renderPlantillas(plantillas) {
+    const body = document.getElementById('contabilidadBody');
+    const MODULO_LABELS = { Gasto: 'Gasto', Recibo: 'Recibo', Movimiento: 'Movimiento', Manual: 'Manual' };
+    const filas = plantillas.map(p => `
+      <tr>
+        <td><strong>${p.codigo}</strong><br><small style="color:#64748b;">v${p.version}</small></td>
+        <td>${p.nombre}</td>
+        <td><span class="badge badge-info">${MODULO_LABELS[p.modulo] || p.modulo}</span></td>
+        <td>${p.subtipo || '<span style="color:#94a3b8;">—</span>'}</td>
+        <td style="font-size:0.8rem;color:#64748b;">${p.fecha_desde}${p.fecha_hasta ? ' → ' + p.fecha_hasta : ' → vigente'}</td>
+        <td>${p.lineas ? p.lineas.length : 0} líneas</td>
+        <td style="white-space:nowrap;">
+          <button class="btn btn-secondary btn-sm" onclick="Contabilidad.verPlantilla(${p.id})">Ver / Editar</button>
+          <button class="btn btn-secondary btn-sm" style="margin-left:4px;" onclick="Contabilidad.abrirSimulacion(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')">Simular</button>
+        </td>
+      </tr>
+    `).join('');
+
+    body.innerHTML = `
+      <div style="padding:24px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+          <div>
+            <h2 style="margin:0;color:#1e293b;">Plantillas de Contabilización</h2>
+            <p style="margin:4px 0 0;color:#64748b;font-size:0.875rem;">Define el patrón de asiento para cada tipo de operación. Modificar una plantilla crea una nueva versión sin alterar asientos históricos.</p>
+          </div>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead><tr>
+              <th>Código / Versión</th><th>Nombre</th><th>Módulo</th><th>Subtipo</th><th>Vigencia</th><th>Líneas</th><th>Acciones</th>
+            </tr></thead>
+            <tbody>${filas || '<tr><td colspan="7" style="text-align:center;color:#94a3b8;">No hay plantillas registradas</td></tr>'}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  },
+
+  async verPlantilla(id) {
+    const res = await window.api.plantillas.getById(id);
+    if (!res.success) { App.toast('Error: ' + res.error, 'error'); return; }
+    const p = res.data;
+
+    const TIPO_CUENTA = {
+      cuenta_fija_id: 'Cuenta fija PUC',
+      cuenta_automatica_clave: 'Cuenta automática',
+      cuenta_mapeo_modulo: 'Mapeo conceptos',
+      cuenta_contexto_campo: 'Campo del documento'
+    };
+
+    const filaLineas = p.lineas.map((l, i) => {
+      let cuentaDesc = '';
+      if (l.cuenta_fija_id)          cuentaDesc = `Fija ID: ${l.cuenta_fija_id}`;
+      if (l.cuenta_automatica_clave) cuentaDesc = `Automática: <strong>${l.cuenta_automatica_clave}</strong>`;
+      if (l.cuenta_mapeo_modulo)     cuentaDesc = `Mapeo: ${l.cuenta_mapeo_modulo} → [${l.cuenta_mapeo_campo}]`;
+      if (l.cuenta_contexto_campo)   cuentaDesc = `Campo doc: <em>${l.cuenta_contexto_campo}</em>`;
+
+      const expansionBadge = l.tipo_expansion === 'Expansion'
+        ? `<span class="badge badge-info">Expansión (${l.expansion_fuente})</span>`
+        : '';
+
+      const condBadge = l.condicion_json
+        ? `<span class="badge badge-warning" title="${l.condicion_json}">Condicional</span>`
+        : '';
+
+      const terceroBadge = (l.incluir_tercero_id || l.incluir_propietario_id || l.incluir_snapshot_nombre)
+        ? `<span class="badge" style="background:#e0f2fe;color:#0369a1;">Tercero</span>`
+        : '';
+
+      return `<tr>
+        <td style="text-align:center;">${l.orden}</td>
+        <td>${expansionBadge || cuentaDesc}</td>
+        <td>${l.expansion_monto_campo ? `campo: ${l.expansion_monto_campo}` : `${l.tipo_monto}: ${l.monto_campo || l.monto_fijo || ''}`}</td>
+        <td><strong>${l.tipo_expansion === 'Expansion' ? l.expansion_lado_formula : l.lado}</strong></td>
+        <td>${condBadge} ${terceroBadge}</td>
+        <td style="color:#64748b;font-size:0.8rem;">${l.descripcion_linea || ''}</td>
+      </tr>`;
+    }).join('');
+
+    const esSistema = p.es_sistema === 1;
+
+    App.openModal(`
+      <div class="modal-header"><h2>${p.nombre} <small style="font-weight:normal;color:#64748b;">v${p.version}</small></h2></div>
+      <div style="margin-bottom:12px;font-size:0.875rem;color:#64748b;">
+        Módulo: <strong>${p.modulo}</strong> · Subtipo: <strong>${p.subtipo || '—'}</strong> ·
+        Código: <code>${p.codigo}</code> · Vigencia: ${p.fecha_desde} → ${p.fecha_hasta || 'vigente'}
+        ${esSistema ? ' · <span class="badge badge-warning">Sistema</span>' : ''}
+      </div>
+      <table class="data-table" style="margin-bottom:20px;">
+        <thead><tr><th>#</th><th>Cuenta</th><th>Monto</th><th>Lado</th><th>Flags</th><th>Descripción</th></tr></thead>
+        <tbody>${filaLineas}</tbody>
+      </table>
+      <div style="text-align:right;">
+        <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+        <button class="btn btn-primary" style="margin-left:8px;" onclick="Contabilidad.abrirSimulacion(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')">Simular</button>
+      </div>
+    `, 'large');
+  },
+
+  abrirSimulacion(plantillaId, nombrePlantilla) {
+    const ejemplos = {
+      1: '{"fecha":"2025-01-15","concepto":"Compra materiales","valor":500000,"metodo_pago":"Efectivo","cuenta_contable_id":1,"tercero_id":null,"tercero_nombre":"Proveedor Ejemplo","tercero_identificacion":"900123456"}',
+      2: '{"fecha":"2025-01-15","concepto":"Servicio técnico","valor":800000,"metodo_pago":"Banco","cuenta_contable_id":1,"tercero_id":null,"tercero_nombre":"Proveedor Ejemplo","tercero_identificacion":"900123456"}',
+      3: '{"fecha":"2025-01-15","numero_recibo":"1001","total":120000,"metodo_pago":"Efectivo","propietario_id":1,"tercero_nombre":"Juan Pérez","tercero_identificacion":"12345678","detalles":[{"concepto":"Sostenimiento","valor":120000,"cuenta_contable_id":5}]}',
+      5: '{"fecha":"2025-01-15","concepto":"Consignación","monto":500000,"tipo":"Traslado","origen":"Caja","destino":"Banco"}'
+    };
+    const ejemploCtx = ejemplos[plantillaId] || '{}';
+
+    App.openModal(`
+      <div class="modal-header"><h2>Simular: ${nombrePlantilla}</h2></div>
+      <p style="font-size:0.875rem;color:#64748b;margin-bottom:12px;">
+        Ingresa el contexto del documento en formato JSON. El motor generará el asiento resultante
+        <strong>sin registrar ningún dato en la base de datos</strong>.
+      </p>
+      <div class="form-group">
+        <label for="simCtxJson">Contexto (JSON)</label>
+        <textarea id="simCtxJson" class="form-control" rows="8" style="font-family:monospace;font-size:0.8rem;">${ejemploCtx}</textarea>
+      </div>
+      <div style="text-align:right;margin-bottom:16px;">
+        <button class="btn btn-primary" onclick="Contabilidad.ejecutarSimulacion(${plantillaId})">Ejecutar simulación</button>
+        <button class="btn btn-secondary" style="margin-left:8px;" onclick="App.closeModal()">Cancelar</button>
+      </div>
+      <div id="simResultado"></div>
+    `, 'large');
+  },
+
+  async ejecutarSimulacion(plantillaId) {
+    const textarea = document.getElementById('simCtxJson');
+    const resultDiv = document.getElementById('simResultado');
+    if (!textarea || !resultDiv) return;
+
+    resultDiv.innerHTML = '<p style="color:#64748b;">Ejecutando...</p>';
+
+    let contexto;
+    try {
+      contexto = JSON.parse(textarea.value);
+    } catch {
+      resultDiv.innerHTML = '<p style="color:#dc2626;"><strong>Error:</strong> El JSON no es válido. Verifica la sintaxis.</p>';
+      return;
+    }
+
+    const res = await window.api.plantillas.simularContabilizacion(plantillaId, contexto);
+    if (!res.success) {
+      resultDiv.innerHTML = `<p style="color:#dc2626;"><strong>Error del motor:</strong> ${res.error}</p>`;
+      return;
+    }
+
+    const { lineas, totalDebito, totalCredito, balanceado } = res.data;
+    const fmt = n => Number(n || 0).toLocaleString('es-CO');
+
+    const filasLineas = lineas.map((l, i) => `
+      <tr>
+        <td>${i + 1}</td>
+        <td style="font-size:0.8rem;">${l.cuentaContableId}</td>
+        <td class="text-right">${l.debito  > 0 ? '$' + fmt(l.debito)  : ''}</td>
+        <td class="text-right">${l.credito > 0 ? '$' + fmt(l.credito) : ''}</td>
+        <td style="font-size:0.75rem;color:#64748b;">${l.terceroNombre || l.propietarioId ? (l.terceroNombre || '') : ''}</td>
+      </tr>
+    `).join('');
+
+    const estadoBalance = balanceado
+      ? '<span style="color:#16a34a;font-weight:bold;">✓ Balanceado</span>'
+      : '<span style="color:#dc2626;font-weight:bold;">✗ Desbalanceado</span>';
+
+    resultDiv.innerHTML = `
+      <hr style="margin:16px 0;">
+      <h3 style="margin:0 0 12px;font-size:1rem;">Resultado de la simulación ${estadoBalance}</h3>
+      <table class="data-table" style="margin-bottom:8px;">
+        <thead><tr><th>#</th><th>Cuenta ID</th><th class="text-right">Débito</th><th class="text-right">Crédito</th><th>Tercero</th></tr></thead>
+        <tbody>${filasLineas}</tbody>
+        <tfoot>
+          <tr style="font-weight:bold;background:#f8fafc;">
+            <td colspan="2">TOTALES</td>
+            <td class="text-right">$${fmt(totalDebito)}</td>
+            <td class="text-right">$${fmt(totalCredito)}</td>
+            <td></td>
+          </tr>
+        </tfoot>
+      </table>
+      <p style="font-size:0.75rem;color:#64748b;">Los IDs de cuenta se muestran por brevedad. En producción se resolverán a las cuentas reales del PUC.</p>
+    `;
+  },
+
+  // --- Impuestos ---
+
+  async loadImpuestos() {
+    const body = document.getElementById('contabilidadBody');
+    body.innerHTML = `<div style="padding:24px;">${App.renderSkeletonTable()}</div>`;
+    try {
+      const res = await window.api.impuestos.getAll();
+      if (!res.success) { App.toast('Error: ' + res.error, 'error'); return; }
+      this.renderImpuestos(res.data);
+    } catch (e) { console.error(e); App.toast('Error al cargar impuestos', 'error'); }
+  },
+
+  renderImpuestos(impuestos) {
+    const body = document.getElementById('contabilidadBody');
+    const TIPO_LABELS = { IVA: 'IVA', ReteFuente: 'Ret. Fuente', ReteIVA: 'Ret. IVA', ICA: 'ICA', Otro: 'Otro' };
+
+    const filas = impuestos.length === 0
+      ? '<tr><td colspan="7" style="text-align:center;color:#94a3b8;padding:32px;">No hay impuestos configurados. Agrégalos cuando la asociación tenga obligaciones tributarias.</td></tr>'
+      : impuestos.map(i => `
+        <tr style="${i.activo ? '' : 'opacity:0.5;'}">
+          <td><strong>${i.codigo}</strong></td>
+          <td>${i.nombre}</td>
+          <td><span class="badge badge-info">${TIPO_LABELS[i.tipo] || i.tipo}</span></td>
+          <td style="text-align:right;">${i.porcentaje}%</td>
+          <td style="font-size:0.8rem;">${i.cuenta_codigo} – ${i.cuenta_nombre}<br><small style="color:#64748b;">${i.lado_ajuste === 'Debito' ? 'Divide el gasto (débito)' : 'Divide el pago (crédito)'}</small></td>
+          <td><span class="badge ${i.activo ? 'badge-success' : ''}" style="${!i.activo ? 'background:#f1f5f9;color:#94a3b8;' : ''}">${i.activo ? 'Activo' : 'Inactivo'}</span></td>
+          <td style="white-space:nowrap;">
+            <button class="btn btn-secondary btn-sm" onclick="Contabilidad.editarImpuesto(${i.id})">Editar</button>
+            <button class="btn btn-secondary btn-sm" style="margin-left:4px;" onclick="Contabilidad.toggleImpuesto(${i.id})">${i.activo ? 'Desactivar' : 'Activar'}</button>
+          </td>
+        </tr>
+      `).join('');
+
+    body.innerHTML = `
+      <div style="padding:24px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;">
+          <div>
+            <h2 style="margin:0;color:#1e293b;">Impuestos</h2>
+            <p style="margin:4px 0 0;color:#64748b;font-size:0.875rem;">Motor tributario: configura IVA, ReteFuente, ICA y otros impuestos. Se activan asignando un impuesto a una plantilla de contabilización.</p>
+          </div>
+          <button class="btn btn-primary" onclick="Contabilidad.editarImpuesto(null)">+ Nuevo Impuesto</button>
+        </div>
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead><tr><th>Código</th><th>Nombre</th><th>Tipo</th><th>%</th><th>Cuenta / Afecta</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <tbody>${filas}</tbody>
+          </table>
+        </div>
+      </div>
+    `;
+  },
+
+  async editarImpuesto(id) {
+    let imp = null;
+    if (id) {
+      const res = await window.api.impuestos.getById(id);
+      if (!res.success) { App.toast('Error: ' + res.error, 'error'); return; }
+      imp = res.data;
+    }
+
+    const TIPOS = ['IVA', 'ReteFuente', 'ReteIVA', 'ICA', 'Otro'];
+    const optTipos = TIPOS.map(t => `<option value="${t}" ${imp?.tipo === t ? 'selected' : ''}>${t}</option>`).join('');
+
+    App.openModal(`
+      <div class="modal-header"><h2>${id ? 'Editar' : 'Nuevo'} Impuesto</h2></div>
+      <form id="frmImpuesto">
+        <div class="form-group">
+          <label>Código <small style="color:#64748b;">(único, ej: IVA_19)</small></label>
+          <input type="text" id="impCodigo" class="form-control" value="${imp?.codigo || ''}" required ${id ? 'readonly' : ''}>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group">
+            <label>Nombre</label>
+            <input type="text" id="impNombre" class="form-control" value="${imp?.nombre || ''}" required>
+          </div>
+          <div class="form-group">
+            <label>Tipo</label>
+            <select id="impTipo" class="form-control">${optTipos}</select>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div class="form-group">
+            <label>Porcentaje (%)</label>
+            <input type="number" id="impPorcentaje" class="form-control" value="${imp?.porcentaje || ''}" min="0.01" max="100" step="0.01" required>
+          </div>
+          <div class="form-group">
+            <label>Campo base <small style="color:#64748b;">(campo del contexto)</small></label>
+            <input type="text" id="impBaseCampo" class="form-control" value="${imp?.base_campo || 'valor'}">
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;">
+          <div class="form-group">
+            <label>Cuenta del impuesto (ID PUC) <small style="color:#64748b;">ej: 2408 IVA por Descontar, 2365 ReteFuente x Pagar</small></label>
+            <input type="number" id="impCuentaId" class="form-control" value="${imp?.cuenta_id || ''}" required>
+          </div>
+          <div class="form-group">
+            <label>Lado que afecta</label>
+            <select id="impLadoAjuste" class="form-control">
+              <option value="Credito" ${(imp?.lado_ajuste || 'Credito') === 'Credito' ? 'selected' : ''}>Crédito – ReteFuente / ICA (divide el pago)</option>
+              <option value="Debito"  ${imp?.lado_ajuste === 'Debito' ? 'selected' : ''}>Débito – IVA descontable (divide el gasto)</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar</button>
+        </div>
+      </form>
+    `, 'medium');
+
+    document.getElementById('frmImpuesto').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const datos = {
+        codigo:           document.getElementById('impCodigo').value.trim().toUpperCase(),
+        nombre:           document.getElementById('impNombre').value.trim(),
+        tipo:             document.getElementById('impTipo').value,
+        porcentaje:       parseFloat(document.getElementById('impPorcentaje').value),
+        cuentaId:    parseInt(document.getElementById('impCuentaId').value),
+        ladoAjuste:  document.getElementById('impLadoAjuste').value,
+        baseCampo:   document.getElementById('impBaseCampo').value.trim() || 'valor'
+      };
+
+      const res = id
+        ? await window.api.impuestos.update(id, datos)
+        : await window.api.impuestos.create(datos);
+
+      if (!res.success) { App.toast('Error: ' + res.error, 'error'); return; }
+      App.closeModal();
+      App.toast(id ? 'Impuesto actualizado' : 'Impuesto creado', 'success');
+      await this.loadImpuestos();
+    });
+  },
+
+  async toggleImpuesto(id) {
+    const res = await window.api.impuestos.toggleActivo(id);
+    if (!res.success) { App.toast('Error: ' + res.error, 'error'); return; }
+    App.toast(`Impuesto ${res.data.activo ? 'activado' : 'desactivado'}`, 'success');
+    await this.loadImpuestos();
   }
 };

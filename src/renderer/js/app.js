@@ -362,6 +362,13 @@ const App = {
     };
   },
 
+  // Para insertar HTML completo (ej. el documento de un reporte) dentro de un atributo
+  // srcdoc="..." de un <iframe>: solo hace falta escapar comillas dobles y &, no <>/ (eso es
+  // contenido normal del HTML interno, no del atributo en sí).
+  escapeAttr(value) {
+    return String(value || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  },
+
   // Placeholder de carga para una tabla (reemplaza el "Cargando..." de texto plano que tenían
   // todos los módulos): un puñado de filas con barras grises animadas, del mismo ancho que el
   // contenido real, así la pantalla no "salta" tanto cuando los datos llegan.

@@ -605,6 +605,11 @@ tr:hover {
   color: #1e40af;
 }
 
+.badge-warning {
+  background-color: #fef3c7;
+  color: #92400e;
+}
+
 .table-actions {
   display: flex;
   gap: 8px;
@@ -1110,53 +1115,15 @@ tr:hover {
   display: flex;
 }
 
-.reporte-preview {
-  max-height: 65vh;
-  overflow-y: auto;
+/* La vista previa de reportes ahora es el mismo HTML que produce el PDF (ver
+   PlantillaReporteService), mostrado dentro de un iframe aislado — su propio <style> interno
+   define la apariencia del documento, aquí solo se dimensiona el iframe en sí. */
+.reporte-preview-frame {
+  width: 100%;
+  max-height: 70vh;
+  border: 1px solid var(--gray-200);
+  border-radius: 6px;
   margin-bottom: 20px;
-}
-
-.reporte-preview-subtitulo {
-  font-size: 15px;
-  font-weight: 600;
-  color: var(--gray-900);
-  margin: 20px 0 10px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid var(--gray-200);
-}
-
-.reporte-preview-subtitulo:first-child {
-  margin-top: 0;
-}
-
-.reporte-preview-resumen-seccion {
-  margin-bottom: 16px;
-}
-
-.reporte-preview-resumen-seccion h4 {
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--color-primary);
-  margin-bottom: 6px;
-}
-
-.reporte-preview-resumen-row {
-  display: flex;
-  justify-content: space-between;
-  padding: 4px 0;
-  font-size: 13px;
-  color: var(--gray-700);
-}
-
-.reporte-preview-resumen-total {
-  display: flex;
-  justify-content: space-between;
-  font-weight: 600;
-  padding-top: 6px;
-  margin-top: 4px;
-  border-top: 1px solid var(--gray-200);
-  font-size: 13px;
-  color: var(--gray-900);
 }
 
 .reporte-card-fechas {
@@ -1241,4 +1208,38 @@ tr:hover {
 
 .input-currency input {
   padding-left: 30px;
+}
+
+/* Dashboard Financiero del módulo de Contabilidad */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.kpi-card {
+  background: #fff;
+  border: 1px solid var(--gray-200);
+  border-radius: 12px;
+  padding: 20px;
+  transition: box-shadow 0.15s;
+}
+
+.kpi-card:hover {
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+/* Estado vacío genérico */
+.empty-state {
+  padding: 48px 24px;
+  text-align: center;
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.empty-state p {
+  max-width: 420px;
+  margin: 0 auto;
+  line-height: 1.6;
 }

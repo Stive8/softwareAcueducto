@@ -16,13 +16,23 @@ const BackupService = require('./src/services/BackupService');
 const NuevoPuntoService = require('./src/services/NuevoPuntoService');
 const ReporteService = require('./src/services/ReporteService');
 const ExcelExportService = require('./src/services/ExcelExportService');
+const PlantillaReporteService = require('./src/services/PlantillaReporteService');
 const DevToolsService = require('./src/services/DevToolsService');
 const AuditoriaService = require('./src/services/AuditoriaService');
 const PlanCuentaService = require('./src/services/PlanCuentaService');
 const MapeoContableService = require('./src/services/MapeoContableService');
 const AsientoContableService = require('./src/services/AsientoContableService');
 const CloudBackupOrchestratorService = require('./src/services/CloudBackupOrchestratorService');
+const ComprobanteCloudService = require('./src/services/ComprobanteCloudService');
 const TerceroService = require('./src/services/TerceroService');
+const CuentaAutomaticaService = require('./src/services/CuentaAutomaticaService');
+const CuentaAutomaticaRepository = require('./src/repositories/CuentaAutomaticaRepository');
+const PlanCuentaRepository = require('./src/repositories/PlanCuentaRepository');
+const PeriodoContableService = require('./src/services/PeriodoContableService');
+const PeriodoContableRepository = require('./src/repositories/PeriodoContableRepository');
+const PlantillaContabilizacionService = require('./src/services/PlantillaContabilizacionService');
+const ImpuestoService = require('./src/services/ImpuestoService');
+const MotorContabilizacionService = require('./src/services/MotorContabilizacionService');
 
 let mainWindow;
 let dbService;
@@ -41,12 +51,19 @@ let backupService;
 let nuevoPuntoService;
 let reporteService;
 let excelExportService;
+let plantillaReporteService;
 let devToolsService;
 let auditoriaService;
 let planCuentaService;
 let mapeoContableService;
 let asientoContableService;
+let cuentaAutomaticaService;
+let periodoContableService;
+let plantillaContabilizacionService;
+let impuestoService;
+let motorContabilizacionService;
 let cloudBackupService;
+let comprobanteCloudService;
 
 // Sesión activa del único usuario que puede estar usando esta app de escritorio a la vez.
 // No es solo un dato de UI: la capa de permisos de abajo (envolverHandle) la usa para decidir
@@ -61,11 +78,16 @@ const PREFIJOS_LECTURA = ['get', 'find', 'simular', 'tiene', 'imprimir', 'export
 // Acciones reservadas exclusivamente al rol Administrador, sin importar que no sean de lectura.
 const CANALES_SOLO_ADMIN = new Set([
   'usuarios:getAll', 'usuarios:crear', 'usuarios:toggleActivo', 'usuarios:resetearPassword',
-  'config:actualizar', 'backup:restaurar',
+  'config:actualizar', 'config:subirLogo', 'config:quitarLogo', 'backup:restaurar',
   'auditoria:getAll',
   'plancuentas:create', 'plancuentas:update', 'plancuentas:toggleActivo',
   'mapeocontable:actualizar', 'mapeocontable:crear',
   'asientos:crearManual', 'asientos:revertir',
+  'cuentasautomaticas:actualizar',
+  'periodos:cerrar', 'periodos:bloquear', 'periodos:reabrir', 'periodos:actualizarNotas',
+  'plantillas:actualizarLineas',
+  'impuestos:create', 'impuestos:update', 'impuestos:toggleActivo',
+  'impuestos:asignarAPlantilla', 'impuestos:quitarDePlantilla',
   'cloudBackup:respaldarAhora'
 ]);
 
@@ -203,12 +225,19 @@ app.whenReady().then(() => {
   nuevoPuntoService = new NuevoPuntoService(dbService);
   reporteService = new ReporteService(dbService);
   excelExportService = new ExcelExportService(dbService);
+  plantillaReporteService = new PlantillaReporteService(dbService);
   devToolsService = new DevToolsService(dbService);
   auditoriaService = new AuditoriaService(dbService);
   planCuentaService = new PlanCuentaService(dbService);
   mapeoContableService = new MapeoContableService(dbService);
   asientoContableService = new AsientoContableService(dbService);
+  cuentaAutomaticaService = new CuentaAutomaticaService(new CuentaAutomaticaRepository(dbService), new PlanCuentaRepository(dbService));
+  periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService));
+  plantillaContabilizacionService = new PlantillaContabilizacionService(dbService);
+  impuestoService = new ImpuestoService(dbService);
+  motorContabilizacionService = new MotorContabilizacionService(dbService);
   cloudBackupService = new CloudBackupOrchestratorService(dbService, baseDirDb);
+  comprobanteCloudService = new ComprobanteCloudService(baseDirDb);
 
   setupIpcHandlers();
   createWindow();
@@ -542,6 +571,14 @@ function setupIpcHandlers() {
     }
   });
 
+  envolverHandle('terceros:getHistorialMovimientos', async (event, id) => {
+    try {
+      return { success: true, data: terceroService.getHistorialMovimientos(id) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   envolverHandle('categorias:getHistorialTarifas', async (event, categoriaId) => {
     try {
       return { success: true, data: categoriaService.getHistorialTarifas(categoriaId) };
@@ -663,6 +700,144 @@ function setupIpcHandlers() {
     } catch (error) {
       return { success: false, error: error.message };
     }
+  });
+
+  // Cuentas Automáticas: las cuentas contables que el sistema usa sin que el operador tenga que
+  // elegirlas explícitamente (Caja, Banco, Cartera de Usuarios). Solo el Administrador puede
+  // reasignar a qué cuenta PUC apunta cada clave.
+  envolverHandle('cuentasautomaticas:getAll', async () => {
+    try {
+      return { success: true, data: cuentaAutomaticaService.getAll() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cuentasautomaticas:actualizar', async (event, clave, cuentaContableId) => {
+    try {
+      return { success: true, data: cuentaAutomaticaService.actualizar(clave, cuentaContableId) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Períodos Contables: administración de aperturas y cierres de períodos mes/año.
+  envolverHandle('periodos:getAll', async () => {
+    try {
+      return { success: true, data: periodoContableService.getAll() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('periodos:getByAnioMes', async (event, anio, mes) => {
+    try {
+      return { success: true, data: periodoContableService.getByAnioMes(anio, mes) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('periodos:cerrar', async (event, id, motivoCierre) => {
+    try {
+      return { success: true, data: periodoContableService.cerrar(id, sesionActual.id, motivoCierre) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('periodos:bloquear', async (event, id, motivoCierre) => {
+    try {
+      return { success: true, data: periodoContableService.bloquear(id, sesionActual.id, motivoCierre) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('periodos:reabrir', async (event, id) => {
+    try {
+      return { success: true, data: periodoContableService.reabrir(id) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('periodos:actualizarNotas', async (event, id, notas) => {
+    try {
+      return { success: true, data: periodoContableService.actualizarNotas(id, notas) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Dashboard contable: KPIs del módulo de Contabilidad.
+  envolverHandle('contabilidad:getDashboard', async () => {
+    try {
+      return { success: true, data: reporteService.getDashboardContable() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Plantillas de contabilización: catálogo de patrones de asiento configurables.
+  envolverHandle('plantillas:getAll', async () => {
+    try { return { success: true, data: plantillaContabilizacionService.getAll() }; }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+  envolverHandle('plantillas:getById', async (event, id) => {
+    try { return { success: true, data: plantillaContabilizacionService.getById(id) }; }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+  envolverHandle('plantillas:getVersiones', async (event, codigo) => {
+    try { return { success: true, data: plantillaContabilizacionService.getVersiones(codigo) }; }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+  envolverHandle('plantillas:actualizarLineas', async (event, id, nuevasLineas) => {
+    try { return { success: true, data: plantillaContabilizacionService.actualizarLineas(id, nuevasLineas) }; }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+  // Prefijo 'simular' → lectura automática (cualquier rol puede usar la herramienta de simulación)
+  envolverHandle('plantillas:simularContabilizacion', async (event, plantillaId, contextoJson) => {
+    try { return { success: true, data: motorContabilizacionService.simularContabilizacion(plantillaId, contextoJson) }; }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+
+  // Motor tributario: impuestos configurables.
+  envolverHandle('impuestos:getAll', async () => {
+    try { return { success: true, data: impuestoService.getAll() }; }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+  envolverHandle('impuestos:getById', async (event, id) => {
+    try { return { success: true, data: impuestoService.getById(id) }; }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+  envolverHandle('impuestos:create', async (event, datos) => {
+    try {
+      const imp = impuestoService.create(datos);
+      return { success: true, data: imp };
+    } catch (e) { return { success: false, error: e.message }; }
+  });
+  envolverHandle('impuestos:update', async (event, id, datos) => {
+    try {
+      const imp = impuestoService.update(id, datos);
+      return { success: true, data: imp };
+    } catch (e) { return { success: false, error: e.message }; }
+  });
+  envolverHandle('impuestos:toggleActivo', async (event, id) => {
+    try { return { success: true, data: impuestoService.toggleActivo(id) }; }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+  envolverHandle('impuestos:asignarAPlantilla', async (event, plantillaId, impuestoId, orden) => {
+    try { impuestoService.asignarAPlantilla(plantillaId, impuestoId, orden); return { success: true }; }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+  envolverHandle('impuestos:quitarDePlantilla', async (event, plantillaId, impuestoId) => {
+    try { impuestoService.quitarDePlantilla(plantillaId, impuestoId); return { success: true }; }
+    catch (e) { return { success: false, error: e.message }; }
+  });
+  envolverHandle('impuestos:getPlantillasAsignadas', async (event, impuestoId) => {
+    try { return { success: true, data: impuestoService.getPlantillasAsignadas(impuestoId) }; }
+    catch (e) { return { success: false, error: e.message }; }
   });
 
   // Asientos contables (doble partida). La generación automática ocurre dentro de los servicios
@@ -842,6 +1017,15 @@ function setupIpcHandlers() {
     try {
       reciboService.anular(id, motivo, sesionActual.id);
       return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('recibos:corregirMetodoPago', async (event, id, nuevoMetodoPago, motivo) => {
+    try {
+      reciboService.corregirMetodoPago(id, nuevoMetodoPago, motivo, sesionActual.id);
+      return { success: true, data: { id } };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -1043,6 +1227,74 @@ function setupIpcHandlers() {
     }
   });
 
+  envolverHandle('gastos:corregirMetodoPago', async (event, id, nuevoMetodoPago, motivo) => {
+    try {
+      gastoService.corregirMetodoPago(id, nuevoMetodoPago, motivo, sesionActual.id);
+      return { success: true, data: { id } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Soportes documentales de gastos (facturas, recibos, imágenes), guardados en Google Drive —
+  // ver ComprobanteCloudService. El archivo nunca se queda en disco local de forma permanente.
+  envolverHandle('gastos:adjuntarSoporte', async (event, gastoId, tipoSoporte) => {
+    try {
+      if (!comprobanteCloudService.estaConectado()) {
+        return { success: false, error: 'No hay una cuenta de Google conectada. Ve a Configuración → Respaldo en la Nube para conectarla.' };
+      }
+
+      const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        title: 'Seleccionar soporte',
+        filters: [{ name: 'PDF o imagen', extensions: ['pdf', 'png', 'jpg', 'jpeg'] }],
+        properties: ['openFile']
+      });
+
+      if (canceled || !filePaths || filePaths.length === 0) {
+        return { success: false, canceled: true };
+      }
+
+      const filePath = filePaths[0];
+      const extension = path.extname(filePath).toLowerCase().replace('.', '');
+      if (!['pdf', 'png', 'jpg', 'jpeg'].includes(extension)) {
+        return { success: false, error: 'El archivo debe ser PDF, PNG o JPG.' };
+      }
+
+      const tamanioMb = fs.statSync(filePath).size / (1024 * 1024);
+      if (tamanioMb > 15) {
+        return { success: false, error: 'El archivo supera el límite de 15 MB.' };
+      }
+
+      const nombreArchivo = path.basename(filePath);
+      const subida = await comprobanteCloudService.subirSoporte(filePath, nombreArchivo);
+
+      gastoService.adjuntarSoporte(gastoId, { tipoSoporte, driveFileId: subida.id, nombreArchivo: subida.name });
+      return { success: true, data: { id: gastoId } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('gastos:getSoportes', async (event, gastoId) => {
+    try {
+      return { success: true, data: gastoService.getSoportes(gastoId) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('gastos:getSoporte', async (event, gastoId, soporteId) => {
+    try {
+      const soporte = gastoService.getSoporte(soporteId);
+      if (!soporte) return { success: false, error: 'Soporte no encontrado' };
+
+      await comprobanteCloudService.descargarYAbrir(soporte.drive_file_id, soporte.nombre_archivo);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Caja y Bancos
   envolverHandle('caja:getSaldos', async () => {
     try {
@@ -1156,6 +1408,75 @@ function setupIpcHandlers() {
     try {
       configuracionService.actualizar(datos);
       return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // El logo se guarda en disco LOCAL (no en Drive como los soportes de gastos): debe estar
+  // disponible sin internet para poder generar un PDF. Vive en la misma carpeta 'data' que el
+  // .db, no en __dirname (no es escribible/persistente en la app empaquetada).
+  envolverHandle('config:subirLogo', async () => {
+    try {
+      const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
+        title: 'Seleccionar logo',
+        filters: [{ name: 'Imagen', extensions: ['png', 'jpg', 'jpeg'] }],
+        properties: ['openFile']
+      });
+
+      if (canceled || !filePaths || filePaths.length === 0) {
+        return { success: false, canceled: true };
+      }
+
+      const filePath = filePaths[0];
+      const extension = path.extname(filePath).toLowerCase().replace('.', '');
+      if (!['png', 'jpg', 'jpeg'].includes(extension)) {
+        return { success: false, error: 'El logo debe ser PNG o JPG.' };
+      }
+
+      const tamanioMb = fs.statSync(filePath).size / (1024 * 1024);
+      if (tamanioMb > 0.5) {
+        return { success: false, error: 'El logo supera el límite de 500 KB (se incrusta en cada PDF generado). Usa una imagen más liviana.' };
+      }
+
+      const dataDir = path.dirname(dbService.getDbPath());
+      // Borra cualquier logo previo con otra extensión, para no acumular archivos huérfanos si
+      // cambian de formato (ej. tenían logo.png y ahora suben uno .jpg).
+      ['png', 'jpg', 'jpeg'].forEach(ext => {
+        const previo = path.join(dataDir, `logo.${ext}`);
+        if (fs.existsSync(previo)) fs.unlinkSync(previo);
+      });
+
+      const nombreArchivo = `logo.${extension}`;
+      fs.copyFileSync(filePath, path.join(dataDir, nombreArchivo));
+      configuracionService.actualizarLogoPath(nombreArchivo);
+
+      return { success: true, data: { logo_path: nombreArchivo } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('config:quitarLogo', async () => {
+    try {
+      const dataDir = path.dirname(dbService.getDbPath());
+      ['png', 'jpg', 'jpeg'].forEach(ext => {
+        const archivo = path.join(dataDir, `logo.${ext}`);
+        if (fs.existsSync(archivo)) fs.unlinkSync(archivo);
+      });
+      configuracionService.actualizarLogoPath('');
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // El renderer no puede leer archivos locales directamente (contextIsolation): para mostrar la
+  // miniatura del logo en Configuración se pide ya codificado en base64.
+  envolverHandle('config:getLogoBase64', async () => {
+    try {
+      const { logoBase64 } = plantillaReporteService.obtenerConfiguracionInstitucional();
+      return { success: true, data: logoBase64 };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -1485,7 +1806,10 @@ function setupIpcHandlers() {
   envolverHandle('reportes:generarPDF', async (event, tipoReporte, params) => {
     let ventanaImpresion;
     try {
-      const html = reporteService.generarHTML(tipoReporte, params);
+      const reporte = reporteService.getReporte(tipoReporte, params);
+      const orientacion = plantillaReporteService.decidirOrientacion(reporte);
+      const config = plantillaReporteService.obtenerConfiguracionInstitucional();
+      const html = plantillaReporteService.construirHTML(reporte, config, sesionActual.nombreCompleto);
 
       const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
         title: 'Guardar Reporte como PDF',
@@ -1500,7 +1824,15 @@ function setupIpcHandlers() {
       ventanaImpresion = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
       await ventanaImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
-      const pdfBuffer = await ventanaImpresion.webContents.printToPDF({ landscape: true });
+      const pdfBuffer = await ventanaImpresion.webContents.printToPDF({
+        landscape: orientacion === 'horizontal',
+        displayHeaderFooter: true,
+        headerTemplate: plantillaReporteService.construirHeaderTemplate(config),
+        footerTemplate: plantillaReporteService.construirFooterTemplate(sesionActual.nombreCompleto),
+        // Suficiente para que el header/footer compactos no se corten (el área que reserva
+        // Electron por defecto es muy pequeña para contenido propio).
+        margins: { top: 0.6, bottom: 0.6, left: 0.4, right: 0.4 }
+      });
       fs.writeFileSync(filePath, pdfBuffer);
       ventanaImpresion.close();
       if (mainWindow) mainWindow.focus();
@@ -1508,6 +1840,20 @@ function setupIpcHandlers() {
       return { success: true, filePath };
     } catch (error) {
       if (ventanaImpresion) ventanaImpresion.close();
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Vista previa: el MISMO HTML que produce el PDF (vía PlantillaReporteService), para que lo que
+  // se ve en pantalla sea literalmente el mismo documento. El header/footerTemplate de paginación
+  // repetida por página no aplica aquí (es exclusivo de printToPDF, ver PlantillaReporteService).
+  envolverHandle('reportes:getVistaPreviaHTML', async (event, tipoReporte, params) => {
+    try {
+      const reporte = reporteService.getReporte(tipoReporte, params);
+      const config = plantillaReporteService.obtenerConfiguracionInstitucional();
+      const html = plantillaReporteService.construirHTML(reporte, config, sesionActual.nombreCompleto);
+      return { success: true, data: html };
+    } catch (error) {
       return { success: false, error: error.message };
     }
   });

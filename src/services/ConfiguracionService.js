@@ -1,7 +1,9 @@
 const ConfiguracionRepository = require('../repositories/ConfiguracionRepository');
 
+// logo_path NO está aquí a propósito: solo se escribe desde config:subirLogo/config:quitarLogo
+// (main.js), nunca desde el formulario genérico de Configuración.
 const CLAVES_EDITABLES = [
-  'nombre_asociacion', 'nit', 'direccion', 'telefono', 'email',
+  'nombre_asociacion', 'nit', 'direccion', 'ciudad', 'telefono', 'email',
   'consecutivo_recibos', 'valor_nuevo_punto', 'saldo_caja_inicial', 'saldo_banco_inicial',
   'respaldo_nube_dias_retencion'
 ];
@@ -42,6 +44,13 @@ class ConfiguracionService {
         this.repository.actualizar(clave, datos[clave]);
       }
     }
+  }
+
+  // Aparte de actualizar(): logo_path no está en CLAVES_EDITABLES a propósito (ver comentario
+  // arriba), así que necesita su propio punto de entrada, usado solo por config:subirLogo/
+  // config:quitarLogo en main.js.
+  actualizarLogoPath(nombreArchivo) {
+    this.repository.actualizar('logo_path', nombreArchivo || '');
   }
 }
 

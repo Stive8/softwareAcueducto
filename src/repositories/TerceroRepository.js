@@ -36,11 +36,12 @@ class TerceroRepository {
     const result = this.db.prepare(`
       INSERT INTO terceros (
         tipo_identificacion, numero_identificacion, nombre_razon_social, nombre_comercial,
-        telefono, email, direccion, observaciones, es_proveedor, es_otro
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        telefono, email, direccion, observaciones, es_proveedor, es_otro,
+        es_contratista, es_aliado, es_cliente, es_empleado, es_entidad_publica
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       tercero.tipoIdentificacion,
-      tercero.numeroIdentificacion.trim(),
+      tercero.numeroIdentificacion ? tercero.numeroIdentificacion.trim() : null,
       tercero.nombreRazonSocial.trim(),
       tercero.nombreComercial || null,
       tercero.telefono || null,
@@ -48,7 +49,12 @@ class TerceroRepository {
       tercero.direccion || null,
       tercero.observaciones || null,
       tercero.esProveedor ? 1 : 0,
-      tercero.esOtro ? 1 : 0
+      tercero.esOtro ? 1 : 0,
+      tercero.esContratista ? 1 : 0,
+      tercero.esAliado ? 1 : 0,
+      tercero.esCliente ? 1 : 0,
+      tercero.esEmpleado ? 1 : 0,
+      tercero.esEntidadPublica ? 1 : 0
     );
 
     return result.lastInsertRowid;
@@ -58,11 +64,12 @@ class TerceroRepository {
     this.db.prepare(`
       UPDATE terceros SET
         tipo_identificacion = ?, numero_identificacion = ?, nombre_razon_social = ?, nombre_comercial = ?,
-        telefono = ?, email = ?, direccion = ?, observaciones = ?, es_proveedor = ?, es_otro = ?
+        telefono = ?, email = ?, direccion = ?, observaciones = ?, es_proveedor = ?, es_otro = ?,
+        es_contratista = ?, es_aliado = ?, es_cliente = ?, es_empleado = ?, es_entidad_publica = ?
       WHERE id = ?
     `).run(
       tercero.tipoIdentificacion,
-      tercero.numeroIdentificacion.trim(),
+      tercero.numeroIdentificacion ? tercero.numeroIdentificacion.trim() : null,
       tercero.nombreRazonSocial.trim(),
       tercero.nombreComercial || null,
       tercero.telefono || null,
@@ -71,6 +78,11 @@ class TerceroRepository {
       tercero.observaciones || null,
       tercero.esProveedor ? 1 : 0,
       tercero.esOtro ? 1 : 0,
+      tercero.esContratista ? 1 : 0,
+      tercero.esAliado ? 1 : 0,
+      tercero.esCliente ? 1 : 0,
+      tercero.esEmpleado ? 1 : 0,
+      tercero.esEntidadPublica ? 1 : 0,
       id
     );
   }
