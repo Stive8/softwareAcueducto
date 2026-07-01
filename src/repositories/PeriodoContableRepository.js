@@ -5,7 +5,7 @@ class PeriodoContableRepository {
 
   getAll() {
     return this.db.prepare(`
-      SELECT p.*, u.nombre AS usuario_cierre_nombre
+      SELECT p.*, u.nombre_completo AS usuario_cierre_nombre
       FROM periodos_contables p
       LEFT JOIN usuarios u ON u.id = p.usuario_cierre_id
       ORDER BY p.anio DESC, p.mes DESC
@@ -20,7 +20,7 @@ class PeriodoContableRepository {
 
   getById(id) {
     return this.db.prepare(`
-      SELECT p.*, u.nombre AS usuario_cierre_nombre
+      SELECT p.*, u.nombre_completo AS usuario_cierre_nombre
       FROM periodos_contables p
       LEFT JOIN usuarios u ON u.id = p.usuario_cierre_id
       WHERE p.id = ?
