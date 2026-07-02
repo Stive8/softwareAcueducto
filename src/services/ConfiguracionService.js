@@ -5,7 +5,7 @@ const ConfiguracionRepository = require('../repositories/ConfiguracionRepository
 const CLAVES_EDITABLES = [
   'nombre_asociacion', 'nit', 'direccion', 'ciudad', 'telefono', 'email',
   'consecutivo_recibos', 'valor_nuevo_punto', 'saldo_caja_inicial', 'saldo_banco_inicial',
-  'respaldo_nube_dias_retencion'
+  'respaldo_nube_dias_retencion', 'caja_menor_activa', 'caja_menor_saldo_objetivo'
 ];
 
 class ConfiguracionService {
@@ -23,6 +23,13 @@ class ConfiguracionService {
   actualizar(datos) {
     if (datos.nombre_asociacion !== undefined && !datos.nombre_asociacion.trim()) {
       throw new Error('El nombre de la asociación es obligatorio');
+    }
+
+    if (datos.caja_menor_saldo_objetivo !== undefined) {
+      const valor = Number(datos.caja_menor_saldo_objetivo);
+      if (!Number.isFinite(valor) || valor < 0) {
+        throw new Error('El saldo objetivo de Caja Menor debe ser un número mayor o igual a cero');
+      }
     }
 
     // El consecutivo de recibos nunca puede retroceder por debajo de un recibo ya emitido,
