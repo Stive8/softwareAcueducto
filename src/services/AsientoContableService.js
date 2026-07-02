@@ -276,8 +276,8 @@ class AsientoContableService {
 
   // Asiento manual, para todo lo que la generación automática no cubre (ajustes financieros,
   // depreciaciones, correcciones, partidas de apertura, etc).
-  crearManual({ fecha, concepto, tipoComprobante = 'Asiento Contable', lineas, usuarioId = null }) {
-    return this.crear({ fecha, concepto, tipoOrigen: 'Manual', tipoComprobante, usuarioId, lineas, sincronizarLedgerSimple: true });
+  crearManual({ fecha, concepto, tipoComprobante = 'Asiento Contable', lineas, usuarioId = null, sincronizarLedgerSimple = true }) {
+    return this.crear({ fecha, concepto, tipoOrigen: 'Manual', tipoComprobante, usuarioId, lineas, sincronizarLedgerSimple });
   }
 
   // --- Generación automática a partir de procesos existentes ---
