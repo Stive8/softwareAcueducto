@@ -21,6 +21,11 @@ const Configuracion = {
     const config = response.success ? response.data : {};
     const container = document.getElementById('configContent');
 
+    const cajaMenorResponse = esAdmin ? await window.api.cajaMenor.getEstado() : { success: false };
+    const cajaMenorEstado = cajaMenorResponse.success
+      ? cajaMenorResponse.data
+      : { activa: false, saldoObjetivo: 0, saldoActual: 0, responsable: null, montoReembolso: 0 };
+
     container.innerHTML = `
       ${esAdmin ? `
       <div class="table-container" style="margin-bottom: 24px;">
@@ -108,6 +113,41 @@ const Configuracion = {
           </form>
         </div>
       </div>
+
+      <div class="table-container" style="margin-bottom: 24px;">
+        <div class="table-header"><h2>Caja Menor</h2></div>
+        <div style="padding: 24px;">
+          <div id="cajaMenorConfigError"></div>
+          <form id="cajaMenorConfigForm">
+            <div class="form-group">
+              <label>
+                <input type="checkbox" id="caja_menor_activa" ${cajaMenorEstado.activa ? 'checked' : ''}>
+                Caja Menor activa
+              </label>
+            </div>
+
+            <div class="form-group">
+              <label for="caja_menor_saldo_objetivo">Saldo Objetivo</label>
+              <div class="input-currency">
+                <span class="currency-symbol">$</span>
+                <input type="text" inputmode="numeric" id="caja_menor_saldo_objetivo" name="caja_menor_saldo_objetivo" value="${this.formatMoney(cajaMenorEstado.saldoObjetivo)}">
+              </div>
+            </div>
+
+            <div class="form-actions">
+              <button type="submit" class="btn btn-primary">Guardar Caja Menor</button>
+            </div>
+          </form>
+
+          <hr style="margin: 20px 0; border: none; border-top: 1px solid #e2e8f0;">
+
+          <p style="margin: 0 0 8px;"><strong>Responsable actual:</strong> ${cajaMenorEstado.responsable ? cajaMenorEstado.responsable.nombre_razon_social : 'Sin asignar'}</p>
+          <div class="form-actions" style="justify-content: flex-start;">
+            <button type="button" class="btn btn-secondary" id="btnCambiarResponsableCajaMenor">Cambiar Responsable</button>
+            <button type="button" class="btn btn-secondary" id="btnHistorialResponsablesCajaMenor">Ver Historial de Responsables</button>
+          </div>
+        </div>
+      </div>
       ` : ''}
 
       <div class="table-container" style="margin-bottom: 24px;">
@@ -180,6 +220,18 @@ const Configuracion = {
       document.getElementById('configForm').addEventListener('submit', (e) => {
         e.preventDefault();
         this.guardarConfiguracion();
+      });
+
+      App.attachMoneyInput(document.getElementById('caja_menor_saldo_objetivo'));
+      document.getElementById('cajaMenorConfigForm').addEventListener('submit', (e) => {
+        e.preventDefault();
+        this.guardarCajaMenorConfig();
+      });
+      document.getElementById('btnCambiarResponsableCajaMenor').addEventListener('click', () => {
+        this.showCambiarResponsableCajaMenorModal();
+      });
+      document.getElementById('btnHistorialResponsablesCajaMenor').addEventListener('click', () => {
+        this.showHistorialResponsablesCajaMenorModal();
       });
 
       document.getElementById('btnRestaurarBackup').addEventListener('click', () => this.restaurarBackup());
@@ -284,6 +336,137 @@ const Configuracion = {
       console.error('Error:', error);
       errorDiv.innerHTML = `<div class="error-message">Error al guardar la configuración</div>`;
     }
+  },
+
+  async guardarCajaMenorConfig() {
+    const datos = {
+      caja_menor_activa: document.getElementById('caja_menor_activa').checked ? 'true' : 'false',
+      caja_menor_saldo_objetivo: String(App.parseMoneyValue(document.getElementById('caja_menor_saldo_objetivo').value))
+    };
+
+    const errorDiv = document.getElementById('cajaMenorConfigError');
+    errorDiv.innerHTML = '';
+
+    try {
+      const response = await window.api.config.actualizar(datos);
+
+      if (response.success) {
+        App.toast('Configuración de Caja Menor guardada con éxito');
+        await this.renderForm();
+      } else {
+        errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      errorDiv.innerHTML = `<div class="error-message">Error al guardar la configuración de Caja Menor</div>`;
+    }
+  },
+
+  async showCambiarResponsableCajaMenorModal() {
+    const tercerosResponse = await window.api.terceros.getAll({ soloActivos: true });
+    const terceros = tercerosResponse.success ? tercerosResponse.data : [];
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const content = `
+      <div class="modal-header">
+        <h2>Cambiar Responsable de Caja Menor</h2>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="responsableCajaMenorForm">
+        <div class="form-group">
+          <label for="tercero_responsable_id">Responsable <span style="color: #ef4444;">*</span></label>
+          <select id="tercero_responsable_id" required>
+            <option value="">Seleccione...</option>
+            ${terceros.map(t => `<option value="${t.id}">${t.nombre_razon_social}${t.numero_identificacion ? ' - ' + t.numero_identificacion : ''}</option>`).join('')}
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="fecha_inicio_responsable">Fecha de Inicio <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_inicio_responsable" value="${hoy}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="observaciones_responsable">Observaciones</label>
+          <textarea id="observaciones_responsable"></textarea>
+        </div>
+
+        <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
+          <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+            <strong>Nota:</strong> Si ya hay un responsable, su período se cerrará automáticamente en la fecha de inicio del nuevo.
+          </p>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Asignar</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+    Combobox.attach('tercero_responsable_id');
+
+    document.getElementById('responsableCajaMenorForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const terceroId = parseInt(document.getElementById('tercero_responsable_id').value, 10);
+      const fechaInicio = document.getElementById('fecha_inicio_responsable').value;
+      const observaciones = document.getElementById('observaciones_responsable').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.cajaMenor.asignarResponsable(terceroId, fechaInicio, observaciones);
+
+        if (response.success) {
+          App.closeModal();
+          App.toast('Responsable de Caja Menor asignado con éxito');
+          await this.renderForm();
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al asignar el responsable</div>`;
+      }
+    });
+  },
+
+  async showHistorialResponsablesCajaMenorModal() {
+    const response = await window.api.cajaMenor.getHistorialResponsables();
+    const historial = response.success ? response.data : [];
+
+    const content = `
+      <div class="modal-header">
+        <h2>Historial de Responsables de Caja Menor</h2>
+      </div>
+
+      ${historial.length === 0 ? '<p style="color: #64748b;">Sin registros todavía.</p>' : `
+        <table>
+          <thead>
+            <tr><th>Responsable</th><th>Desde</th><th>Hasta</th><th>Observaciones</th></tr>
+          </thead>
+          <tbody>
+            ${historial.map(h => `
+              <tr>
+                <td>${h.nombre_razon_social}</td>
+                <td>${h.fecha_inicio}</td>
+                <td>${h.fecha_fin || 'Actual'}</td>
+                <td>${h.observaciones || '-'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+      </div>
+    `;
+
+    App.openModal(content);
   },
 
   async cambiarPassword() {
