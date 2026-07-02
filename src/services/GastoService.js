@@ -3,6 +3,8 @@ const AsientoContableService = require('./AsientoContableService');
 const DashboardRepository = require('../repositories/DashboardRepository');
 const PeriodoContableRepository = require('../repositories/PeriodoContableRepository');
 const PeriodoContableService = require('./PeriodoContableService');
+const PlanCuentaRepository = require('../repositories/PlanCuentaRepository');
+const ConfiguracionRepository = require('../repositories/ConfiguracionRepository');
 
 const METODOS_PAGO_VALIDOS = ['Efectivo', 'Transferencia'];
 const TIPOS_OPERACION_VALIDOS = ['Compra directa', 'Reembolso'];
@@ -14,6 +16,8 @@ class GastoService {
     this.asientoContableService = new AsientoContableService(dbService);
     this.dashboardRepo = new DashboardRepository(dbService);
     this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService));
+    this.planCuentaRepository = new PlanCuentaRepository(dbService);
+    this.configuracionRepository = new ConfiguracionRepository(dbService);
   }
 
   getAll(params) {
@@ -47,6 +51,20 @@ class GastoService {
 
     gastoData.tipoOperacion = gastoData.tipoOperacion || 'Compra directa';
     if (!TIPOS_OPERACION_VALIDOS.includes(gastoData.tipoOperacion)) throw new Error('Tipo de operación inválido');
+
+    // Resuelve de cuál subcuenta de efectivo sale el gasto. 'Menor' solo se respeta si Caja
+    // Menor está activa; en cualquier otro caso (incluyendo pago por Transferencia) se usa
+    // Caja General, igual que el comportamiento previo a esta funcionalidad.
+    let cajaEfectivoId = null;
+    if (gastoData.metodoPago === 'Efectivo') {
+      const config = this.configuracionRepository.getAll();
+      const usarCajaMenor = config.caja_menor_activa === 'true' && gastoData.cajaEfectivo === 'Menor';
+      const codigoCaja = usarCajaMenor ? '110510' : '110505';
+      const cuentaCaja = this.planCuentaRepository.findByCodigo(codigoCaja);
+      if (!cuentaCaja) throw new Error(`No se encontró la cuenta contable ${codigoCaja}; verifique el plan de cuentas`);
+      cajaEfectivoId = cuentaCaja.id;
+    }
+    gastoData.cajaEfectivoId = cajaEfectivoId;
 
     // Valida que el período contable de la fecha del gasto esté Abierto.
     // Si no existe aún, se crea automáticamente como Abierto (primer movimiento del mes).
