@@ -27,6 +27,8 @@ const Caja = {
 
       <div class="stats-grid" id="saldosGrid">${App.renderSkeletonStatsGrid(3)}</div>
 
+      <div id="cajaMenorCard"></div>
+
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header">
           <h2>Resumen del Período</h2>
@@ -64,6 +66,7 @@ const Caja = {
 
     this.setupEventListeners();
     await this.loadSaldos();
+    await this.loadCajaMenor();
     await this.loadResumenPeriodo();
     await this.loadMovimientos();
   },
@@ -120,6 +123,106 @@ const Caja = {
     } catch (error) {
       console.error('Error:', error);
     }
+  },
+
+  async loadCajaMenor() {
+    try {
+      const response = await window.api.cajaMenor.getEstado();
+      const container = document.getElementById('cajaMenorCard');
+      if (!response.success || !response.data.activa) {
+        container.innerHTML = '';
+        return;
+      }
+
+      const estado = response.data;
+      const puedeReembolsar = estado.montoReembolso > 0;
+
+      container.innerHTML = `
+        <div class="table-container" style="margin-bottom: 24px;">
+          <div class="table-header"><h2>Caja Menor</h2></div>
+          <div style="padding: 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
+            <div>
+              <p style="margin: 0; font-size: 1.5rem; font-weight: 700;">
+                $${this.formatNumber(estado.saldoActual)}
+                <span style="font-size: 1rem; font-weight: 400; color: #64748b;">de $${this.formatNumber(estado.saldoObjetivo)}</span>
+              </p>
+              <p style="margin: 4px 0 0; color: #64748b; font-size: 0.875rem;">
+                Responsable: ${estado.responsable ? estado.responsable.nombre_razon_social : 'Sin asignar'}
+              </p>
+            </div>
+            <button class="btn btn-primary" id="btnReembolsarCajaMenor" ${puedeReembolsar ? '' : 'disabled'}>+ Reembolsar Caja Menor</button>
+          </div>
+        </div>
+      `;
+
+      if (puedeReembolsar) {
+        document.getElementById('btnReembolsarCajaMenor').addEventListener('click', () => this.showReembolsoCajaMenorModal(estado));
+      }
+    } catch (error) {
+      console.error('Error:', error);
+    }
+  },
+
+  showReembolsoCajaMenorModal(estado) {
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const content = `
+      <div class="modal-header">
+        <h2>Reembolsar Caja Menor</h2>
+      </div>
+
+      <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
+          Traslada <strong>$${this.formatNumber(estado.montoReembolso)}</strong> de Caja General a Caja Menor,
+          para volver al saldo objetivo de $${this.formatNumber(estado.saldoObjetivo)}.
+          Responsable: <strong>${estado.responsable.nombre_razon_social}</strong>.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="reembolsoCajaMenorForm">
+        <div class="form-group">
+          <label for="fecha_reembolso">Fecha <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_reembolso" name="fecha_reembolso" value="${hoy}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="observaciones_reembolso">Observaciones</label>
+          <textarea id="observaciones_reembolso" name="observaciones_reembolso"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Reembolsar</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    document.getElementById('reembolsoCajaMenorForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const fecha = document.getElementById('fecha_reembolso').value;
+      const observaciones = document.getElementById('observaciones_reembolso').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.cajaMenor.reembolsar({ fecha, observaciones });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadCajaMenor();
+          App.toast('Reembolso de Caja Menor registrado con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar el reembolso</div>`;
+      }
+    });
   },
 
   async loadResumenPeriodo() {
