@@ -135,7 +135,7 @@ const Caja = {
       }
 
       const estado = response.data;
-      const puedeReembolsar = estado.montoReembolso > 0;
+      const puedeReembolsar = estado.montoReembolso > 0 && !!estado.responsable;
 
       container.innerHTML = `
         <div class="table-container" style="margin-bottom: 24px;">
@@ -175,7 +175,7 @@ const Caja = {
         <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
           Traslada <strong>$${this.formatNumber(estado.montoReembolso)}</strong> de Caja General a Caja Menor,
           para volver al saldo objetivo de $${this.formatNumber(estado.saldoObjetivo)}.
-          Responsable: <strong>${estado.responsable.nombre_razon_social}</strong>.
+          Responsable: <strong>${estado.responsable ? estado.responsable.nombre_razon_social : 'Sin asignar'}</strong>.
         </p>
       </div>
 
