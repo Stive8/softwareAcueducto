@@ -196,7 +196,7 @@ class AsientoContableService {
   // ajuste por una comisión bancaria) solo pasa por aquí, y si no se replica en `movimientos` el
   // saldo de caja/banco que muestra el resto de la app quedaría desincronizado del Balance de
   // Prueba. Por eso solo se activa para asientos manuales (y sus reversiones).
-  crear({ fecha, concepto, tipoOrigen, referenciaId = null, referenciaTipo = null, usuarioId = null, lineas, sincronizarLedgerSimple = false }) {
+  crear({ fecha, concepto, tipoOrigen, tipoComprobante = null, referenciaId = null, referenciaTipo = null, usuarioId = null, lineas, sincronizarLedgerSimple = false }) {
     if (!fecha) throw new Error('La fecha del asiento es obligatoria');
     if (!concepto || !concepto.trim()) throw new Error('El concepto del asiento es obligatorio');
     if (!Array.isArray(lineas) || lineas.length < 2) throw new Error('Un asiento debe tener al menos 2 líneas');
@@ -241,7 +241,7 @@ class AsientoContableService {
       const numero = this.repository.getConsecutivo();
       this.repository.incrementarConsecutivo(numero + 1);
 
-      const asientoId = this.repository.crear({ numero, fecha, concepto, tipoOrigen, referenciaId, referenciaTipo, usuarioId, lineas });
+      const asientoId = this.repository.crear({ numero, fecha, concepto, tipoOrigen, tipoComprobante, referenciaId, referenciaTipo, usuarioId, lineas });
 
       if (sincronizarLedgerSimple) {
         lineas.forEach((linea, i) => this.sincronizarLineaConCajaBanco(cuentasPorLinea[i], linea, fecha, concepto, asientoId));
@@ -377,14 +377,24 @@ class AsientoContableService {
       // también debe reflejarse ahí (ver crear()). Si era de Gasto/Recibo/Movimiento, el Service
       // que pidió la reversión (GastoService.anular, ReciboService.anular) ya crea su propia
       // contrapartida en `movimientos`, así que no se duplica aquí.
+      //
+      // Excepción: un Reembolso de Caja Menor es 'Manual' pero se creó a propósito con
+      // sincronizarLedgerSimple=false (es un traslado interno Caja General <-> Caja Menor que no
+      // cambia el efectivo total). Si su reversión sincronizara, el lado Caja General de la
+      // reversión SÍ calzaría con el prefijo de detección de "Caja" (a diferencia del lado Caja
+      // Menor, que ya no coincide desde que CAJA automática apunta a la subcuenta hoja 110505),
+      // generando una fila fantasma de Ingreso sin contrapartida. Se detecta por tipo_comprobante,
+      // el único campo que distingue este caso de una nota manual real que sí debe sincronizar.
+      const esReversionDeReembolsoCajaMenor = asiento.tipo_origen === 'Manual' && asiento.tipo_comprobante === 'Reembolso Caja Menor';
       const reversionId = this.crear({
         fecha: new Date().toISOString().split('T')[0],
         concepto: `Reversión: ${asiento.concepto}`,
         tipoOrigen: 'Reversion',
+        tipoComprobante: asiento.tipo_comprobante,
         referenciaId: asiento.id,
         referenciaTipo: 'Asiento',
         usuarioId,
-        sincronizarLedgerSimple: asiento.tipo_origen === 'Manual',
+        sincronizarLedgerSimple: asiento.tipo_origen === 'Manual' && !esReversionDeReembolsoCajaMenor,
         lineas: asiento.lineas.map(l => ({
           cuentaContableId: l.cuenta_id,
           debito: l.credito,
