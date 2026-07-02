@@ -392,6 +392,9 @@ const Gastos = {
     const proveedoresResponse = await window.api.terceros.getAll({ soloActivos: true });
     const proveedores = proveedoresResponse.success ? proveedoresResponse.data : [];
 
+    const cajaMenorResponse = await window.api.cajaMenor.getEstado();
+    const cajaMenorActiva = cajaMenorResponse.success && cajaMenorResponse.data.activa;
+
     const content = `
       <div class="modal-header">
         <h2>Nuevo Gasto</h2>
@@ -457,6 +460,14 @@ const Gastos = {
           </select>
         </div>
 
+        <div class="form-group" id="cajaEfectivoGroup" style="display: none;">
+          <label for="caja_efectivo">¿De cuál caja sale?</label>
+          <select id="caja_efectivo" name="caja_efectivo">
+            <option value="General" ${(prefill?.cajaEfectivo || 'General') === 'General' ? 'selected' : ''}>Caja General</option>
+            <option value="Menor" ${prefill?.cajaEfectivo === 'Menor' ? 'selected' : ''}>Caja Menor</option>
+          </select>
+        </div>
+
         <div class="form-group">
           <label for="observaciones">Observaciones</label>
           <textarea id="observaciones" name="observaciones">${prefill?.observaciones || ''}</textarea>
@@ -477,6 +488,13 @@ const Gastos = {
     document.getElementById('tipo_gasto').addEventListener('change', (e) => {
       document.getElementById('avisoGastosDiversos').style.display = e.target.value === 'Gastos Diversos' ? 'block' : 'none';
     });
+
+    const actualizarVisibilidadCajaEfectivo = () => {
+      const esEfectivo = document.getElementById('metodo_pago').value === 'Efectivo';
+      document.getElementById('cajaEfectivoGroup').style.display = (esEfectivo && cajaMenorActiva) ? 'block' : 'none';
+    };
+    document.getElementById('metodo_pago').addEventListener('change', actualizarVisibilidadCajaEfectivo);
+    actualizarVisibilidadCajaEfectivo();
 
     document.getElementById('btnNuevoProveedorDesdeGasto').addEventListener('click', () => {
       const snapshot = {
@@ -502,6 +520,7 @@ const Gastos = {
   },
 
   async saveGasto() {
+    const cajaEfectivoEl = document.getElementById('caja_efectivo');
     const formData = {
       fechaGasto: document.getElementById('fecha_gasto').value,
       concepto: document.getElementById('concepto').value.trim(),
@@ -510,6 +529,7 @@ const Gastos = {
       terceroId: parseInt(document.getElementById('tercero_id').value, 10),
       valor: App.parseMoneyValue(document.getElementById('valor').value),
       metodoPago: document.getElementById('metodo_pago').value,
+      cajaEfectivo: cajaEfectivoEl ? cajaEfectivoEl.value : 'General',
       observaciones: document.getElementById('observaciones').value.trim()
     };
 
