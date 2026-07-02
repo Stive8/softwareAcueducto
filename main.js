@@ -22,6 +22,7 @@ const AuditoriaService = require('./src/services/AuditoriaService');
 const PlanCuentaService = require('./src/services/PlanCuentaService');
 const MapeoContableService = require('./src/services/MapeoContableService');
 const AsientoContableService = require('./src/services/AsientoContableService');
+const CajaMenorService = require('./src/services/CajaMenorService');
 const CloudBackupOrchestratorService = require('./src/services/CloudBackupOrchestratorService');
 const ComprobanteCloudService = require('./src/services/ComprobanteCloudService');
 const TerceroService = require('./src/services/TerceroService');
@@ -57,6 +58,7 @@ let auditoriaService;
 let planCuentaService;
 let mapeoContableService;
 let asientoContableService;
+let cajaMenorService;
 let cuentaAutomaticaService;
 let periodoContableService;
 let plantillaContabilizacionService;
@@ -88,7 +90,8 @@ const CANALES_SOLO_ADMIN = new Set([
   'plantillas:actualizarLineas',
   'impuestos:create', 'impuestos:update', 'impuestos:toggleActivo',
   'impuestos:asignarAPlantilla', 'impuestos:quitarDePlantilla',
-  'cloudBackup:respaldarAhora'
+  'cloudBackup:respaldarAhora',
+  'cajaMenor:asignarResponsable', 'cajaMenor:reembolsar'
 ]);
 
 // Excepciones puntuales a "Consulta no puede escribir": acciones que, aunque cambian estado
@@ -231,6 +234,7 @@ app.whenReady().then(() => {
   planCuentaService = new PlanCuentaService(dbService);
   mapeoContableService = new MapeoContableService(dbService);
   asientoContableService = new AsientoContableService(dbService);
+  cajaMenorService = new CajaMenorService(dbService);
   cuentaAutomaticaService = new CuentaAutomaticaService(new CuentaAutomaticaRepository(dbService), new PlanCuentaRepository(dbService));
   periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService));
   plantillaContabilizacionService = new PlantillaContabilizacionService(dbService);
@@ -1324,6 +1328,41 @@ function setupIpcHandlers() {
   envolverHandle('caja:getResumenPeriodo', async (event, fechaDesde, fechaHasta) => {
     try {
       return { success: true, data: cajaService.getResumenPeriodo(fechaDesde, fechaHasta) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Caja Menor
+  envolverHandle('cajaMenor:getEstado', async () => {
+    try {
+      return { success: true, data: cajaMenorService.getEstado() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cajaMenor:getHistorialResponsables', async () => {
+    try {
+      return { success: true, data: cajaMenorService.getHistorialResponsables() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cajaMenor:asignarResponsable', async (event, terceroId, fechaInicio, observaciones) => {
+    try {
+      cajaMenorService.asignarResponsable(terceroId, fechaInicio, observaciones);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cajaMenor:reembolsar', async (event, payload) => {
+    try {
+      const id = cajaMenorService.reembolsar({ ...payload, usuarioId: sesionActual.id });
+      return { success: true, data: { id } };
     } catch (error) {
       return { success: false, error: error.message };
     }

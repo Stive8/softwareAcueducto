@@ -85,6 +85,12 @@ contextBridge.exposeInMainWorld('api', {
     registrarConsignacion: (payload) => ipcRenderer.invoke('caja:registrarConsignacion', payload),
     getResumenPeriodo: (fechaDesde, fechaHasta) => ipcRenderer.invoke('caja:getResumenPeriodo', fechaDesde, fechaHasta)
   },
+  cajaMenor: {
+    getEstado: () => ipcRenderer.invoke('cajaMenor:getEstado'),
+    getHistorialResponsables: () => ipcRenderer.invoke('cajaMenor:getHistorialResponsables'),
+    asignarResponsable: (terceroId, fechaInicio, observaciones) => ipcRenderer.invoke('cajaMenor:asignarResponsable', terceroId, fechaInicio, observaciones),
+    reembolsar: (payload) => ipcRenderer.invoke('cajaMenor:reembolsar', payload)
+  },
   auth: {
     login: (usuario, password) => ipcRenderer.invoke('auth:login', usuario, password),
     logout: () => ipcRenderer.invoke('auth:logout'),
