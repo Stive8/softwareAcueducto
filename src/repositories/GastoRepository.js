@@ -157,8 +157,8 @@ class GastoRepository {
     const cuentaContableId = this.resolverCuentaContable('Gasto', gasto.tipoGasto || '__default__');
 
     const result = this.db.prepare(`
-      INSERT INTO gastos (fecha_gasto, concepto, tipo_gasto, tipo_operacion, tercero_id, valor, metodo_pago, observaciones, ruta_soporte, cuenta_contable_id)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO gastos (fecha_gasto, concepto, tipo_gasto, tipo_operacion, tercero_id, valor, metodo_pago, observaciones, ruta_soporte, cuenta_contable_id, caja_efectivo_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       gasto.fechaGasto,
       gasto.concepto,
@@ -169,7 +169,8 @@ class GastoRepository {
       gasto.metodoPago,
       gasto.observaciones || null,
       gasto.rutaSoporte || null,
-      cuentaContableId
+      cuentaContableId,
+      gasto.cajaEfectivoId || null
     );
 
     return result.lastInsertRowid;
