@@ -33,7 +33,7 @@ class AsientoContableService {
     this.repository = new AsientoContableRepository(dbService);
     this.planCuentaRepository = new PlanCuentaRepository(dbService);
     this.cuentaAutomaticaRepository = new CuentaAutomaticaRepository(dbService);
-    this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService));
+    this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService), dbService);
     this.motorService = new MotorContabilizacionService(dbService);
     this.cajaRepository = new CajaRepository(dbService);
   }

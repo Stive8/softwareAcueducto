@@ -58,7 +58,7 @@ class PagoService {
     this.propietarioRepository = new PropietarioRepository(dbService);
     this.nuevoPuntoRepository = new NuevoPuntoRepository(dbService);
     this.asientoContableService = new AsientoContableService(dbService);
-    this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService));
+    this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService), dbService);
   }
 
   formatPeriodo(anio, mes) {

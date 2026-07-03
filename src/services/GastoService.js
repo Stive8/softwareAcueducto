@@ -15,7 +15,7 @@ class GastoService {
     this.repository = new GastoRepository(dbService);
     this.asientoContableService = new AsientoContableService(dbService);
     this.dashboardRepo = new DashboardRepository(dbService);
-    this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService));
+    this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService), dbService);
     this.planCuentaRepository = new PlanCuentaRepository(dbService);
     this.configuracionRepository = new ConfiguracionRepository(dbService);
   }

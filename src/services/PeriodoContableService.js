@@ -1,6 +1,9 @@
+const ConfiguracionRepository = require('../repositories/ConfiguracionRepository');
+
 class PeriodoContableService {
-  constructor(periodoContableRepository) {
+  constructor(periodoContableRepository, dbService) {
     this.repository = periodoContableRepository;
+    this.configuracionRepository = dbService ? new ConfiguracionRepository(dbService) : null;
   }
 
   getAll() {
@@ -15,11 +18,23 @@ class PeriodoContableService {
     return this.repository.getPeriodosAbiertos();
   }
 
-  // Valida que la fecha ISO (YYYY-MM-DD) pertenece a un período Abierto.
-  // Crea el período automáticamente si no existe (la primera operación del mes lo abre).
-  // Lanza un error descriptivo si el período está Cerrado o Bloqueado.
+  // Valida que la fecha ISO (YYYY-MM-DD) pertenece a un período Abierto y que no cae antes del
+  // límite de bloqueo configurado (si hay uno). Crea el período automáticamente si no existe
+  // (la primera operación del mes lo abre). Lanza un error descriptivo si el período está
+  // Cerrado, Bloqueado, o la fecha cae antes del límite configurado.
   validarFechaPermitida(fechaISO) {
     if (!fechaISO) throw new Error('La fecha del movimiento es requerida.');
+
+    if (this.configuracionRepository) {
+      const limite = this.configuracionRepository.getAll().periodo_bloqueo_anterior_a;
+      if (limite && fechaISO < limite) {
+        throw new Error(
+          `No se permite contabilizar en fechas anteriores a ${limite}: ese rango quedó bloqueado ` +
+          `desde Configuración. Si necesita registrar un movimiento en esa fecha, un administrador ` +
+          `debe ajustar el límite en Configuración → Períodos primero.`
+        );
+      }
+    }
 
     const d = new Date(fechaISO + 'T00:00:00');
     const anio = d.getFullYear();
