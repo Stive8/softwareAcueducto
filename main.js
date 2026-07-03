@@ -272,7 +272,18 @@ app.on('before-quit', async (event) => {
       new Promise((_, reject) => setTimeout(() => reject(new Error('Tiempo de espera agotado')), 20000))
     ]);
   } catch (error) {
-    console.error('No se pudo respaldar en la nube al cerrar la app:', error.message);
+    const esTokenInvalido =
+      error.message?.includes('invalid_grant') ||
+      error.response?.data?.error === 'invalid_grant';
+    if (esTokenInvalido) {
+      // El refresh token expiró o fue revocado desde Google. Se limpia el archivo de token
+      // para que la app no lo intente en el próximo inicio. El usuario deberá reconectar
+      // la cuenta desde Configuración.
+      try { cloudBackupService.desconectar(); } catch { /* ignorar errores de limpieza */ }
+      console.warn('Token de Google Drive expirado o revocado. La cuenta fue desconectada. Reconecte desde Configuración.');
+    } else {
+      console.error('No se pudo respaldar en la nube al cerrar la app:', error.message);
+    }
   } finally {
     app.quit();
   }

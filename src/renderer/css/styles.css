@@ -792,15 +792,19 @@ tr:hover {
   position: absolute;
   top: 100%;
   left: 0;
-  right: 0;
+  /* Crece hasta el contenido pero respeta un mínimo igual al propio input.
+     Útil en tablas donde la celda (y por ende el input) pueden ser muy angostos. */
+  min-width: 100%;
+  width: max-content;
+  max-width: min(560px, 90vw);
   margin-top: 4px;
-  max-height: 220px;
+  max-height: 240px;
   overflow-y: auto;
   background: white;
   border: 1px solid var(--gray-200);
   border-radius: var(--radius-sm);
   box-shadow: var(--shadow-md);
-  z-index: 10;
+  z-index: 100;
 }
 
 .combobox-dropdown.open {

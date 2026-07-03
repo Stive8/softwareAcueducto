@@ -473,16 +473,30 @@ const Contabilidad = {
       <div class="modal-header"><h2>${id ? 'Editar Cuenta Contable' : 'Nueva Cuenta Contable'}</h2></div>
       <div id="formError"></div>
       <form id="cuentaContableForm">
+        ${!id ? `
+          <div class="form-group">
+            <label for="padreId">Cuenta Padre</label>
+            <select id="padreId" name="padreId">
+              <option value="">Sin cuenta padre (nueva Clase, nivel 1)</option>
+              ${padres.map(p => `<option value="${p.id}" data-codigo="${p.codigo}" data-tipo="${p.tipo || ''}" data-naturaleza="${p.naturaleza || ''}">${p.codigo} - ${p.nombre} (${p.tipo})</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" id="codigoWrapper"></div>
+        ` : `
+          <div class="form-group">
+            <label for="codigo">Código <span style="color:#ef4444;">*</span></label>
+            <input type="text" id="codigo" name="codigo" value="${cuenta?.codigo || ''}" required>
+          </div>
+          <div style="padding:12px;background:#eff6ff;border-left:4px solid #3b82f6;border-radius:4px;margin-bottom:20px;">
+            <p style="margin:0;font-size:0.875rem;color:#1e40af;">La jerarquía (cuenta padre / nivel) no se puede modificar después de creada la cuenta.</p>
+          </div>
+        `}
         <div class="form-group">
-          <label for="codigo">Código <span style="color: #ef4444;">*</span></label>
-          <input type="text" id="codigo" name="codigo" value="${cuenta?.codigo || ''}" required>
-        </div>
-        <div class="form-group">
-          <label for="nombre">Nombre <span style="color: #ef4444;">*</span></label>
+          <label for="nombre">Nombre <span style="color:#ef4444;">*</span></label>
           <input type="text" id="nombre" name="nombre" value="${cuenta?.nombre || ''}" required>
         </div>
         <div class="form-group">
-          <label for="tipo">Tipo <span style="color: #ef4444;">*</span></label>
+          <label for="tipo">Tipo <span style="color:#ef4444;">*</span></label>
           <select id="tipo" name="tipo" required>
             ${['Activo', 'Pasivo', 'Patrimonio', 'Ingreso', 'Gasto', 'Costo'].map(t =>
               `<option value="${t}" ${cuenta?.tipo === t ? 'selected' : ''}>${t}</option>`
@@ -490,26 +504,12 @@ const Contabilidad = {
           </select>
         </div>
         <div class="form-group">
-          <label for="naturaleza">Naturaleza <span style="color: #ef4444;">*</span></label>
+          <label for="naturaleza">Naturaleza <span style="color:#ef4444;">*</span></label>
           <select id="naturaleza" name="naturaleza" required>
             <option value="Debito" ${cuenta?.naturaleza === 'Debito' ? 'selected' : ''}>Débito</option>
             <option value="Credito" ${cuenta?.naturaleza === 'Credito' ? 'selected' : ''}>Crédito</option>
           </select>
         </div>
-        ${!id ? `
-          <div class="form-group">
-            <label for="padreId">Cuenta Padre</label>
-            <select id="padreId" name="padreId">
-              <option value="">Ninguna (nueva Clase de nivel 1)</option>
-              ${padres.map(p => `<option value="${p.id}">${p.codigo} - ${p.nombre} (${p.tipo})</option>`).join('')}
-            </select>
-            <small style="color: #64748b; font-size: 0.875rem;">El nivel se calcula automáticamente según la cuenta padre. El tipo debe coincidir con el de la cuenta padre.</small>
-          </div>
-        ` : `
-          <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
-            <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">La jerarquía (cuenta padre / nivel) no se puede modificar después de creada la cuenta.</p>
-          </div>
-        `}
         <div class="form-actions">
           <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
           <button type="submit" class="btn btn-primary">${id ? 'Actualizar' : 'Crear'}</button>
@@ -523,11 +523,90 @@ const Contabilidad = {
       e.preventDefault();
       this.saveCuenta(id);
     });
+
+    if (!id) {
+      this._actualizarCamposCuenta();
+      document.getElementById('padreId').addEventListener('change', () => this._actualizarCamposCuenta());
+      Combobox.attach('padreId');
+    }
+  },
+
+  _actualizarCamposCuenta() {
+    const padreSelect = document.getElementById('padreId');
+    const wrapper = document.getElementById('codigoWrapper');
+    if (!padreSelect || !wrapper) return;
+
+    const padreId = padreSelect.value;
+
+    if (!padreId) {
+      wrapper.innerHTML = `
+        <label for="codigoLibre">Código <span style="color:#ef4444;">*</span></label>
+        <input type="text" id="codigoLibre" name="codigoLibre"
+          placeholder="Ej: 1 (Clase), 11 (Grupo), 1105 (Cuenta)..."
+          maxlength="8" inputmode="numeric" autocomplete="off" required>
+        <small style="color:#64748b;font-size:0.875rem;">Máximo 8 dígitos. Ej: 1, 11, 1105, 110501</small>
+      `;
+      document.getElementById('codigoLibre').addEventListener('input', (e) => {
+        e.target.value = e.target.value.replace(/\D/g, '');
+      });
+    } else {
+      const padreOpt = padreSelect.querySelector(`option[value="${padreId}"]`);
+      const prefijo = padreOpt?.dataset.codigo || '';
+      const tipo = padreOpt?.dataset.tipo || '';
+      const naturaleza = padreOpt?.dataset.naturaleza || '';
+      const maxSufijo = Math.max(1, 8 - prefijo.length);
+
+      wrapper.innerHTML = `
+        <label>Código <span style="color:#ef4444;">*</span></label>
+        <div style="display:flex;align-items:stretch;border:1px solid #cbd5e1;border-radius:6px;overflow:hidden;">
+          <span id="codigoPrefijo" style="
+            display:flex;align-items:center;padding:0 12px;
+            background:#f1f5f9;color:#334155;
+            font-family:monospace;font-weight:700;font-size:15px;
+            border-right:1px solid #e2e8f0;white-space:nowrap;user-select:none;"
+          >${prefijo}</span>
+          <input type="text" id="codigoSufijo"
+            style="flex:1;border:none;outline:none;padding:10px 12px;font-size:14px;min-width:0;background:white;"
+            inputmode="numeric" maxlength="${maxSufijo}"
+            placeholder="${'0'.repeat(Math.min(maxSufijo, 2))}"
+            autocomplete="off" required>
+        </div>
+        <small style="color:#64748b;font-size:0.875rem;">
+          Prefijo fijo: <strong style="font-family:monospace;">${prefijo}</strong> — añade hasta ${maxSufijo} dígito${maxSufijo !== 1 ? 's' : ''} más
+        </small>
+      `;
+
+      document.getElementById('codigoSufijo').addEventListener('input', (e) => {
+        e.target.value = e.target.value.replace(/\D/g, '');
+      });
+
+      if (tipo) document.getElementById('tipo').value = tipo;
+      if (naturaleza) document.getElementById('naturaleza').value = naturaleza;
+    }
   },
 
   async saveCuenta(id) {
+    let codigo;
+    if (!id) {
+      const prefijo = document.getElementById('codigoPrefijo');
+      const sufijo = document.getElementById('codigoSufijo');
+      const libre = document.getElementById('codigoLibre');
+      if (prefijo && sufijo) {
+        codigo = prefijo.textContent.trim() + sufijo.value.trim();
+      } else {
+        codigo = libre?.value.trim() || '';
+      }
+    } else {
+      codigo = document.getElementById('codigo')?.value.trim() || '';
+    }
+
+    if (!codigo) {
+      document.getElementById('formError').innerHTML = '<div class="error-message">El código de la cuenta es requerido</div>';
+      return;
+    }
+
     const formData = {
-      codigo: document.getElementById('codigo').value.trim(),
+      codigo,
       nombre: document.getElementById('nombre').value.trim(),
       tipo: document.getElementById('tipo').value,
       naturaleza: document.getElementById('naturaleza').value
@@ -1004,7 +1083,7 @@ const Contabilidad = {
         </div>
 
         <table style="width: 100%;" id="lineasAsientoTable">
-          <thead><tr><th>Cuenta Contable</th><th style="width: 140px;">Débito</th><th style="width: 140px;">Crédito</th><th style="width: 200px;">Tercero (opcional)</th><th></th></tr></thead>
+          <thead><tr><th>Cuenta Contable</th><th style="width:120px;">Débito</th><th style="width:120px;">Crédito</th><th style="width:230px;">Tercero (opcional)</th><th style="width:44px;"></th></tr></thead>
           <tbody id="lineasAsientoBody"></tbody>
         </table>
         <button type="button" class="btn btn-secondary btn-icon" id="btnAgregarLinea" style="margin: 8px 0 16px 0;">+ Agregar línea</button>
@@ -1018,7 +1097,7 @@ const Contabilidad = {
       </form>
     `;
 
-    App.openModal(content, 'large');
+    App.openModal(content, 'xlarge');
 
     this.agregarLineaAsiento();
     this.agregarLineaAsiento();
