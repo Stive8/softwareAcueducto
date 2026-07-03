@@ -957,7 +957,8 @@ const Contabilidad = {
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
           <button class="btn btn-secondary" onclick="Contabilidad.imprimirAsiento(${asiento.id})">Imprimir</button>
           <button class="btn btn-success" onclick="Contabilidad.exportarAsientoPDF(${asiento.id})">Exportar PDF</button>
-          ${asiento.estado === 'Activo' ? `<button class="btn btn-warning" onclick="App.closeModal(); Contabilidad.showRevertirAsientoModal(${asiento.id})">Revertir</button>` : ''}
+          ${asiento.estado === 'Activo' && asiento.tipo_origen === 'Manual' ? `<button class="btn btn-warning" onclick="App.closeModal(); Contabilidad.showRevertirAsientoModal(${asiento.id})">Revertir</button>` : ''}
+          ${asiento.estado === 'Activo' && asiento.tipo_origen !== 'Manual' ? `<p style="font-size: 0.8rem; color: #64748b;">Este asiento se generó automáticamente. Para revertirlo, anule el documento que lo originó desde su propio módulo (Gastos, Recibos o Caja).</p>` : ''}
         </div>
       `;
 
