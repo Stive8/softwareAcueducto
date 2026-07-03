@@ -1,11 +1,13 @@
 const PlantillaContabilizacionRepository = require('../repositories/PlantillaContabilizacionRepository');
 const PlanCuentaRepository = require('../repositories/PlanCuentaRepository');
+const ImpuestoRepository = require('../repositories/ImpuestoRepository');
 const MotorContabilizacionService = require('./MotorContabilizacionService');
 
 class PlantillaContabilizacionService {
   constructor(dbService) {
     this.repository = new PlantillaContabilizacionRepository(dbService);
     this.planCuentaRepository = new PlanCuentaRepository(dbService);
+    this.impuestoRepository = new ImpuestoRepository(dbService);
     this.motor = new MotorContabilizacionService(dbService);
   }
 
@@ -58,6 +60,7 @@ class PlantillaContabilizacionService {
       });
 
       this.repository.reemplazarLineas(nuevoId, nuevasLineas);
+      this.impuestoRepository.copiarAsignaciones(id, nuevoId);
 
       return this.repository.findById(nuevoId);
     });

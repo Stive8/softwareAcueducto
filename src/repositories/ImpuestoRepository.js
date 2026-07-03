@@ -72,6 +72,20 @@ class ImpuestoRepository {
     this.db.prepare('DELETE FROM plantilla_impuestos WHERE plantilla_id = ? AND impuesto_id = ?').run(plantillaId, impuestoId);
   }
 
+  // Copia todas las asignaciones de impuestos de una plantilla a otra, preservando el orden.
+  // Se usa al versionar una plantilla (PlantillaContabilizacionService.actualizarLineas): la
+  // versión nueva tiene un id distinto, así que sin esto pierde en silencio todos los impuestos
+  // que tuviera configurados la versión anterior — hallazgo Alto A-1 de la auditoría de
+  // Contabilidad (2026-07-03).
+  copiarAsignaciones(plantillaIdOrigen, plantillaIdDestino) {
+    const asignaciones = this.db.prepare(`
+      SELECT impuesto_id, orden FROM plantilla_impuestos WHERE plantilla_id = ?
+    `).all(plantillaIdOrigen);
+    for (const a of asignaciones) {
+      this.asignarAPlantilla(plantillaIdDestino, a.impuesto_id, a.orden);
+    }
+  }
+
   getPlantillasAsignadas(impuestoId) {
     return this.db.prepare(`
       SELECT p.id, p.codigo, p.version, p.nombre, p.modulo, p.subtipo, pi.orden
