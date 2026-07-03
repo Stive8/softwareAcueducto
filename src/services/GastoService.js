@@ -63,6 +63,20 @@ class GastoService {
       const cuentaCaja = this.planCuentaRepository.findByCodigo(codigoCaja);
       if (!cuentaCaja) throw new Error(`No se encontró la cuenta contable ${codigoCaja}; verifique el plan de cuentas`);
       cajaEfectivoId = cuentaCaja.id;
+
+      // Un gasto en efectivo no puede dejar la caja física en negativo: eso sería un faltante
+      // de efectivo que el sistema debe advertir en el momento de la captura, no descubrirse
+      // después en un arqueo. Compara contra el saldo contable de esa subcuenta específica
+      // (Caja General o Caja Menor según corresponda), con el mismo método que ya usa
+      // CajaMenorService.getEstado() para calcular el monto de reembolso — hallazgo Alto A-7
+      // de la auditoría de Contabilidad (2026-07-03).
+      const saldoDisponible = this.asientoContableService.getLibroMayor(cajaEfectivoId).saldoFinal;
+      if (gastoData.valor > saldoDisponible) {
+        throw new Error(
+          `Saldo insuficiente en ${usarCajaMenor ? 'Caja Menor' : 'Caja General'}: disponible $${saldoDisponible.toLocaleString('es-CO')}, ` +
+          `se requieren $${Number(gastoData.valor).toLocaleString('es-CO')}.`
+        );
+      }
     }
     gastoData.cajaEfectivoId = cajaEfectivoId;
 

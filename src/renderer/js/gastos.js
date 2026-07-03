@@ -489,10 +489,30 @@ const Gastos = {
       document.getElementById('avisoGastosDiversos').style.display = e.target.value === 'Gastos Diversos' ? 'block' : 'none';
     });
 
-    const actualizarVisibilidadCajaEfectivo = () => {
+    const actualizarVisibilidadCajaEfectivo = async () => {
       const esEfectivo = document.getElementById('metodo_pago').value === 'Efectivo';
-      document.getElementById('cajaEfectivoGroup').style.display = (esEfectivo && cajaMenorActiva) ? 'block' : 'none';
+      const grupo = document.getElementById('cajaEfectivoGroup');
+      grupo.style.display = (esEfectivo && cajaMenorActiva) ? 'block' : 'none';
+      if (esEfectivo && cajaMenorActiva) {
+        await actualizarAvisoSaldoCaja();
+      }
     };
+
+    const actualizarAvisoSaldoCaja = async () => {
+      const avisoId = 'avisoSaldoCajaEfectivo';
+      let aviso = document.getElementById(avisoId);
+      if (!aviso) {
+        aviso = document.createElement('p');
+        aviso.id = avisoId;
+        aviso.style.cssText = 'font-size: 0.8rem; color: #64748b; margin-top: 4px;';
+        document.getElementById('cajaEfectivoGroup').appendChild(aviso);
+      }
+      const response = await window.api.cajaMenor.getEstado();
+      if (response.success) {
+        aviso.textContent = `Saldo actual en Caja Menor: $${this.formatNumber(response.data.saldoActual)}`;
+      }
+    };
+    document.getElementById('caja_efectivo').addEventListener('change', actualizarAvisoSaldoCaja);
     document.getElementById('metodo_pago').addEventListener('change', actualizarVisibilidadCajaEfectivo);
     actualizarVisibilidadCajaEfectivo();
 
