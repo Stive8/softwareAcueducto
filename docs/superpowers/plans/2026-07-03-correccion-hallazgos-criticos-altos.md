@@ -1304,6 +1304,8 @@ git commit -m "fix(critico): dashboard de contabilidad reutiliza CajaRepository.
 
 ## Task 8: [Alto A-7] Validar saldo suficiente antes de un gasto en efectivo
 
+> **Corrección post-revisión (2026-07-03):** la primera versión del Step 5 mostraba el aviso de saldo SIEMPRE bajo la etiqueta "Saldo actual en Caja Menor", sin importar si el selector tenía elegida "Caja General" o "Caja Menor" — un reviewer lo señaló como potencialmente engañoso (aunque puramente informativo: la validación real y vinculante del Step 3, en el backend, sí distingue correctamente ambas cajas). Se corrige para que el aviso solo se muestre cuando el selector tiene "Caja Menor" elegida (es la única subcuenta para la que existe hoy una consulta de saldo específica vía `cajaMenor.getEstado()`); para "Caja General" simplemente no se muestra nada, en vez de mostrar un número que podría no corresponder.
+
 **Files:**
 - Modify: `src/services/GastoService.js`
 - Modify: `src/renderer/js/gastos.js`
@@ -1457,6 +1459,20 @@ En `src/renderer/js/gastos.js`, dentro de `actualizarVisibilidadCajaEfectivo` (l
     const actualizarAvisoSaldoCaja = async () => {
       const avisoId = 'avisoSaldoCajaEfectivo';
       let aviso = document.getElementById(avisoId);
+      const cajaSeleccionada = document.getElementById('caja_efectivo').value;
+
+      // Solo mostramos el aviso para Caja Menor: es la única subcuenta de efectivo para la que
+      // hoy existe una consulta de saldo específica y precisa (cajaMenor.getEstado()). Para
+      // "Caja General" no hay un canal que devuelva SOLO su saldo (caja:getSaldos devuelve el
+      // total combinado del libro simple, que también incluiría lo que hay en Caja Menor) —
+      // mostrar ese número bajo la etiqueta "Caja General" sería tan engañoso como el defecto
+      // que este aviso corrige, así que se prefiere no mostrar nada antes que mostrar un dato
+      // que no corresponde exactamente a la caja seleccionada.
+      if (cajaSeleccionada !== 'Menor') {
+        if (aviso) aviso.remove();
+        return;
+      }
+
       if (!aviso) {
         aviso = document.createElement('p');
         aviso.id = avisoId;
