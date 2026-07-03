@@ -5,9 +5,12 @@ function anioMesDeFecha(fechaString) {
   return { anio, mes };
 }
 
+const CajaRepository = require('./CajaRepository');
+
 class ReporteRepository {
   constructor(dbService) {
     this.db = dbService.getDb();
+    this.cajaRepository = new CajaRepository(dbService);
   }
 
   getCuentas(estado = '') {
@@ -269,21 +272,14 @@ class ReporteRepository {
         AND fecha_gasto BETWEEN ? AND ?
     `).get(primerDiaMes, ultimoDiaMes).total;
 
-    const saldoCaja = this.db.prepare(`
-      SELECT COALESCE(
-        SUM(CASE WHEN tipo = 'Ingreso' THEN monto ELSE -monto END), 0
-      ) as saldo
-      FROM movimientos
-      WHERE origen = 'Caja'
-    `).get().saldo;
-
-    const saldoBanco = this.db.prepare(`
-      SELECT COALESCE(
-        SUM(CASE WHEN tipo = 'Ingreso' THEN monto ELSE -monto END), 0
-      ) as saldo
-      FROM movimientos
-      WHERE origen = 'Banco'
-    `).get().saldo;
+    // Reutiliza EXACTAMENTE la misma fórmula que ya usan correctamente el Dashboard general y
+    // la pantalla de Caja (CajaRepository.getSaldo): saldo inicial configurado + ingresos -
+    // egresos/traslados salientes + traslados entrantes. Antes, este método reimplementaba su
+    // propia fórmula que ignoraba el saldo inicial y solo miraba `origen`, nunca `destino`, así
+    // que cualquier traslado interno (consignación, retiro) hacía "desaparecer" ese dinero del
+    // tablero — hallazgo Crítico C-3 de la auditoría de Contabilidad (2026-07-03).
+    const saldoCaja = this.cajaRepository.getSaldoCaja();
+    const saldoBanco = this.cajaRepository.getSaldoBanco();
 
     const cuentasMora = this.db.prepare(`
       SELECT COUNT(*) as total
