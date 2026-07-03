@@ -1624,6 +1624,8 @@ git commit -m "fix(alto): copiar impuestos asignados al crear una nueva version 
 
 ## Task 10: [Alto A-2] Vigencia temporal de las tasas de impuestos
 
+> **Corrección post-revisión (2026-07-03):** el reviewer reprodujo empíricamente que dos ediciones de la misma tasa en el mismo día calendario escriben una fila de historial con `fecha_desde > fecha_hasta` (invertida): la primera edición cierra el tramo anterior con `fecha_hasta = ayer`, pero la segunda edición ese mismo día lee `fecha_vigencia_desde = hoy` (ya actualizado por la primera) y sigue calculando `fecha_hasta = ayer`, que ahora es ANTERIOR a `fecha_desde = hoy`. No afecta el cálculo de impuestos en documentos reales (la resolución es por día, y "hoy" siempre resuelve contra la fila actual, no contra el historial), pero corrompe en silencio la fila de auditoría del tramo intermedio — justo lo que esta tabla existe para evitar. Se corrige el Step 4 acotando `fecha_hasta` a nunca ser anterior a `fecha_desde`.
+
 **Files:**
 - Create: `src/database/migrations/032_vigencia_impuestos.sql`
 - Modify: `src/repositories/ImpuestoRepository.js`
@@ -1716,10 +1718,17 @@ En `src/repositories/ImpuestoRepository.js`, reemplazar el método `update` (lí
       const ayer = new Date(Date.now() - 86400000).toLocaleDateString('en-CA');
       const hoy = new Date().toLocaleDateString('en-CA');
 
+      // fecha_hasta nunca puede ser anterior a fecha_desde (actual.fecha_vigencia_desde). Si la
+      // tasa ya se había editado hoy mismo (fecha_vigencia_desde == hoy), "ayer" quedaría antes
+      // que su propia fecha_desde e invertiría el rango, corrompiendo la fila de historial de
+      // ese tramo intermedio de menos de un día. En ese caso se cierra el mismo día que empezó
+      // (un tramo de duración cero pero con un rango válido) en vez de invertirlo.
+      const fechaHastaHistorial = ayer > actual.fecha_vigencia_desde ? ayer : actual.fecha_vigencia_desde;
+
       this.db.prepare(`
         INSERT INTO impuesto_historial_porcentaje (impuesto_id, porcentaje, fecha_desde, fecha_hasta)
         VALUES (?, ?, ?, ?)
-      `).run(id, actual.porcentaje, actual.fecha_vigencia_desde, ayer);
+      `).run(id, actual.porcentaje, actual.fecha_vigencia_desde, fechaHastaHistorial);
 
       this.db.prepare(`
         UPDATE impuestos
