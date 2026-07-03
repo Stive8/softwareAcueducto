@@ -54,11 +54,15 @@ class ImpuestoRepository {
     if (Number(actual.porcentaje) !== Number(porcentaje)) {
       const ayer = new Date(Date.now() - 86400000).toLocaleDateString('en-CA');
       const hoy = new Date().toLocaleDateString('en-CA');
+      // fecha_hasta nunca puede ser anterior a fecha_desde (actual.fecha_vigencia_desde): si ya
+      // hubo un cambio de tarifa hoy mismo, el segundo cambio del mismo día debe cerrar el tramo
+      // el mismo día en que empezó, no "ayer" (que quedaría antes de fecha_desde).
+      const fechaHastaHistorial = ayer > actual.fecha_vigencia_desde ? ayer : actual.fecha_vigencia_desde;
 
       this.db.prepare(`
         INSERT INTO impuesto_historial_porcentaje (impuesto_id, porcentaje, fecha_desde, fecha_hasta)
         VALUES (?, ?, ?, ?)
-      `).run(id, actual.porcentaje, actual.fecha_vigencia_desde, ayer);
+      `).run(id, actual.porcentaje, actual.fecha_vigencia_desde, fechaHastaHistorial);
 
       this.db.prepare(`
         UPDATE impuestos
