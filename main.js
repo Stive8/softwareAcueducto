@@ -8,7 +8,8 @@ const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
 // casi al mismo tiempo -hallazgo Alto A-6 de la auditoría de Contabilidad (2026-07-03)-. Si ya
 // hay una instancia corriendo, esta nueva se cierra de inmediato y le pide a la primera que
 // traiga su ventana al frente, en vez de dejar ambas abiertas.
-if (!app.requestSingleInstanceLock()) {
+const tieneCandadoUnico = app.requestSingleInstanceLock();
+if (!tieneCandadoUnico) {
   app.quit();
 }
 
@@ -218,6 +219,11 @@ function createWindow() {
   }
 }
 
+// La instancia perdedora del candado (tieneCandadoUnico === false) nunca debe llegar a este
+// punto: app.quit() es asíncrono y no detiene por sí solo la ejecución del resto del archivo,
+// así que todo el arranque real queda condicionado explícitamente al candado para que esa
+// instancia no abra la base de datos ni una ventana antes de cerrarse.
+if (tieneCandadoUnico) {
 app.whenReady().then(() => {
   // Empaquetada (instalada): app.getPath('userData'), la única carpeta escribible una vez
   // instalada en Program Files. En desarrollo (npm start): la carpeta del proyecto, para que
@@ -320,6 +326,7 @@ app.on('activate', () => {
     createWindow();
   }
 });
+}
 
 function setupIpcHandlers() {
   // Dashboard
