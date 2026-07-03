@@ -791,13 +791,17 @@ git commit -m "fix(alto): detectar Caja/Banco por ancestro de nivel 3 en vez de 
 
 ## Task 5: [Alto A-8] Restringir la reversión directa a asientos manuales
 
+> **Corrección post-revisión (2026-07-03):** la primera versión de este task ponía la restricción directamente dentro de `revertir()`. Un revisor de Task Reviewer detectó — y reprodujo con un test real — que `revertir()` también es el método que usa internamente `revertirPorReferencia()`, al que llaman `GastoService.anular()`/`ReciboService.anular()` (y sus `corregirMetodoPago()`) como parte de su propio flujo, ya correctamente coordinado. Poner la restricción ahí rompía por completo la anulación de gastos y recibos. La versión de abajo ya corrige esto: `revertir()` vuelve a quedar sin restricción (uso interno, vía `revertirPorReferencia`), y se agrega `revertirManual()` como punto de entrada restringido, que es al que debe apuntar el canal IPC `asientos:revertir` en `main.js`. Sigue el mismo patrón que ya usa el código (`crear()` interno / `crearManual()` público).
+
 **Files:**
 - Modify: `src/services/AsientoContableService.js`
+- Modify: `main.js`
 - Modify: `src/renderer/js/contabilidad.js`
 - Test: `src/services/AsientoContableService.revertir.test.js`
 
 **Interfaces:**
-- Modifica `AsientoContableService.revertir(asientoId, motivo, usuarioId)`: ahora lanza si `asiento.tipo_origen !== 'Manual'`.
+- `AsientoContableService.revertir(asientoId, motivo, usuarioId)`: **sin cambios de comportamiento** — sigue sin restricción por `tipo_origen`, para no romper el uso interno vía `revertirPorReferencia()`.
+- Nuevo: `AsientoContableService.revertirManual(asientoId, motivo, usuarioId)`: valida que `asiento.tipo_origen === 'Manual'` y solo entonces delega en `revertir()`. Es el único punto de entrada que debe usar el canal IPC `asientos:revertir`.
 
 - [ ] **Step 1: Escribir el test que falla**
 
@@ -808,7 +812,7 @@ const assert = require('node:assert/strict');
 const { crearDbTemporal, cerrarDbTemporal } = require('../testUtils/dbTemporal');
 const AsientoContableService = require('./AsientoContableService');
 
-test('revertir() rechaza un asiento automático (tipo_origen=Gasto): debe anularse el documento origen', () => {
+test('revertirManual() rechaza un asiento automático (tipo_origen=Gasto): debe anularse el documento origen', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -830,7 +834,7 @@ test('revertir() rechaza un asiento automático (tipo_origen=Gasto): debe anular
     });
 
     assert.throws(
-      () => service.revertir(asientoId, 'Intento de reversión directa'),
+      () => service.revertirManual(asientoId, 'Intento de reversión directa'),
       /debe anularse desde el módulo|no se puede revertir directamente/i
     );
 
@@ -841,7 +845,7 @@ test('revertir() rechaza un asiento automático (tipo_origen=Gasto): debe anular
   }
 });
 
-test('revertir() sigue permitiendo revertir un asiento Manual', () => {
+test('revertirManual() sigue permitiendo revertir un asiento Manual', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -859,11 +863,42 @@ test('revertir() sigue permitiendo revertir un asiento Manual', () => {
       ]
     });
 
-    const reversionId = service.revertir(asientoId, 'Corrección de prueba');
+    const reversionId = service.revertirManual(asientoId, 'Corrección de prueba');
     assert.ok(reversionId > 0);
 
     const original = service.getById(asientoId);
     assert.equal(original.estado, 'Anulado');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('revertirPorReferencia() (usado por GastoService.anular/ReciboService.anular) sigue revirtiendo un asiento automático SIN restricción de tipo_origen', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const service = new AsientoContableService(ctx.dbService);
+
+    const cuentaGasto = db.prepare(`SELECT id FROM plan_cuentas WHERE codigo = '519599'`).get();
+    const cuentaCaja = db.prepare(`SELECT id FROM plan_cuentas WHERE codigo = '110505'`).get();
+
+    service.crear({
+      fecha: '2026-07-03',
+      concepto: 'Gasto simulado',
+      tipoOrigen: 'Gasto',
+      referenciaId: 777,
+      referenciaTipo: 'Gasto',
+      lineas: [
+        { cuentaContableId: cuentaGasto.id, debito: 12000 },
+        { cuentaContableId: cuentaCaja.id, credito: 12000 }
+      ]
+    });
+
+    // Este es exactamente el camino interno que usan GastoService.anular()/ReciboService.anular()
+    // (y sus corregirMetodoPago()): NO debe verse afectado por la restricción de
+    // revertirManual(), o la anulación de gastos/recibos quedaría completamente rota.
+    const reversionId = service.revertirPorReferencia('Gasto', 777, 'Anulación de gasto de prueba');
+    assert.ok(reversionId > 0, 'revertirPorReferencia debe seguir funcionando para asientos automáticos, sin restricción');
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -873,25 +908,29 @@ test('revertir() sigue permitiendo revertir un asiento Manual', () => {
 - [ ] **Step 2: Ejecutar y verificar que falla**
 
 Run: `npm test`
-Expected: FAIL en el primer test — hoy `revertir()` no distingue `tipo_origen`, así que revierte el asiento de Gasto sin lanzar.
+Expected: FAIL en los primeros dos tests con `service.revertirManual is not a function` (el método todavía no existe). El tercer test debe PASAR ya (`revertirPorReferencia`/`revertir` no tienen restricción hoy) — así queda documentado desde el principio que ese camino no se puede romper.
 
 - [ ] **Step 3: Implementar el fix en el backend**
 
-En `src/services/AsientoContableService.js`, modificar el inicio de `revertir` (líneas actuales 369-374):
+En `src/services/AsientoContableService.js`, **NO modificar el método `revertir()` existente** (líneas actuales 369-413): debe quedar exactamente como está, sin ninguna restricción por `tipo_origen`, porque `revertirPorReferencia()` (líneas 362-367, tampoco se toca) depende de que siga aceptando cualquier asiento activo.
+
+Añadir el nuevo método `revertirManual`, inmediatamente después del cierre de `revertir()` (después de la línea 413, antes del cierre de la clase):
 
 ```js
-  revertir(asientoId, motivo, usuarioId = null) {
+  // Punto de entrada directo (usado por la pantalla de Asientos / canal IPC asientos:revertir):
+  // a diferencia de revertir(), SOLO acepta revertir notas contables manuales. Un asiento
+  // generado automáticamente (Gasto/Recibo/Movimiento) o uno que ya es en sí mismo una reversión
+  // debe deshacerse desde su propio módulo (anular el gasto/recibo/traslado, que internamente
+  // llama a revertir() vía revertirPorReferencia() y sí coordina correctamente TANTO la doble
+  // partida como el libro simple `movimientos` y el estado del documento origen). Revertir aquí
+  // directamente un asiento automático solo actualizaba la doble partida, dejando el "Saldo en
+  // Caja/Banco" del Dashboard sin revertir y el documento origen con estado "Activo" pese a que
+  // su único asiento quedaba "Anulado" (hallazgo Alto A-8 de la auditoría de Contabilidad,
+  // 2026-07-03). La restricción vive aquí y NO en revertir() para no bloquear el uso interno de
+  // revertirPorReferencia() que GastoService.anular()/ReciboService.anular() sí necesitan.
+  revertirManual(asientoId, motivo, usuarioId = null) {
     const asiento = this.repository.findById(asientoId);
     if (!asiento) throw new Error('Asiento no encontrado');
-    if (asiento.estado === 'Anulado') throw new Error('Este asiento ya fue revertido');
-    // Solo las notas contables manuales se revierten directamente desde aquí. Un asiento
-    // generado automáticamente (Gasto/Recibo/Movimiento) o uno que ya es en sí mismo una
-    // reversión debe deshacerse desde su propio módulo (anular el gasto/recibo/traslado), que
-    // coordina correctamente TANTO la doble partida como el libro simple `movimientos` y el
-    // estado del documento origen. Revertir aquí directamente un asiento automático solo
-    // actualizaba la doble partida, dejando el "Saldo en Caja/Banco" del Dashboard sin revertir
-    // y el documento origen con estado "Activo" pese a que su único asiento quedaba "Anulado"
-    // (hallazgo Alto A-8 de la auditoría de Contabilidad, 2026-07-03).
     if (asiento.tipo_origen !== 'Manual') {
       const nombreModulo = { Gasto: 'Gastos', Recibo: 'Recibos', Movimiento: 'Caja', Reversion: null }[asiento.tipo_origen];
       throw new Error(
@@ -900,17 +939,33 @@ En `src/services/AsientoContableService.js`, modificar el inicio de `revertir` (
           : `Un asiento de Reversión no se puede revertir directamente; si necesita deshacer su efecto, anule el documento original.`
       );
     }
-    if (!motivo || !motivo.trim()) throw new Error('Debe indicar el motivo de la reversión');
+    return this.revertir(asientoId, motivo, usuarioId);
+  }
 ```
-
-(El resto del método, desde `return this.repository.transaccion(...)`, queda exactamente igual.)
 
 - [ ] **Step 4: Ejecutar y verificar que pasa**
 
 Run: `npm test`
-Expected: `# pass 11`, `# fail 0`.
+Expected: todos los tests en verde, incluidos los 3 nuevos de este task.
 
-- [ ] **Step 5: Ajustar el frontend para no ofrecer el botón cuando no aplica**
+- [ ] **Step 5: Apuntar el canal IPC al nuevo método restringido**
+
+En `main.js`, el handler `asientos:revertir` (busca `envolverHandle('asientos:revertir'`) hoy llama a `asientoContableService.revertir(id, motivo, sesionActual.id)`. Cambiarlo para que llame a `revertirManual`:
+
+```js
+  envolverHandle('asientos:revertir', async (event, id, motivo) => {
+    try {
+      const reversionId = asientoContableService.revertirManual(id, motivo, sesionActual.id);
+      return { success: true, data: { id: reversionId } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+```
+
+(Es el único cambio en `main.js`: mismo nombre de canal, misma firma, mismo manejo de errores — solo cambia qué método del servicio se invoca.)
+
+- [ ] **Step 6: Ajustar el frontend para no ofrecer el botón cuando no aplica**
 
 En `src/renderer/js/contabilidad.js`, línea 960, reemplazar:
 
@@ -925,14 +980,14 @@ por:
           ${asiento.estado === 'Activo' && asiento.tipo_origen !== 'Manual' ? `<p style="font-size: 0.8rem; color: #64748b;">Este asiento se generó automáticamente. Para revertirlo, anule el documento que lo originó desde su propio módulo (Gastos, Recibos o Caja).</p>` : ''}
 ```
 
-- [ ] **Step 6: Verificación manual en la app**
+- [ ] **Step 7: Verificación manual en la app**
 
-Run: `npm start`, iniciar sesión como Administrador, ir a Contabilidad → Asientos, abrir un asiento con `tipo_origen` distinto de Manual (por ejemplo uno generado por un Gasto real) → confirmar que ya no aparece el botón "Revertir" sino el mensaje explicativo. Abrir un asiento manual (o crear uno con "Nueva Nota Contable") → confirmar que "Revertir" sigue funcionando igual que antes.
+Run: `npm start`, iniciar sesión como Administrador, ir a Contabilidad → Asientos, abrir un asiento con `tipo_origen` distinto de Manual (por ejemplo uno generado por un Gasto real) → confirmar que ya no aparece el botón "Revertir" sino el mensaje explicativo. Abrir un asiento manual (o crear uno con "Nueva Nota Contable") → confirmar que "Revertir" sigue funcionando igual que antes. Por separado, anular un Gasto real desde el módulo de Gastos → confirmar que la anulación sigue funcionando (este es exactamente el flujo que la primera versión de este task rompía).
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add src/services/AsientoContableService.js src/renderer/js/contabilidad.js src/services/AsientoContableService.revertir.test.js
+git add src/services/AsientoContableService.js main.js src/renderer/js/contabilidad.js src/services/AsientoContableService.revertir.test.js
 git commit -m "fix(alto): restringir la reversion directa de asientos a solo tipo Manual"
 ```
 
