@@ -909,6 +909,14 @@ function setupIpcHandlers() {
     }
   });
 
+  envolverHandle('asientos:verificarConciliacion', async () => {
+    try {
+      return { success: true, data: asientoContableService.verificarConciliacionCajaBanco() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   envolverHandle('asientos:imprimir', async (event, id) => {
     let ventanaImpresion;
     try {

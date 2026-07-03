@@ -4,6 +4,7 @@ const CuentaAutomaticaRepository = require('../repositories/CuentaAutomaticaRepo
 const PeriodoContableRepository = require('../repositories/PeriodoContableRepository');
 const PeriodoContableService = require('./PeriodoContableService');
 const MotorContabilizacionService = require('./MotorContabilizacionService');
+const CajaRepository = require('../repositories/CajaRepository');
 
 // Centavos de tolerancia al comparar sumas de débito/crédito (los valores siempre son pesos
 // colombianos sin decimales en este sistema, pero se deja margen por seguridad ante redondeos).
@@ -34,6 +35,7 @@ class AsientoContableService {
     this.cuentaAutomaticaRepository = new CuentaAutomaticaRepository(dbService);
     this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService));
     this.motorService = new MotorContabilizacionService(dbService);
+    this.cajaRepository = new CajaRepository(dbService);
   }
 
   // Códigos PUC del ancestro de nivel 3 de Caja y de Banco, cacheados para la sesión (evitar un
@@ -284,6 +286,46 @@ class AsientoContableService {
       referenciaTipo: 'Asiento',
       fechaMovimiento: fecha
     });
+  }
+
+  // Compara, para Caja y para Banco, el saldo del libro simple (tabla `movimientos`, la fuente
+  // del Dashboard y de la pantalla de Caja) contra el saldo de la cuenta de doble partida
+  // correspondiente (incluidas todas sus subcuentas). Si difieren, algo quedó desincronizado
+  // entre los dos libros — ver hallazgo Alto A-9 de la auditoría de Contabilidad (2026-07-03).
+  // Pensado para invocarse desde una pantalla de diagnóstico o, como aquí, desde pruebas
+  // automatizadas que protejan contra que el defecto vuelva a aparecer.
+  verificarConciliacionCajaBanco() {
+    const { caja: codigoCaja, banco: codigoBanco } = this._getCodigosCajaBanco();
+    const resultado = [];
+
+    if (codigoCaja) {
+      const cuentaCaja = this.planCuentaRepository.findByCodigo(codigoCaja);
+      resultado.push(this._compararSaldoLedgers(
+        'Caja',
+        this.cajaRepository.getSaldoCaja(),
+        this.repository.getSaldoConSubcuentas(cuentaCaja.id)
+      ));
+    }
+    if (codigoBanco) {
+      const cuentaBanco = this.planCuentaRepository.findByCodigo(codigoBanco);
+      resultado.push(this._compararSaldoLedgers(
+        'Banco',
+        this.cajaRepository.getSaldoBanco(),
+        this.repository.getSaldoConSubcuentas(cuentaBanco.id)
+      ));
+    }
+    return resultado;
+  }
+
+  _compararSaldoLedgers(nombreCuenta, saldoLedgerSimple, saldoDoblePartida) {
+    const diferencia = Math.round((saldoLedgerSimple - saldoDoblePartida) * 100) / 100;
+    return {
+      cuenta: nombreCuenta,
+      saldoLedgerSimple,
+      saldoDoblePartida,
+      diferencia,
+      conciliado: Math.abs(diferencia) < 1
+    };
   }
 
   // Asiento manual, para todo lo que la generación automática no cubre (ajustes financieros,

@@ -306,6 +306,24 @@ class AsientoContableRepository {
     query += ' ORDER BY a.fecha ASC, a.numero ASC, mc.id ASC';
     return this.db.prepare(query).all(...params);
   }
+
+  // Suma débito-crédito en movimientos_contables para una cuenta y TODAS sus cuentas
+  // descendientes (recursivo por padre_id). Se usa para conciliar contra el libro simple
+  // `movimientos`, que no distingue entre Caja General y Caja Menor: ambas deben sumarse juntas
+  // para comparar peras con peras.
+  getSaldoConSubcuentas(cuentaId) {
+    const row = this.db.prepare(`
+      WITH RECURSIVE subcuentas(id) AS (
+        SELECT id FROM plan_cuentas WHERE id = ?
+        UNION ALL
+        SELECT pc.id FROM plan_cuentas pc INNER JOIN subcuentas s ON pc.padre_id = s.id
+      )
+      SELECT COALESCE(SUM(mc.debito - mc.credito), 0) as saldo
+      FROM movimientos_contables mc
+      WHERE mc.cuenta_id IN (SELECT id FROM subcuentas)
+    `).get(cuentaId);
+    return row.saldo;
+  }
 }
 
 module.exports = AsientoContableRepository;
