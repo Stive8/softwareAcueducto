@@ -42,6 +42,22 @@ class PlanCuentaService {
       if (!padre) throw new Error('La cuenta padre no existe');
       if (padre.nivel >= 5) throw new Error('No se pueden crear cuentas debajo de un auxiliar (nivel máximo alcanzado)');
       if (padre.tipo !== tipo) throw new Error('La cuenta debe tener el mismo tipo que su cuenta padre');
+      // Convertir una cuenta que ya tiene movimientos en una cuenta de agrupación deja esos
+      // movimientos "huérfanos": el sistema ya no admite postear contra una cuenta con hijas
+      // (ver AsientoContableService.crear()), pero los movimientos ya contabilizados se quedan
+      // apuntando a ella sin que nada los detecte ni los migre. Este fue exactamente el
+      // mecanismo del hallazgo Crítico C-1 (la cuenta '1105' Caja, con nueve años de historia,
+      // convertida en agrupación por la migración 029 sin reasignar sus movimientos). En vez de
+      // repetir ese defecto, se bloquea la operación: quien necesite reorganizar una cuenta en
+      // uso debe hacerlo con una migración de datos explícita (ver 031 como plantilla), que
+      // reasigne los movimientos existentes en la misma operación.
+      if (this.repository.tieneMovimientos(padreId)) {
+        throw new Error(
+          `No se puede crear una subcuenta bajo "${padre.nombre}" porque esa cuenta ya tiene movimientos registrados. ` +
+          `Convertirla en cuenta de agrupación dejaría esos movimientos huérfanos. Si necesita reorganizar el plan de ` +
+          `cuentas, contacte a soporte técnico para una migración de datos que reasigne el histórico primero.`
+        );
+      }
       nivel = padre.nivel + 1;
     }
 
