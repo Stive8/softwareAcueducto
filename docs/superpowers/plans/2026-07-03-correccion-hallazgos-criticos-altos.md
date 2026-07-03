@@ -2073,6 +2073,22 @@ git commit -m "fix(alto): permitir bloquear contabilizacion retroactiva mas alla
 
 Este task no tiene una prueba automatizada razonable con `node:test` (requiere lanzar dos procesos Electron reales con GUI y observar el evento `second-instance`), así que se verifica manualmente. Es deliberadamente el único task de este plan sin TDD, por esa limitación práctica, no por ser menos importante.
 
+> **Corrección post-revisión:** la primera versión de este task (commit `06bef3c`) insertaba el guard
+> `if (!app.requestSingleInstanceLock()) { app.quit(); }` sin un `else`, dejando el resto del archivo
+> — incluyendo `app.whenReady().then(...)`, que abre la conexión SQLite, corre migraciones,
+> registra los handlers IPC y crea la ventana — como alcanzable incondicionalmente. `app.quit()`
+> es asíncrono/advisory: no detiene la ejecución del resto del script. En la práctica, la
+> instancia perdedora igual llegaba a inicializar `DatabaseService`/correr migraciones
+> concurrentemente con la instancia ganadora sobre el mismo `data/acueducto.db` — reproduciendo
+> parcialmente la misma condición de carrera que este hallazgo (A-6) buscaba cerrar — y podía
+> mostrar brevemente una ventana antes de cerrarse, contradiciendo el propio criterio de
+> verificación manual del Step 2 ("sin abrir ventana"). El reviewer lo encontró leyendo el
+> control de flujo real de `main.js`, no solo el diff. Se corrige seleccionando el resultado de
+> `requestSingleInstanceLock()` en una constante y envolviendo TODO el bloque de inicialización
+> (`app.whenReady().then(...)` y los tres `app.on(...)` que le siguen: `before-quit`,
+> `window-all-closed`, `activate`) dentro de un `else`, siguiendo el patrón oficial documentado
+> por Electron para esta API.
+
 - [ ] **Step 1: Implementar el fix**
 
 En `main.js`, inmediatamente después de la línea 1 (`const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');`) y antes del resto de los `require`, insertar:
@@ -2085,13 +2101,51 @@ En `main.js`, inmediatamente después de la línea 1 (`const { app, BrowserWindo
 // como "leer el máximo actual, sumar uno" y podrían leerse el mismo valor desde ambos procesos
 // casi al mismo tiempo -hallazgo Alto A-6 de la auditoría de Contabilidad (2026-07-03)-. Si ya
 // hay una instancia corriendo, esta nueva se cierra de inmediato y le pide a la primera que
-// traiga su ventana al frente, en vez de dejar ambas abiertas.
-if (!app.requestSingleInstanceLock()) {
+// traiga su ventana al frente, en vez de dejar ambas abiertas. app.quit() es asíncrono: por sí
+// solo NO detiene la ejecución del resto de este archivo, así que todo el arranque real
+// (app.whenReady + los listeners de before-quit/window-all-closed/activate) debe quedar dentro
+// del "else" para que la instancia perdedora nunca llegue a abrir la base de datos ni una
+// ventana.
+const tieneCandadoUnico = app.requestSingleInstanceLock();
+if (!tieneCandadoUnico) {
   app.quit();
 }
 ```
 
-Y, dentro de `app.whenReady().then(() => { ... })` (línea actual 208), justo después de `createWindow();` (buscar esa línea dentro del bloque; si no está en el `then` sino en un listener separado, ubicar el lugar exacto donde se llama `createWindow()` por primera vez y añadir el listener inmediatamente después):
+Luego, envolver TODO el bloque que va desde `app.whenReady().then(() => { ... })` hasta el final del
+`app.on('activate', ...)` (línea actual 221 a 322: `app.whenReady().then(...)`, `app.on('before-quit', ...)`,
+`app.on('window-all-closed', ...)` y `app.on('activate', ...)` — las cuatro llamadas de nivel superior que
+siguen inmediatamente a `createWindow()`, antes de `function setupIpcHandlers() {`) dentro de un
+`else { ... }` que sigue directamente al `if` de arriba:
+
+```js
+} else {
+  app.whenReady().then(() => {
+    // ... (contenido existente sin cambios)
+  });
+
+  app.on('before-quit', async (event) => {
+    // ... (contenido existente sin cambios)
+  });
+
+  app.on('window-all-closed', () => {
+    // ... (contenido existente sin cambios)
+  });
+
+  app.on('activate', () => {
+    // ... (contenido existente sin cambios)
+  });
+}
+```
+
+No es necesario reescribir el contenido interior de esos bloques — solo envolverlos, moviendo la
+llave de cierre `}` de cada uno una unidad de indentación hacia adentro si se opta por reindentar
+por legibilidad (opcional; lo único obligatorio es que el `else {` abra inmediatamente después del
+`if` del guard y el `}` de cierre quede justo antes de `function setupIpcHandlers() {`).
+
+Y, dentro de `app.whenReady().then(() => { ... })`, justo después de `createWindow();` (buscar esa
+línea dentro del bloque — es la única llamada a `createWindow()` seguida por
+`backupService.ejecutarSiCorresponde();`), añadir:
 
 ```js
   app.on('second-instance', () => {
