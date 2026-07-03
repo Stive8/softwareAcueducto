@@ -501,6 +501,20 @@ const Gastos = {
     const actualizarAvisoSaldoCaja = async () => {
       const avisoId = 'avisoSaldoCajaEfectivo';
       let aviso = document.getElementById(avisoId);
+      const cajaSeleccionada = document.getElementById('caja_efectivo').value;
+
+      // Solo mostramos el aviso para Caja Menor: es la única subcuenta de efectivo para la que
+      // hoy existe una consulta de saldo específica y precisa (cajaMenor.getEstado()). Para
+      // "Caja General" no hay un canal que devuelva SOLO su saldo (caja:getSaldos devuelve el
+      // total combinado del libro simple, que también incluiría lo que hay en Caja Menor) —
+      // mostrar ese número bajo la etiqueta "Caja General" sería tan engañoso como el defecto
+      // que este aviso corrige, así que se prefiere no mostrar nada antes que mostrar un dato
+      // que no corresponde exactamente a la caja seleccionada.
+      if (cajaSeleccionada !== 'Menor') {
+        if (aviso) aviso.remove();
+        return;
+      }
+
       if (!aviso) {
         aviso = document.createElement('p');
         aviso.id = avisoId;
