@@ -8,7 +8,8 @@
     "dev": "electron . --dev",
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "icon": "node scripts/generate-icon.js",
-    "dist": "npm run rebuild && electron-builder --win"
+    "dist": "npm run rebuild && electron-builder --win",
+    "test": "node scripts/test.js"
   },
   "keywords": [],
   "author": "",
