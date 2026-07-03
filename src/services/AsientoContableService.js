@@ -36,13 +36,25 @@ class AsientoContableService {
     this.motorService = new MotorContabilizacionService(dbService);
   }
 
-  // Códigos PUC de Caja y Banco cacheados para la sesión (evitar un SELECT por cada línea
-  // en sincronizarLineaConCajaBanco). Se invalidan con _codigosCajaBancoCache = null.
+  // Códigos PUC del ancestro de nivel 3 de Caja y de Banco, cacheados para la sesión (evitar un
+  // SELECT por cada línea en sincronizarLineaConCajaBanco). Se resuelven a partir del ANCESTRO
+  // de nivel 3 de la cuenta automática configurada (no del código exacto de esa cuenta): así,
+  // sin importar cuántas subcuentas de detalle existan bajo Caja o Banco (Caja General, Caja
+  // Menor, Cuenta Corriente, Cuenta de Ahorros...), todas se reconocen como la misma "familia"
+  // de efectivo. Esto es justamente lo que se perdió cuando la migración 029 movió la cuenta
+  // automática CAJA del nodo padre '1105' a la hoja '110505': antes, cualquier subcuenta nueva
+  // bajo '1105' quedaba cubierta automáticamente por el prefijo; ahora se recalcula subiendo la
+  // jerarquía en vez de depender de que el código de la automática sea justo el prefijo correcto.
+  // Se invalidan con _codigosCajaBancoCache = null.
   _getCodigosCajaBanco() {
     if (!this._codigosCajaBancoCache) {
+      const cajaId = this.cuentaAutomaticaRepository.getCuentaIdByClave('CAJA');
+      const bancoId = this.cuentaAutomaticaRepository.getCuentaIdByClave('BANCO');
+      const ancestroCaja = cajaId ? this.planCuentaRepository.getAncestroHastaNivel(cajaId, 3) : null;
+      const ancestroBanco = bancoId ? this.planCuentaRepository.getAncestroHastaNivel(bancoId, 3) : null;
       this._codigosCajaBancoCache = {
-        caja: this.cuentaAutomaticaRepository.getCodigoByClave('CAJA'),
-        banco: this.cuentaAutomaticaRepository.getCodigoByClave('BANCO')
+        caja: ancestroCaja ? ancestroCaja.codigo : null,
+        banco: ancestroBanco ? ancestroBanco.codigo : null
       };
     }
     return this._codigosCajaBancoCache;

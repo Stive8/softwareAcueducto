@@ -67,6 +67,18 @@ class PlanCuentaRepository {
     return (enGastos + enRecibos + enMovimientos + enMovimientosContables) > 0;
   }
 
+  // Sube por la jerarquía padre_id hasta encontrar un ancestro de nivel <= nivelMax (o hasta la
+  // raíz si la cuenta ya está en un nivel <= nivelMax). Se usa para agrupar todas las subcuentas
+  // de una "familia" (p.ej. Caja General y Caja Menor comparten el mismo ancestro de nivel 3,
+  // '1105' Caja) sin depender de que sus códigos compartan un prefijo de longitud fija.
+  getAncestroHastaNivel(id, nivelMax) {
+    let cuenta = this.findById(id);
+    while (cuenta && cuenta.nivel > nivelMax && cuenta.padre_id) {
+      cuenta = this.findById(cuenta.padre_id);
+    }
+    return cuenta || null;
+  }
+
   create(cuenta) {
     const result = this.db.prepare(`
       INSERT INTO plan_cuentas (codigo, nombre, tipo, naturaleza, nivel, padre_id, activo)
