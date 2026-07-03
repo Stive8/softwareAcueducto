@@ -1,4 +1,17 @@
 const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+
+// Esta es una app de escritorio monousuario sobre un único archivo SQLite
+// (data/acueducto.db). Sin este candado, abrir el ejecutable dos veces crea dos procesos
+// completamente independientes -dos conexiones SQLite, dos sesiones de usuario- escribiendo
+// sobre el mismo archivo; los consecutivos (número de asiento, número de recibo) se calculan
+// como "leer el máximo actual, sumar uno" y podrían leerse el mismo valor desde ambos procesos
+// casi al mismo tiempo -hallazgo Alto A-6 de la auditoría de Contabilidad (2026-07-03)-. Si ya
+// hay una instancia corriendo, esta nueva se cierra de inmediato y le pide a la primera que
+// traiga su ventana al frente, en vez de dejar ambas abiertas.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+}
+
 const path = require('path');
 const fs = require('fs');
 const DatabaseService = require('./src/database/DatabaseService');
@@ -245,6 +258,13 @@ app.whenReady().then(() => {
 
   setupIpcHandlers();
   createWindow();
+
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
 
   // No bloquea el arranque: corre en segundo plano y solo actúa si ya pasó el intervalo.
   backupService.ejecutarSiCorresponde();
