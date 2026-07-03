@@ -45,12 +45,52 @@ class ImpuestoRepository {
   }
 
   update(id, { nombre, tipo, porcentaje, cuentaId, ladoAjuste, baseCampo }) {
-    this.db.prepare(`
-      UPDATE impuestos
-      SET nombre = ?, tipo = ?, porcentaje = ?, cuenta_id = ?, lado_ajuste = ?,
-          base_campo = ?, fecha_actualizacion = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `).run(nombre, tipo, porcentaje, cuentaId, ladoAjuste, baseCampo, id);
+    const actual = this.db.prepare('SELECT porcentaje, fecha_vigencia_desde FROM impuestos WHERE id = ?').get(id);
+    if (!actual) throw new Error('Impuesto no encontrado');
+
+    // Si la tarifa cambia, se cierra el tramo de vigencia anterior en el historial ANTES de
+    // sobreescribir impuestos.porcentaje, para poder reconstruir qué tasa regía en fechas
+    // pasadas sin alterar el resultado de asientos ya generados con la tasa anterior.
+    if (Number(actual.porcentaje) !== Number(porcentaje)) {
+      const ayer = new Date(Date.now() - 86400000).toLocaleDateString('en-CA');
+      const hoy = new Date().toLocaleDateString('en-CA');
+
+      this.db.prepare(`
+        INSERT INTO impuesto_historial_porcentaje (impuesto_id, porcentaje, fecha_desde, fecha_hasta)
+        VALUES (?, ?, ?, ?)
+      `).run(id, actual.porcentaje, actual.fecha_vigencia_desde, ayer);
+
+      this.db.prepare(`
+        UPDATE impuestos
+        SET nombre = ?, tipo = ?, porcentaje = ?, cuenta_id = ?, lado_ajuste = ?,
+            base_campo = ?, fecha_vigencia_desde = ?, fecha_actualizacion = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(nombre, tipo, porcentaje, cuentaId, ladoAjuste, baseCampo, hoy, id);
+    } else {
+      this.db.prepare(`
+        UPDATE impuestos
+        SET nombre = ?, tipo = ?, porcentaje = ?, cuenta_id = ?, lado_ajuste = ?,
+            base_campo = ?, fecha_actualizacion = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(nombre, tipo, porcentaje, cuentaId, ladoAjuste, baseCampo, id);
+    }
+  }
+
+  // Porcentaje que regía para este impuesto en una fecha dada. Si la fecha es igual o posterior
+  // a la última vigencia registrada, se usa la tarifa ACTUAL; si es anterior, se busca en el
+  // historial de cambios. Si no hay ningún tramo histórico que cubra esa fecha (p. ej. el
+  // impuesto se creó después), se usa la tarifa actual como mejor aproximación disponible.
+  getPorcentajeVigente(impuestoId, fechaISO) {
+    const actual = this.db.prepare('SELECT porcentaje, fecha_vigencia_desde FROM impuestos WHERE id = ?').get(impuestoId);
+    if (!actual) return null;
+    if (fechaISO >= actual.fecha_vigencia_desde) return actual.porcentaje;
+
+    const historico = this.db.prepare(`
+      SELECT porcentaje FROM impuesto_historial_porcentaje
+      WHERE impuesto_id = ? AND fecha_desde <= ? AND fecha_hasta >= ?
+      ORDER BY fecha_desde DESC LIMIT 1
+    `).get(impuestoId, fechaISO, fechaISO);
+    return historico ? historico.porcentaje : actual.porcentaje;
   }
 
   toggleActivo(id) {

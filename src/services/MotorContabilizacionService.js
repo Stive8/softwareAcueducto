@@ -212,8 +212,13 @@ class MotorContabilizacionService {
   // para que la base se ajuste antes de calcular las retenciones sobre el valor neto.
   _aplicarImpuestos(lineas, impuestos, contexto) {
     for (const imp of impuestos) {
-      const base     = Number(contexto[imp.base_campo] || 0);
-      const montoImp = Math.round(base * imp.porcentaje / 100);
+      const base = Number(contexto[imp.base_campo] || 0);
+      // Usa la tasa vigente en la FECHA DEL DOCUMENTO, no la tasa actual del impuesto: así, un
+      // documento retroactivo o una re-contabilización de un documento antiguo no cambian de
+      // resultado si la tarifa se actualizó después — hallazgo Alto A-2 de la auditoría de
+      // Contabilidad (2026-07-03).
+      const porcentajeVigente = this.impuestoRepository.getPorcentajeVigente(imp.id, contexto.fecha);
+      const montoImp = Math.round(base * porcentajeVigente / 100);
       if (montoImp === 0) continue;
 
       if (imp.lado_ajuste === 'Debito') {
