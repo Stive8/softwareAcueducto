@@ -995,6 +995,8 @@ git commit -m "fix(alto): restringir la reversion directa de asientos a solo tip
 
 ## Task 6: [Alto A-9] Verificación de conciliación entre el libro simple y la doble partida
 
+> **Corrección post-revisión (2026-07-03):** la primera versión de este task nombraba el canal IPC `asientos:verificarConciliacion`. `main.js` clasifica un canal como solo-lectura (accesible al rol Consulta) únicamente si su verbo empieza por uno de `PREFIJOS_LECTURA = ['get','find','simular','tiene','imprimir','exportar','generar']` — `verificarConciliacion` no matchea ninguno, así que quedaba clasificado como escritura y el rol Consulta era rechazado, exactamente lo contrario de lo que pedía esta misma sección ("solo lectura, cualquier rol autenticado"). Se corrige renombrando el canal IPC y el método expuesto en `preload.js` a `asientos:getConciliacionCajaBanco` (el método del servicio, `verificarConciliacionCajaBanco()`, no cambia — la clasificación por prefijo solo mira el nombre del canal IPC, no el del método interno).
+
 **Files:**
 - Modify: `src/repositories/AsientoContableRepository.js`
 - Modify: `src/services/AsientoContableService.js`
@@ -1004,7 +1006,7 @@ git commit -m "fix(alto): restringir la reversion directa de asientos a solo tip
 
 **Interfaces:**
 - Produces: `AsientoContableRepository.getSaldoConSubcuentas(cuentaId): number`, `AsientoContableService.verificarConciliacionCajaBanco(): Array<{cuenta, saldoLedgerSimple, saldoDoblePartida, diferencia, conciliado}>`.
-- Produces: canal IPC `asientos:verificarConciliacion` (solo lectura, cualquier rol autenticado — es información de diagnóstico, no un dato operativo sensible).
+- Produces: canal IPC `asientos:getConciliacionCajaBanco` (solo lectura, cualquier rol autenticado — es información de diagnóstico, no un dato operativo sensible; el nombre empieza por `get` a propósito para que `main.js` lo clasifique como lectura).
 
 - [ ] **Step 1: Escribir el test que falla**
 
@@ -1163,7 +1165,7 @@ Expected: `# pass 13`, `# fail 0`.
 En `main.js`, buscar el bloque de handlers de `asientos:getBalancePrueba` (línea actual 904-909) y añadir justo después:
 
 ```js
-  envolverHandle('asientos:verificarConciliacion', async () => {
+  envolverHandle('asientos:getConciliacionCajaBanco', async () => {
     try {
       return { success: true, data: asientoContableService.verificarConciliacionCajaBanco() };
     } catch (error) {
@@ -1175,14 +1177,14 @@ En `main.js`, buscar el bloque de handlers de `asientos:getBalancePrueba` (líne
 En `preload.js`, dentro del bloque `asientos: { ... }` (líneas 147-156), añadir:
 
 ```js
-    verificarConciliacion: () => ipcRenderer.invoke('asientos:verificarConciliacion'),
+    getConciliacionCajaBanco: () => ipcRenderer.invoke('asientos:getConciliacionCajaBanco'),
 ```
 
 - [ ] **Step 7: Verificación manual del canal IPC**
 
-Run: `npm start`, iniciar sesión, abrir la consola de DevTools (`--dev`) y ejecutar en la consola del renderer:
+Run: `npm start`, iniciar sesión (probar con un usuario de rol Consulta además de Administrador, para confirmar que el canal ya no lo rechaza), abrir la consola de DevTools (`--dev`) y ejecutar en la consola del renderer:
 ```js
-await window.api.asientos.verificarConciliacion()
+await window.api.asientos.getConciliacionCajaBanco()
 ```
 Expected: `{ success: true, data: [ { cuenta: 'Caja', saldoLedgerSimple: ..., saldoDoblePartida: ..., diferencia: 0, conciliado: true }, { cuenta: 'Banco', ... conciliado: true } ] }` — sobre la base de datos real, después de aplicar la migración 031 de Task 2, ambas cuentas deben quedar conciliadas.
 
