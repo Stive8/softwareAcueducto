@@ -382,22 +382,6 @@ class AsientoContableService {
     const asiento = this.repository.findById(asientoId);
     if (!asiento) throw new Error('Asiento no encontrado');
     if (asiento.estado === 'Anulado') throw new Error('Este asiento ya fue revertido');
-    // Solo las notas contables manuales se revierten directamente desde aquí. Un asiento
-    // generado automáticamente (Gasto/Recibo/Movimiento) o uno que ya es en sí mismo una
-    // reversión debe deshacerse desde su propio módulo (anular el gasto/recibo/traslado), que
-    // coordina correctamente TANTO la doble partida como el libro simple `movimientos` y el
-    // estado del documento origen. Revertir aquí directamente un asiento automático solo
-    // actualizaba la doble partida, dejando el "Saldo en Caja/Banco" del Dashboard sin revertir
-    // y el documento origen con estado "Activo" pese a que su único asiento quedaba "Anulado"
-    // (hallazgo Alto A-8 de la auditoría de Contabilidad, 2026-07-03).
-    if (asiento.tipo_origen !== 'Manual') {
-      const nombreModulo = { Gasto: 'Gastos', Recibo: 'Recibos', Movimiento: 'Caja', Reversion: null }[asiento.tipo_origen];
-      throw new Error(
-        nombreModulo
-          ? `Este asiento se generó automáticamente y debe anularse desde el módulo de ${nombreModulo}, no revertirse aquí directamente.`
-          : `Un asiento de Reversión no se puede revertir directamente; si necesita deshacer su efecto, anule el documento original.`
-      );
-    }
     if (!motivo || !motivo.trim()) throw new Error('Debe indicar el motivo de la reversión');
 
     return this.repository.transaccion(() => {
@@ -438,6 +422,31 @@ class AsientoContableService {
 
       return reversionId;
     });
+  }
+
+  // Punto de entrada directo (usado por la pantalla de Asientos / canal IPC asientos:revertir):
+  // a diferencia de revertir(), SOLO acepta revertir notas contables manuales. Un asiento
+  // generado automáticamente (Gasto/Recibo/Movimiento) o uno que ya es en sí mismo una reversión
+  // debe deshacerse desde su propio módulo (anular el gasto/recibo/traslado, que internamente
+  // llama a revertir() vía revertirPorReferencia() y sí coordina correctamente TANTO la doble
+  // partida como el libro simple `movimientos` y el estado del documento origen). Revertir aquí
+  // directamente un asiento automático solo actualizaba la doble partida, dejando el "Saldo en
+  // Caja/Banco" del Dashboard sin revertir y el documento origen con estado "Activo" pese a que
+  // su único asiento quedaba "Anulado" (hallazgo Alto A-8 de la auditoría de Contabilidad,
+  // 2026-07-03). La restricción vive aquí y NO en revertir() para no bloquear el uso interno de
+  // revertirPorReferencia() que GastoService.anular()/ReciboService.anular() sí necesitan.
+  revertirManual(asientoId, motivo, usuarioId = null) {
+    const asiento = this.repository.findById(asientoId);
+    if (!asiento) throw new Error('Asiento no encontrado');
+    if (asiento.tipo_origen !== 'Manual') {
+      const nombreModulo = { Gasto: 'Gastos', Recibo: 'Recibos', Movimiento: 'Caja', Reversion: null }[asiento.tipo_origen];
+      throw new Error(
+        nombreModulo
+          ? `Este asiento se generó automáticamente y debe anularse desde el módulo de ${nombreModulo}, no revertirse aquí directamente.`
+          : `Un asiento de Reversión no se puede revertir directamente; si necesita deshacer su efecto, anule el documento original.`
+      );
+    }
+    return this.revertir(asientoId, motivo, usuarioId);
   }
 }
 

@@ -886,7 +886,7 @@ function setupIpcHandlers() {
 
   envolverHandle('asientos:revertir', async (event, id, motivo) => {
     try {
-      const reversionId = asientoContableService.revertir(id, motivo, sesionActual.id);
+      const reversionId = asientoContableService.revertirManual(id, motivo, sesionActual.id);
       return { success: true, data: { id: reversionId } };
     } catch (error) {
       return { success: false, error: error.message };
