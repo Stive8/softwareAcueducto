@@ -2058,7 +2058,7 @@ Run: `npm start`, ir a Configuración, confirmar que aparece el nuevo campo (si 
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/database/migrations/033_periodo_bloqueo_anterior.sql src/services/ConfiguracionService.js src/services/PeriodoContableService.js src/services/AsientoContableService.js src/services/GastoService.js src/services/CajaMenorService.js src/services/PeriodoContableService.bloqueo.test.js
+git add src/database/migrations/033_periodo_bloqueo_anterior.sql src/services/ConfiguracionService.js src/services/PeriodoContableService.js src/services/AsientoContableService.js src/services/GastoService.js src/services/CajaMenorService.js src/services/PagoService.js main.js src/services/PeriodoContableService.bloqueo.test.js
 git commit -m "fix(alto): permitir bloquear contabilizacion retroactiva mas alla de una fecha limite"
 ```
 
