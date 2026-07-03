@@ -151,7 +151,7 @@ contextBridge.exposeInMainWorld('api', {
     revertir: (id, motivo) => ipcRenderer.invoke('asientos:revertir', id, motivo),
     getLibroMayor: (cuentaContableId, fechaDesde, fechaHasta) => ipcRenderer.invoke('asientos:getLibroMayor', cuentaContableId, fechaDesde, fechaHasta),
     getBalancePrueba: (fechaDesde, fechaHasta) => ipcRenderer.invoke('asientos:getBalancePrueba', fechaDesde, fechaHasta),
-    verificarConciliacion: () => ipcRenderer.invoke('asientos:verificarConciliacion'),
+    getConciliacionCajaBanco: () => ipcRenderer.invoke('asientos:getConciliacionCajaBanco'),
     imprimir: (id) => ipcRenderer.invoke('asientos:imprimir', id),
     exportarPDF: (id) => ipcRenderer.invoke('asientos:exportarPDF', id)
   },

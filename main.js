@@ -909,7 +909,7 @@ function setupIpcHandlers() {
     }
   });
 
-  envolverHandle('asientos:verificarConciliacion', async () => {
+  envolverHandle('asientos:getConciliacionCajaBanco', async () => {
     try {
       return { success: true, data: asientoContableService.verificarConciliacionCajaBanco() };
     } catch (error) {
