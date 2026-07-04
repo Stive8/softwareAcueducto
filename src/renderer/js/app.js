@@ -263,6 +263,34 @@ const App = {
     this.elementoConFocoPrevio = null;
   },
 
+  // Evita que un formulario financiero se envíe dos veces (doble clic, doble Enter, o un
+  // segundo clic mientras la primera petición IPC todavía no responde): deshabilita el botón de
+  // submit apenas se dispara el evento, y lo restaura solo si el formulario sigue en pantalla al
+  // terminar (si fn() cierra el modal con éxito, el botón ya no existe y no hay nada que
+  // restaurar). fn recibe el evento con preventDefault() ya aplicado.
+  //
+  // Complementa —no sustituye— la deduplicación por opId del lado del servidor (ver main.js,
+  // envolverHandle): esto es la primera línea de defensa (evita la petición duplicada por
+  // completo), y el opId es la segunda (si igual llegaran dos peticiones, el servidor las
+  // reduce a una sola). Hallazgo Crítico C-2 de la auditoría de Contabilidad (2026-07-03).
+  protegerEnvioDoble(form, fn) {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const boton = form.querySelector('button[type="submit"]');
+      if (boton && boton.disabled) return; // ya hay un envío en curso
+      const textoOriginal = boton ? boton.textContent : null;
+      if (boton) boton.disabled = true;
+      try {
+        await fn(e);
+      } finally {
+        if (boton && document.body.contains(boton)) {
+          boton.disabled = false;
+          boton.textContent = textoOriginal;
+        }
+      }
+    });
+  },
+
   // Notificación no bloqueante. Reemplaza a alert(): los diálogos nativos de Electron
   // en Windows dejan el foco del teclado roto en el siguiente campo de texto que se
   // edite, hasta que la ventana pierde y recupera el foco (alt-tab). Esta notificación

@@ -547,10 +547,7 @@ const Gastos = {
       });
     });
 
-    document.getElementById('gastoForm').addEventListener('submit', (e) => {
-      e.preventDefault();
-      this.saveGasto();
-    });
+    App.protegerEnvioDoble(document.getElementById('gastoForm'), () => this.saveGasto());
   },
 
   async saveGasto() {
@@ -564,7 +561,8 @@ const Gastos = {
       valor: App.parseMoneyValue(document.getElementById('valor').value),
       metodoPago: document.getElementById('metodo_pago').value,
       cajaEfectivo: cajaEfectivoEl ? cajaEfectivoEl.value : 'General',
-      observaciones: document.getElementById('observaciones').value.trim()
+      observaciones: document.getElementById('observaciones').value.trim(),
+      opId: crypto.randomUUID()
     };
 
     try {

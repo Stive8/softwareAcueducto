@@ -1105,9 +1105,7 @@ const Contabilidad = {
 
     document.getElementById('btnAgregarLinea').addEventListener('click', () => this.agregarLineaAsiento());
 
-    document.getElementById('asientoManualForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
+    App.protegerEnvioDoble(document.getElementById('asientoManualForm'), async () => {
       const lineas = Array.from(document.querySelectorAll('#lineasAsientoBody tr')).map(fila => ({
         cuentaContableId: parseInt(fila.querySelector('.linea-cuenta').value, 10),
         debito: App.parseMoneyValue(fila.querySelector('.linea-debito').value),
@@ -1121,7 +1119,8 @@ const Contabilidad = {
           fecha: document.getElementById('am_fecha').value,
           tipoComprobante: document.getElementById('am_tipo_comprobante').value,
           concepto: document.getElementById('am_concepto').value.trim(),
-          lineas
+          lineas,
+          opId: crypto.randomUUID()
         });
 
         if (response.success) {

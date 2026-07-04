@@ -201,15 +201,13 @@ const Caja = {
 
     App.openModal(content);
 
-    document.getElementById('reembolsoCajaMenorForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
+    App.protegerEnvioDoble(document.getElementById('reembolsoCajaMenorForm'), async () => {
       const fecha = document.getElementById('fecha_reembolso').value;
       const observaciones = document.getElementById('observaciones_reembolso').value.trim();
       const errorDiv = document.getElementById('formError');
 
       try {
-        const response = await window.api.cajaMenor.reembolsar({ fecha, observaciones });
+        const response = await window.api.cajaMenor.reembolsar({ fecha, observaciones, opId: crypto.randomUUID() });
 
         if (response.success) {
           App.closeModal();
@@ -368,16 +366,14 @@ const Caja = {
     App.openModal(content);
     App.attachMoneyInput(document.getElementById('monto_consignacion'));
 
-    document.getElementById('consignacionForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
+    App.protegerEnvioDoble(document.getElementById('consignacionForm'), async () => {
       const monto = App.parseMoneyValue(document.getElementById('monto_consignacion').value);
       const fecha = document.getElementById('fecha_consignacion').value;
       const observaciones = document.getElementById('observaciones_consignacion').value.trim();
       const errorDiv = document.getElementById('formError');
 
       try {
-        const response = await window.api.caja.registrarConsignacion({ monto, fecha, observaciones });
+        const response = await window.api.caja.registrarConsignacion({ monto, fecha, observaciones, opId: crypto.randomUUID() });
 
         if (response.success) {
           App.closeModal();
