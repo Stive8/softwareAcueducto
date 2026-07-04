@@ -2484,11 +2484,626 @@ git commit -m "fix(critico): proteger formularios financieros contra doble envio
 
 ---
 
+## Task 15: [Crítico C-2, complemento] Completar la protección contra doble envío: quinto formulario y `opId` estable por apertura
+
+> **Añadido tras la revisión final de todo el branch.** El reviewer final encontró dos huecos reales
+> en el cierre del hallazgo C-2:
+>
+> 1. Task 13 ya incluía `pagos:registrarPagoSostenimiento` en `CANALES_IDEMPOTENTES` (`main.js`),
+>    pero Task 14 solo protegió 4 de los 5 formularios — el de Aporte de Sostenimiento
+>    (`pagos.js`) quedó con un listener crudo y sin `opId`, así que un doble clic ahí sigue
+>    creando dos pagos/recibos duplicados (una instancia real y reproducible del propio hallazgo
+>    Crítico que este branch existe para cerrar).
+> 2. En los 4 formularios que Task 14 sí protegió, el `opId` se genera DENTRO del envío (en el
+>    momento del submit), no al ABRIR el formulario como dice el propio comentario de Task 13 en
+>    `main.js` ("generado al abrir el formulario"). Como `protegerEnvioDoble` ya bloquea el
+>    segundo clic deshabilitando el botón, solo llega a enviarse UNA petición por apertura de
+>    formulario — así que el `opId` nunca se repite y la deduplicación del servidor (Task 13)
+>    queda inerte. El escenario real que debía cubrir (la respuesta del primer envío se
+>    pierde/tarda, el botón se reactiva, y el usuario reintenta manualmente) sigue generando un
+>    documento duplicado, porque el reintento manual genera un `opId` nuevo en vez de reutilizar
+>    el de la operación original.
+>
+> Este task corrige ambos huecos. No toca `main.js` (el canal ya estaba listo desde Task 13).
+
+**Files:**
+- Modify: `src/renderer/js/pagos.js`
+- Modify: `src/renderer/js/contabilidad.js`
+- Modify: `src/renderer/js/gastos.js`
+- Modify: `src/renderer/js/caja.js`
+
+**Precondición:** Tasks 13 y 14 ya mergeados.
+
+Igual que Task 14, este task es de interfaz (generar y reutilizar un id, deshabilitar un botón)
+y no tiene lógica de negocio verificable con `node:test` (no hay DOM en el runner de Node). Se
+verifica manualmente, igual que en Task 14.
+
+- [ ] **Step 1: `pagos.js` — proteger el formulario de Aporte de Sostenimiento**
+
+Reemplazar `setupRegistrarPagoModal` completo (líneas actuales 569-582):
+
+```js
+  setupRegistrarPagoModal(cuentaId, conexionPendiente) {
+    if (conexionPendiente) {
+      App.attachMoneyInput(document.getElementById('abono_conexion'));
+    }
+
+    document.getElementById('btnSimular').addEventListener('click', async () => {
+      await this.simularPago(cuentaId);
+    });
+
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('sostenimientoForm'), () => this.registrarPago(cuentaId, conexionPendiente, opId));
+  },
+```
+
+Modificar `registrarPago` (líneas actuales 617-647) para aceptar y enviar `opId`:
+
+```js
+  async registrarPago(cuentaId, conexionPendiente, opId) {
+    const mesInicio = parseInt(document.getElementById('mes_inicio').value, 10);
+    const anioInicio = parseInt(document.getElementById('anio_inicio').value, 10);
+    const cantidadMeses = parseInt(document.getElementById('cantidad_meses').value, 10);
+    const fechaPago = document.getElementById('fecha_pago_sost').value;
+    const metodoPago = document.getElementById('metodo_pago_sost').value;
+    const observaciones = document.getElementById('observaciones_sost').value.trim();
+    const errorDiv = document.getElementById('formError');
+
+    const abonoConexionInput = document.getElementById('abono_conexion');
+    const abonoConexion = abonoConexionInput ? App.parseMoneyValue(abonoConexionInput.value) : 0;
+
+    try {
+      const response = await window.api.pagos.registrarPagoSostenimiento({
+        cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones,
+        nuevoPuntoId: abonoConexion > 0 && conexionPendiente ? conexionPendiente.id : null,
+        abonoConexion,
+        opId
+      });
+
+      if (response.success) {
+        App.closeModal();
+        this.loadCuentas();
+        App.toast(`Aporte registrado con éxito. Recibo No. ${response.data.numeroRecibo}`);
+      } else {
+        errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      errorDiv.innerHTML = `<div class="error-message">Error al registrar el aporte</div>`;
+    }
+  },
+```
+
+- [ ] **Step 2: `contabilidad.js` — `opId` estable en el Asiento Manual**
+
+Reemplazar el bloque que empieza en `App.protegerEnvioDoble(document.getElementById('asientoManualForm')...` (líneas actuales 1108-1137) por:
+
+```js
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('asientoManualForm'), async () => {
+      const lineas = Array.from(document.querySelectorAll('#lineasAsientoBody tr')).map(fila => ({
+        cuentaContableId: parseInt(fila.querySelector('.linea-cuenta').value, 10),
+        debito: App.parseMoneyValue(fila.querySelector('.linea-debito').value),
+        credito: App.parseMoneyValue(fila.querySelector('.linea-credito').value),
+        terceroIdentificacion: fila.querySelector('.linea-tercero-id').value.trim() || null,
+        terceroNombre: fila.querySelector('.linea-tercero-nombre').value.trim() || null
+      }));
+
+      try {
+        const response = await window.api.asientos.crearManual({
+          fecha: document.getElementById('am_fecha').value,
+          tipoComprobante: document.getElementById('am_tipo_comprobante').value,
+          concepto: document.getElementById('am_concepto').value.trim(),
+          lineas,
+          opId
+        });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadListaAsientos();
+          App.toast('Asiento manual creado con éxito');
+        } else {
+          document.getElementById('formError').innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        document.getElementById('formError').innerHTML = '<div class="error-message">Error al guardar el asiento</div>';
+      }
+    });
+```
+
+- [ ] **Step 3: `gastos.js` — `opId` estable en el Gasto**
+
+`saveGasto()` es un método separado de la función que abre el modal (`showFormModal`), así que el
+`opId` se guarda como propiedad de instancia para que sobreviva entre ambas. Reemplazar la línea
+`App.protegerEnvioDoble(document.getElementById('gastoForm'), () => this.saveGasto());` (línea
+actual 550) por:
+
+```js
+    this.opIdActual = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('gastoForm'), () => this.saveGasto());
+```
+
+Y en `saveGasto` (líneas actuales 553-566), reemplazar `opId: crypto.randomUUID()` por
+`opId: this.opIdActual`:
+
+```js
+  async saveGasto() {
+    const cajaEfectivoEl = document.getElementById('caja_efectivo');
+    const formData = {
+      fechaGasto: document.getElementById('fecha_gasto').value,
+      concepto: document.getElementById('concepto').value.trim(),
+      tipoGasto: document.getElementById('tipo_gasto').value.trim(),
+      tipoOperacion: document.getElementById('tipo_operacion').value,
+      terceroId: parseInt(document.getElementById('tercero_id').value, 10),
+      valor: App.parseMoneyValue(document.getElementById('valor').value),
+      metodoPago: document.getElementById('metodo_pago').value,
+      cajaEfectivo: cajaEfectivoEl ? cajaEfectivoEl.value : 'General',
+      observaciones: document.getElementById('observaciones').value.trim(),
+      opId: this.opIdActual
+    };
+
+    try {
+      const response = await window.api.gastos.create(formData);
+
+      if (response.success) {
+        App.closeModal();
+        this.loadStats();
+        this.loadGastos();
+        App.toast('Gasto registrado con éxito');
+      } else {
+        const errorDiv = document.getElementById('formError');
+        errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+      }
+    } catch (error) {
+      console.error('Error:', error);
+      const errorDiv = document.getElementById('formError');
+      errorDiv.innerHTML = `<div class="error-message">Error al registrar el gasto</div>`;
+    }
+  },
+```
+
+- [ ] **Step 4: `caja.js` — `opId` estable en Consignación y en Reembolso de Caja Menor**
+
+Para el reembolso (líneas actuales 202-223), insertar `const opId = crypto.randomUUID();` entre
+`App.openModal(content);` y `App.protegerEnvioDoble(...)`, y usar `opId` en vez de
+`crypto.randomUUID()` dentro del payload:
+
+```js
+    App.openModal(content);
+
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('reembolsoCajaMenorForm'), async () => {
+      const fecha = document.getElementById('fecha_reembolso').value;
+      const observaciones = document.getElementById('observaciones_reembolso').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.cajaMenor.reembolsar({ fecha, observaciones, opId });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadCajaMenor();
+          App.toast('Reembolso de Caja Menor registrado con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar el reembolso</div>`;
+      }
+    });
+```
+
+Para la consignación (líneas actuales 366-390), el mismo patrón:
+
+```js
+    App.openModal(content);
+    App.attachMoneyInput(document.getElementById('monto_consignacion'));
+
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('consignacionForm'), async () => {
+      const monto = App.parseMoneyValue(document.getElementById('monto_consignacion').value);
+      const fecha = document.getElementById('fecha_consignacion').value;
+      const observaciones = document.getElementById('observaciones_consignacion').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.caja.registrarConsignacion({ monto, fecha, observaciones, opId });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadSaldos();
+          this.loadMovimientos();
+          App.toast('Consignación registrada con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar la consignación</div>`;
+      }
+    });
+```
+
+- [ ] **Step 5: Verificación manual**
+
+Run: `npm start`, iniciar sesión. Repetir la prueba de doble clic del Task 14 (Step 5) en los 4
+formularios ya protegidos (deben seguir comportándose igual) y AHORA TAMBIÉN en el formulario de
+Aporte de Sostenimiento (Cuentas → una cuenta con conexión activa → Registrar Aporte): doble clic
+rápido sobre "Registrar Aporte y Generar Recibo" debe crear **un solo** pago/recibo, con el botón
+visualmente deshabilitado tras el primer clic.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add src/renderer/js/pagos.js src/renderer/js/contabilidad.js src/renderer/js/gastos.js src/renderer/js/caja.js
+git commit -m "fix(critico): proteger el formulario de aportes y estabilizar opId por apertura de formulario"
+```
+
+---
+
+## Task 16: [Alto A-9, complemento] Asiento de apertura para el saldo inicial configurado de Caja/Banco
+
+> **Añadido tras la revisión final de todo el branch.** El reviewer final encontró que
+> `verificarConciliacionCajaBanco()` (Task 6) compara el saldo del libro simple —que SÍ incluye
+> `saldo_caja_inicial`/`saldo_banco_inicial` de Configuración, ver `CajaRepository.getSaldo()`—
+> contra el saldo en partida doble, que no tiene ningún asiento que registre ese saldo inicial.
+> Cualquier organización con un saldo inicial distinto de cero vería `conciliado: false`
+> permanentemente, con una `diferencia` igual al saldo inicial configurado: un falso positivo
+> constante que resta confianza al diagnóstico de A-9. El usuario decidió resolverlo sembrando un
+> asiento de apertura real en la doble partida (Debita Caja/Banco, Acredita `3105` "Capital o
+> Patrimonio Inicial") cada vez que se configura o cambia el saldo inicial, en vez de excluir ese
+> saldo de la comparación o solo documentar la limitación.
+
+**Files:**
+- Modify: `src/services/AsientoContableService.js`
+- Modify: `src/services/ConfiguracionService.js`
+- Modify: `main.js`
+- Test: `src/services/ConfiguracionService.aperturaSaldoInicial.test.js`
+
+**Interfaces:**
+- Produces: `AsientoContableService.sincronizarAperturaSaldoInicial(claveCuentaAutomatica, monto, usuarioId)` — crea/reemplaza el asiento de apertura de `'CAJA'` o `'BANCO'`.
+- Modifica: `ConfiguracionService` constructor ahora acepta un segundo parámetro opcional `asientoContableService` (mismo patrón ya usado por `PeriodoContableService` en Task 11: si se omite, el comportamiento es exactamente el de antes de este task, sin sincronizar ningún asiento).
+- Modifica: `ConfiguracionService.actualizar(datos, usuarioId)` ahora acepta un segundo parámetro opcional `usuarioId`.
+
+**Contexto de diseño (para quien implemente):** `CajaRepository.getSaldo()` sigue calculando el
+saldo simple exactamente igual que antes de este task (config + movimientos de la tabla
+`movimientos`) — no se toca. Lo que se agrega es la contrapartida en la doble partida.
+El asiento de apertura se crea con `sincronizarLedgerSimple: false` a propósito: si sincronizara,
+`sincronizarLineaConCajaBanco` insertaría una fila en `movimientos` con el mismo monto, y como
+`CajaRepository.getSaldo()` YA suma `saldo_caja_inicial`/`saldo_banco_inicial` directamente desde
+`configuracion`, el saldo simple quedaría contado DOS VECES. Por la misma razón, la reversión de
+este asiento (cuando el saldo inicial configurado cambia) tampoco debe sincronizarse con el libro
+simple — igual que ya ocurre con el Reembolso de Caja Menor (ver el comentario existente en
+`revertir()`), así que este task generaliza esa excepción en vez de duplicarla.
+
+- [ ] **Step 1: Escribir el test que falla**
+
+```js
+// src/services/ConfiguracionService.aperturaSaldoInicial.test.js
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const { crearDbTemporal, cerrarDbTemporal } = require('../testUtils/dbTemporal');
+const ConfiguracionService = require('./ConfiguracionService');
+const AsientoContableService = require('./AsientoContableService');
+
+test('actualizar() siembra un asiento de apertura cuando se configura un saldo inicial de Caja distinto de cero', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+    const service = new ConfiguracionService(ctx.dbService, asientoContableService);
+
+    service.actualizar({ saldo_caja_inicial: 500000 }, 1);
+
+    const conciliacion = asientoContableService.verificarConciliacionCajaBanco();
+    const caja = conciliacion.find(f => f.cuenta === 'Caja');
+    assert.equal(caja.saldoLedgerSimple, 500000, 'El libro simple debe reflejar el saldo inicial configurado');
+    assert.equal(caja.saldoDoblePartida, 500000, 'La doble partida debe tener ahora la misma contrapartida');
+    assert.equal(caja.conciliado, true, 'Ya no debe reportar una diferencia falsa por el saldo inicial');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('actualizar() reemplaza (revierte el anterior y crea uno nuevo) si el saldo inicial de Banco cambia otra vez', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+    const service = new ConfiguracionService(ctx.dbService, asientoContableService);
+
+    service.actualizar({ saldo_banco_inicial: 200000 }, 1);
+    service.actualizar({ saldo_banco_inicial: 750000 }, 1);
+
+    const conciliacion = asientoContableService.verificarConciliacionCajaBanco();
+    const banco = conciliacion.find(f => f.cuenta === 'Banco');
+    assert.equal(banco.saldoLedgerSimple, 750000);
+    assert.equal(banco.saldoDoblePartida, 750000, 'Debe reflejar el valor NUEVO, no la suma de ambos');
+    assert.equal(banco.conciliado, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('actualizar() no crea ningún asiento si saldo_caja_inicial no viene en los datos, o si es 0', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+    const service = new ConfiguracionService(ctx.dbService, asientoContableService);
+
+    service.actualizar({ nombre_asociacion: 'Acueducto de Prueba' }, 1);
+    service.actualizar({ saldo_caja_inicial: 0 }, 1);
+
+    const conciliacion = asientoContableService.verificarConciliacionCajaBanco();
+    for (const fila of conciliacion) {
+      assert.equal(fila.saldoDoblePartida, 0);
+      assert.equal(fila.conciliado, true);
+    }
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('actualizar() sin asientoContableService inyectado se comporta exactamente igual que antes de este task (retrocompatible)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const service = new ConfiguracionService(ctx.dbService); // sin segundo argumento
+    assert.doesNotThrow(() => service.actualizar({ saldo_caja_inicial: 999000 }, 1));
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+```
+
+- [ ] **Step 2: Ejecutar y verificar que falla**
+
+Run: `npm test`
+Expected: FAIL — `ConfiguracionService` constructor todavía no acepta un segundo argumento y
+`actualizar()` no sincroniza ningún asiento, así que la primera prueba falla en el `assert.equal`
+de `saldoDoblePartida` (queda en 0, no 500000).
+
+- [ ] **Step 3: Generalizar la excepción de sincronización en `revertir()`**
+
+En `src/services/AsientoContableService.js`, dentro de `revertir()` (líneas actuales 429-467),
+reemplazar la variable `esReversionDeReembolsoCajaMenor` y su comentario por una versión que
+también cubra el nuevo tipo de comprobante:
+
+```js
+      // Si el asiento original era una nota contable manual que afectaba Caja/Banco, su reversión
+      // también debe reflejarse ahí (ver crear()). Si era de Gasto/Recibo/Movimiento, el Service
+      // que pidió la reversión (GastoService.anular, ReciboService.anular) ya crea su propia
+      // contrapartida en `movimientos`, así que no se duplica aquí.
+      //
+      // Excepción: hay notas manuales cuyo efecto en el libro simple NO viene de sincronizarLineaConCajaBanco
+      // sino de otra fuente, así que sincronizar su reversión duplicaría el efecto en vez de neutralizarlo:
+      //   - 'Reembolso Caja Menor': es un traslado interno Caja General <-> Caja Menor que ya se creó
+      //     con sincronizarLedgerSimple=false (ver comentario histórico de este caso más abajo).
+      //   - 'Apertura Saldo Inicial': su contrapartida en el libro simple es el propio valor de
+      //     saldo_caja_inicial/saldo_banco_inicial en `configuracion` (ver CajaRepository.getSaldo()),
+      //     no una fila en `movimientos` — sincronizar la reversión insertaría una fila que no debe existir.
+      const TIPOS_MANUAL_SIN_SINCRONIZAR_EN_REVERSION = ['Reembolso Caja Menor', 'Apertura Saldo Inicial'];
+      const noDebeSincronizarReversion = asiento.tipo_origen === 'Manual' && TIPOS_MANUAL_SIN_SINCRONIZAR_EN_REVERSION.includes(asiento.tipo_comprobante);
+      const reversionId = this.crear({
+        fecha: new Date().toISOString().split('T')[0],
+        concepto: `Reversión: ${asiento.concepto}`,
+        tipoOrigen: 'Reversion',
+        tipoComprobante: asiento.tipo_comprobante,
+        referenciaId: asiento.id,
+        referenciaTipo: 'Asiento',
+        usuarioId,
+        sincronizarLedgerSimple: asiento.tipo_origen === 'Manual' && !noDebeSincronizarReversion,
+        lineas: asiento.lineas.map(l => ({
+          cuentaContableId: l.cuenta_id,
+          debito: l.credito,
+          credito: l.debito,
+          terceroIdentificacion: l.tercero_identificacion,
+          terceroNombre: l.tercero_nombre,
+          terceroId: l.tercero_id || null,
+          propietarioId: l.propietario_id || null
+        }))
+      });
+```
+
+(Solo cambia el nombre de la variable y la lista de tipos que cubre; el resto de `revertir()` queda igual.)
+
+- [ ] **Step 4: Añadir `sincronizarAperturaSaldoInicial` a `AsientoContableService`**
+
+Añadir este método a `src/services/AsientoContableService.js` (por ejemplo, justo antes de
+`crearManual`):
+
+```js
+  // Sincroniza (crea/reemplaza) el asiento de apertura que representa, en la contabilidad de
+  // doble partida, el saldo inicial configurado en Configuración para Caja o Banco. Sin este
+  // asiento, verificarConciliacionCajaBanco() (Task 6 / hallazgo A-9) siempre reportaba una
+  // diferencia igual al saldo inicial, porque el libro simple (`movimientos`, vía
+  // CajaRepository.getSaldo) SÍ lo incluye pero la doble partida no tenía ninguna contrapartida.
+  // sincronizarLedgerSimple se deja en false a propósito (ver comentario en revertir()): el
+  // libro simple ya cuenta este saldo directamente desde `configuracion`, sincronizar aquí lo
+  // duplicaría.
+  sincronizarAperturaSaldoInicial(claveCuentaAutomatica, monto, usuarioId = null) {
+    const referenciaTipo = 'ConfiguracionSaldoInicial';
+    const referenciaId = claveCuentaAutomatica === 'CAJA' ? 1 : 2;
+
+    const asientoPrevio = this.repository.findByReferenciaActiva(referenciaTipo, referenciaId);
+    if (asientoPrevio) {
+      this.revertir(asientoPrevio.id, 'Saldo inicial actualizado desde Configuración', usuarioId);
+    }
+
+    if (!monto || monto <= 0) return null;
+
+    const cuentaId = this.cuentaAutomaticaRepository.getCuentaIdByClave(claveCuentaAutomatica);
+    if (!cuentaId) return null; // cuenta automática no configurada; nada que sincronizar todavía
+
+    const patrimonio = this.planCuentaRepository.findByCodigo('3105');
+    if (!patrimonio) return null; // no debería pasar: '3105' se siembra en la migración 006
+
+    const nombreCuenta = claveCuentaAutomatica === 'CAJA' ? 'Caja' : 'Bancos';
+
+    return this.crear({
+      fecha: new Date().toLocaleDateString('en-CA'),
+      concepto: `Saldo inicial de ${nombreCuenta} (configurado en Configuración)`,
+      tipoOrigen: 'Manual',
+      tipoComprobante: 'Apertura Saldo Inicial',
+      referenciaId,
+      referenciaTipo,
+      usuarioId,
+      sincronizarLedgerSimple: false,
+      lineas: [
+        { cuentaContableId: cuentaId, debito: monto, credito: 0 },
+        { cuentaContableId: patrimonio.id, debito: 0, credito: monto }
+      ]
+    });
+  }
+```
+
+- [ ] **Step 5: Inyectar `AsientoContableService` en `ConfiguracionService`**
+
+En `src/services/ConfiguracionService.js`, modificar el constructor:
+
+```js
+  constructor(dbService, asientoContableService = null) {
+    this.repository = new ConfiguracionRepository(dbService);
+    this.asientoContableService = asientoContableService;
+  }
+```
+
+Y modificar `actualizar(datos)` para que reciba `usuarioId` y sincronice el asiento de apertura
+DESPUÉS de guardar los cambios (para que, si algo en la sincronización fallara, la configuración
+ya haya quedado guardada de forma consistente con lo que el usuario pidió; y para poder comparar
+el valor "antes" contra el "después" antes de sobreescribir):
+
+```js
+  actualizar(datos, usuarioId = null) {
+    if (datos.nombre_asociacion !== undefined && !datos.nombre_asociacion.trim()) {
+      throw new Error('El nombre de la asociación es obligatorio');
+    }
+
+    if (datos.caja_menor_saldo_objetivo !== undefined) {
+      const valor = Number(datos.caja_menor_saldo_objetivo);
+      if (!Number.isFinite(valor) || valor < 0) {
+        throw new Error('El saldo objetivo de Caja Menor debe ser un número mayor o igual a cero');
+      }
+    }
+
+    // El consecutivo de recibos nunca puede retroceder por debajo de un recibo ya emitido,
+    // de lo contrario se generarían números de recibo duplicados.
+    if (datos.consecutivo_recibos !== undefined) {
+      const nuevoConsecutivo = parseInt(datos.consecutivo_recibos, 10);
+      if (!Number.isInteger(nuevoConsecutivo) || nuevoConsecutivo < 1) {
+        throw new Error('El consecutivo de recibos debe ser un número entero mayor a cero');
+      }
+
+      const maxExistente = this.repository.getMaxNumeroRecibo();
+      if (nuevoConsecutivo <= maxExistente) {
+        throw new Error(`El consecutivo debe ser mayor al último recibo ya emitido (No. ${maxExistente})`);
+      }
+    }
+
+    if (datos.periodo_bloqueo_anterior_a !== undefined && datos.periodo_bloqueo_anterior_a !== '') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(datos.periodo_bloqueo_anterior_a)) {
+        throw new Error('La fecha límite de bloqueo debe tener el formato AAAA-MM-DD, o quedar vacía para no restringir');
+      }
+    }
+
+    const actualAntes = this.repository.getAll();
+    const cambiosSaldoInicial = [];
+    if (datos.saldo_caja_inicial !== undefined && Number(datos.saldo_caja_inicial) !== Number(actualAntes.saldo_caja_inicial || 0)) {
+      cambiosSaldoInicial.push({ clave: 'CAJA', monto: Number(datos.saldo_caja_inicial) });
+    }
+    if (datos.saldo_banco_inicial !== undefined && Number(datos.saldo_banco_inicial) !== Number(actualAntes.saldo_banco_inicial || 0)) {
+      cambiosSaldoInicial.push({ clave: 'BANCO', monto: Number(datos.saldo_banco_inicial) });
+    }
+
+    for (const clave of CLAVES_EDITABLES) {
+      if (datos[clave] !== undefined) {
+        this.repository.actualizar(clave, datos[clave]);
+      }
+    }
+
+    if (this.asientoContableService) {
+      for (const cambio of cambiosSaldoInicial) {
+        this.asientoContableService.sincronizarAperturaSaldoInicial(cambio.clave, cambio.monto, usuarioId);
+      }
+    }
+  }
+```
+
+- [ ] **Step 6: Ejecutar y verificar que pasa**
+
+Run: `npm test`
+Expected: todos los tests en verde, incluidos los 4 nuevos de este task.
+
+- [ ] **Step 7: Conectar en `main.js`**
+
+`ConfiguracionService` se instancia ANTES que `AsientoContableService` (línea actual 296 vs 306),
+así que hay que mover esa línea después, y pasarle la instancia. Reemplazar:
+
+```js
+  authService = new AuthService(dbService);
+  configuracionService = new ConfiguracionService(dbService);
+  backupService = new BackupService(dbService);
+```
+
+por:
+
+```js
+  authService = new AuthService(dbService);
+  backupService = new BackupService(dbService);
+```
+
+Y más abajo, reemplazar:
+
+```js
+  asientoContableService = new AsientoContableService(dbService);
+  cajaMenorService = new CajaMenorService(dbService);
+```
+
+por:
+
+```js
+  asientoContableService = new AsientoContableService(dbService);
+  configuracionService = new ConfiguracionService(dbService, asientoContableService);
+  cajaMenorService = new CajaMenorService(dbService);
+```
+
+(Nada entre las líneas 297-306 originales lee `configuracionService`, así que moverla más abajo
+en el mismo bloque síncrono de `app.whenReady().then(...)` es seguro — confírmelo con
+`grep -n "configuracionService" main.js` antes de mover la línea, para descartar cualquier uso
+intermedio que se le haya escapado a este plan.)
+
+Y en el handler `config:actualizar` (línea actual ~1543), pasar `sesionActual.id`:
+
+```js
+  envolverHandle('config:actualizar', async (event, datos) => {
+    try {
+      configuracionService.actualizar(datos, sesionActual.id);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+```
+
+- [ ] **Step 8: Ejecutar toda la suite una vez más**
+
+Run: `npm test`
+Expected: todos los tests en verde (incluida la infraestructura existente; este task no cambia
+ninguna migración ni el conteo de migraciones).
+
+- [ ] **Step 9: Commit**
+
+```bash
+git add src/services/AsientoContableService.js src/services/ConfiguracionService.js main.js src/services/ConfiguracionService.aperturaSaldoInicial.test.js
+git commit -m "fix(alto): sembrar asiento de apertura para el saldo inicial configurado de Caja/Banco"
+```
+
+---
+
 ## Verificación final de todo el plan
 
-Después de completar los 14 tasks:
+Después de completar los 16 tasks:
 
-- [ ] **Run:** `npm test` — Expected: todos los tests en verde (≈23 tests entre Task 0 y Task 11, más las verificaciones manuales de los Tasks 12-14).
+- [ ] **Run:** `npm test` — Expected: todos los tests en verde (≈23 tests entre Task 0 y Task 11, más las verificaciones manuales de los Tasks 12-15, más los nuevos de Task 16).
 - [ ] **Run:** `npm start` — la app debe arrancar, aplicar las migraciones 031/032/033 sobre `data/acueducto.db` la primera vez, y permitir iniciar sesión y navegar por Contabilidad, Gastos y Caja con normalidad.
 - [ ] Repetir la consulta de conciliación del Task 6 (`window.api.asientos.getConciliacionCajaBanco()`) y confirmar `conciliado: true` en Caja y Banco.
 - [ ] Releer el informe de auditoría original (Artifact publicado el 2026-07-03) y tachar mentalmente los 13 hallazgos Crítico/Alto contra lo implementado aquí — ninguno debe quedar sin una línea clara de "esto se corrigió en el Task N".
