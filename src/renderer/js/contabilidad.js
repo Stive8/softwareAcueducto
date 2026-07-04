@@ -1105,6 +1105,7 @@ const Contabilidad = {
 
     document.getElementById('btnAgregarLinea').addEventListener('click', () => this.agregarLineaAsiento());
 
+    const opId = crypto.randomUUID();
     App.protegerEnvioDoble(document.getElementById('asientoManualForm'), async () => {
       const lineas = Array.from(document.querySelectorAll('#lineasAsientoBody tr')).map(fila => ({
         cuentaContableId: parseInt(fila.querySelector('.linea-cuenta').value, 10),
@@ -1120,7 +1121,7 @@ const Contabilidad = {
           tipoComprobante: document.getElementById('am_tipo_comprobante').value,
           concepto: document.getElementById('am_concepto').value.trim(),
           lineas,
-          opId: crypto.randomUUID()
+          opId
         });
 
         if (response.success) {

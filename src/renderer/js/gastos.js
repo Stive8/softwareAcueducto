@@ -547,6 +547,7 @@ const Gastos = {
       });
     });
 
+    this.opIdActual = crypto.randomUUID();
     App.protegerEnvioDoble(document.getElementById('gastoForm'), () => this.saveGasto());
   },
 
@@ -562,7 +563,7 @@ const Gastos = {
       metodoPago: document.getElementById('metodo_pago').value,
       cajaEfectivo: cajaEfectivoEl ? cajaEfectivoEl.value : 'General',
       observaciones: document.getElementById('observaciones').value.trim(),
-      opId: crypto.randomUUID()
+      opId: this.opIdActual
     };
 
     try {

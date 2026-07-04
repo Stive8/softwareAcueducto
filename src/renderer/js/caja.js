@@ -201,13 +201,14 @@ const Caja = {
 
     App.openModal(content);
 
+    const opId = crypto.randomUUID();
     App.protegerEnvioDoble(document.getElementById('reembolsoCajaMenorForm'), async () => {
       const fecha = document.getElementById('fecha_reembolso').value;
       const observaciones = document.getElementById('observaciones_reembolso').value.trim();
       const errorDiv = document.getElementById('formError');
 
       try {
-        const response = await window.api.cajaMenor.reembolsar({ fecha, observaciones, opId: crypto.randomUUID() });
+        const response = await window.api.cajaMenor.reembolsar({ fecha, observaciones, opId });
 
         if (response.success) {
           App.closeModal();
@@ -366,6 +367,7 @@ const Caja = {
     App.openModal(content);
     App.attachMoneyInput(document.getElementById('monto_consignacion'));
 
+    const opId = crypto.randomUUID();
     App.protegerEnvioDoble(document.getElementById('consignacionForm'), async () => {
       const monto = App.parseMoneyValue(document.getElementById('monto_consignacion').value);
       const fecha = document.getElementById('fecha_consignacion').value;
@@ -373,7 +375,7 @@ const Caja = {
       const errorDiv = document.getElementById('formError');
 
       try {
-        const response = await window.api.caja.registrarConsignacion({ monto, fecha, observaciones, opId: crypto.randomUUID() });
+        const response = await window.api.caja.registrarConsignacion({ monto, fecha, observaciones, opId });
 
         if (response.success) {
           App.closeModal();

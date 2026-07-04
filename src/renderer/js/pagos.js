@@ -575,10 +575,8 @@ const Pagos = {
       await this.simularPago(cuentaId);
     });
 
-    document.getElementById('sostenimientoForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      await this.registrarPago(cuentaId, conexionPendiente);
-    });
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('sostenimientoForm'), () => this.registrarPago(cuentaId, conexionPendiente, opId));
   },
 
   async simularPago(cuentaId) {
@@ -614,7 +612,7 @@ const Pagos = {
     }
   },
 
-  async registrarPago(cuentaId, conexionPendiente) {
+  async registrarPago(cuentaId, conexionPendiente, opId) {
     const mesInicio = parseInt(document.getElementById('mes_inicio').value, 10);
     const anioInicio = parseInt(document.getElementById('anio_inicio').value, 10);
     const cantidadMeses = parseInt(document.getElementById('cantidad_meses').value, 10);
@@ -630,7 +628,8 @@ const Pagos = {
       const response = await window.api.pagos.registrarPagoSostenimiento({
         cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones,
         nuevoPuntoId: abonoConexion > 0 && conexionPendiente ? conexionPendiente.id : null,
-        abonoConexion
+        abonoConexion,
+        opId
       });
 
       if (response.success) {
