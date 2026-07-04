@@ -129,6 +129,33 @@ const CANALES_SIN_SESION = new Set([
   'cloudBackup:getEstado', 'cloudBackup:conectar', 'cloudBackup:actualizarDesdeNube'
 ]);
 
+// Canales que crean un documento financiero nuevo: doble clic o un reintento de red podían
+// dispararlos dos veces, produciendo dos gastos/asientos/consignaciones/reembolsos idénticos
+// (hallazgo Crítico C-2 de la auditoría de Contabilidad, 2026-07-03). El frontend envía un
+// `opId` (uuid) generado al abrir el formulario, dentro del propio payload; ver Task 14 para el
+// lado del renderer.
+const CANALES_IDEMPOTENTES = new Set([
+  'asientos:crearManual', 'gastos:create', 'caja:registrarConsignacion',
+  'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento'
+]);
+
+// opId -> Promise, mientras la operación sigue en curso (protege contra dos IPC casi
+// simultáneos, el caso real de un doble clic).
+const operacionesEnCurso = new Map();
+// opId -> { resultado, expira }, solo para operaciones que YA terminaron con éxito. Un TTL
+// corto es suficiente: solo hace falta cubrir la ventana de un doble clic o un reintento
+// inmediato, no reintentos deliberados minutos después (que si fallaron por una validación de
+// negocio, el usuario corrige el formulario y debe poder reenviar con normalidad).
+const TTL_OPERACION_EXITOSA_MS = 30000;
+const operacionesCompletadas = new Map();
+
+function limpiarOperacionesCompletadasExpiradas() {
+  const ahora = Date.now();
+  for (const [opId, entry] of operacionesCompletadas) {
+    if (entry.expira <= ahora) operacionesCompletadas.delete(opId);
+  }
+}
+
 function esCanalDeLectura(canal) {
   const metodo = canal.split(':')[1] || '';
   return PREFIJOS_LECTURA.some(prefijo => metodo.startsWith(prefijo));
@@ -175,7 +202,31 @@ function envolverHandle(canal, fn) {
       return { success: false, error: 'Su rol de Consulta solo permite ver información, no modificarla' };
     }
 
-    const resultado = await fn(event, ...args);
+    let opId = null;
+    if (CANALES_IDEMPOTENTES.has(canal) && args[0] && typeof args[0] === 'object' && args[0].opId) {
+      opId = args[0].opId;
+      delete args[0].opId; // no debe llegar a la capa de servicio
+
+      limpiarOperacionesCompletadasExpiradas();
+
+      const completada = operacionesCompletadas.get(opId);
+      if (completada) return completada.resultado;
+
+      const enCurso = operacionesEnCurso.get(opId);
+      if (enCurso) return enCurso;
+    }
+
+    const promesaResultado = (async () => {
+      const r = await fn(event, ...args);
+      if (opId && r && r.success) {
+        operacionesCompletadas.set(opId, { resultado: r, expira: Date.now() + TTL_OPERACION_EXITOSA_MS });
+      }
+      return r;
+    })();
+
+    if (opId) operacionesEnCurso.set(opId, promesaResultado);
+    const resultado = await promesaResultado;
+    if (opId) operacionesEnCurso.delete(opId);
 
     if (!esLectura && resultado && resultado.success) {
       try {
