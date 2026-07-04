@@ -2490,5 +2490,5 @@ Después de completar los 14 tasks:
 
 - [ ] **Run:** `npm test` — Expected: todos los tests en verde (≈23 tests entre Task 0 y Task 11, más las verificaciones manuales de los Tasks 12-14).
 - [ ] **Run:** `npm start` — la app debe arrancar, aplicar las migraciones 031/032/033 sobre `data/acueducto.db` la primera vez, y permitir iniciar sesión y navegar por Contabilidad, Gastos y Caja con normalidad.
-- [ ] Repetir la consulta de conciliación del Task 6 (`window.api.asientos.verificarConciliacion()`) y confirmar `conciliado: true` en Caja y Banco.
+- [ ] Repetir la consulta de conciliación del Task 6 (`window.api.asientos.getConciliacionCajaBanco()`) y confirmar `conciliado: true` en Caja y Banco.
 - [ ] Releer el informe de auditoría original (Artifact publicado el 2026-07-03) y tachar mentalmente los 13 hallazgos Crítico/Alto contra lo implementado aquí — ninguno debe quedar sin una línea clara de "esto se corrigió en el Task N".
