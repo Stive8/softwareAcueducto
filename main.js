@@ -293,7 +293,6 @@ app.whenReady().then(() => {
   gastoService = new GastoService(dbService);
   cajaService = new CajaService(dbService);
   authService = new AuthService(dbService);
-  configuracionService = new ConfiguracionService(dbService);
   backupService = new BackupService(dbService);
   nuevoPuntoService = new NuevoPuntoService(dbService);
   reporteService = new ReporteService(dbService);
@@ -304,6 +303,7 @@ app.whenReady().then(() => {
   planCuentaService = new PlanCuentaService(dbService);
   mapeoContableService = new MapeoContableService(dbService);
   asientoContableService = new AsientoContableService(dbService);
+  configuracionService = new ConfiguracionService(dbService, asientoContableService);
   cajaMenorService = new CajaMenorService(dbService);
   cuentaAutomaticaService = new CuentaAutomaticaService(new CuentaAutomaticaRepository(dbService), new PlanCuentaRepository(dbService));
   periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService), dbService);
@@ -1542,7 +1542,7 @@ function setupIpcHandlers() {
 
   envolverHandle('config:actualizar', async (event, datos) => {
     try {
-      configuracionService.actualizar(datos);
+      configuracionService.actualizar(datos, sesionActual.id);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };

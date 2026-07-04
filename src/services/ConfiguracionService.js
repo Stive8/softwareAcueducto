@@ -10,8 +10,9 @@ const CLAVES_EDITABLES = [
 ];
 
 class ConfiguracionService {
-  constructor(dbService) {
+  constructor(dbService, asientoContableService = null) {
     this.repository = new ConfiguracionRepository(dbService);
+    this.asientoContableService = asientoContableService;
   }
 
   getAll() {
@@ -21,7 +22,7 @@ class ConfiguracionService {
   // datos no siempre trae el formulario completo (p. ej. la sección de respaldo en la nube solo
   // envía sus propios 2 campos), así que cada validación solo aplica si esa clave en particular
   // viene incluida en esta actualización.
-  actualizar(datos) {
+  actualizar(datos, usuarioId = null) {
     if (datos.nombre_asociacion !== undefined && !datos.nombre_asociacion.trim()) {
       throw new Error('El nombre de la asociación es obligatorio');
     }
@@ -53,9 +54,24 @@ class ConfiguracionService {
       }
     }
 
+    const actualAntes = this.repository.getAll();
+    const cambiosSaldoInicial = [];
+    if (datos.saldo_caja_inicial !== undefined && Number(datos.saldo_caja_inicial) !== Number(actualAntes.saldo_caja_inicial || 0)) {
+      cambiosSaldoInicial.push({ clave: 'CAJA', monto: Number(datos.saldo_caja_inicial) });
+    }
+    if (datos.saldo_banco_inicial !== undefined && Number(datos.saldo_banco_inicial) !== Number(actualAntes.saldo_banco_inicial || 0)) {
+      cambiosSaldoInicial.push({ clave: 'BANCO', monto: Number(datos.saldo_banco_inicial) });
+    }
+
     for (const clave of CLAVES_EDITABLES) {
       if (datos[clave] !== undefined) {
         this.repository.actualizar(clave, datos[clave]);
+      }
+    }
+
+    if (this.asientoContableService) {
+      for (const cambio of cambiosSaldoInicial) {
+        this.asientoContableService.sincronizarAperturaSaldoInicial(cambio.clave, cambio.monto, usuarioId);
       }
     }
   }

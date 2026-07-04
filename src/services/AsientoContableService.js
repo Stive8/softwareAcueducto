@@ -328,6 +328,49 @@ class AsientoContableService {
     };
   }
 
+  // Sincroniza (crea/reemplaza) el asiento de apertura que representa, en la contabilidad de
+  // doble partida, el saldo inicial configurado en Configuración para Caja o Banco. Sin este
+  // asiento, verificarConciliacionCajaBanco() (Task 6 / hallazgo A-9) siempre reportaba una
+  // diferencia igual al saldo inicial, porque el libro simple (`movimientos`, vía
+  // CajaRepository.getSaldo) SÍ lo incluye pero la doble partida no tenía ninguna contrapartida.
+  // sincronizarLedgerSimple se deja en false a propósito (ver comentario en revertir()): el
+  // libro simple ya cuenta este saldo directamente desde `configuracion`, sincronizar aquí lo
+  // duplicaría.
+  sincronizarAperturaSaldoInicial(claveCuentaAutomatica, monto, usuarioId = null) {
+    const referenciaTipo = 'ConfiguracionSaldoInicial';
+    const referenciaId = claveCuentaAutomatica === 'CAJA' ? 1 : 2;
+
+    const asientoPrevio = this.repository.findByReferenciaActiva(referenciaTipo, referenciaId);
+    if (asientoPrevio) {
+      this.revertir(asientoPrevio.id, 'Saldo inicial actualizado desde Configuración', usuarioId);
+    }
+
+    if (!monto || monto <= 0) return null;
+
+    const cuentaId = this.cuentaAutomaticaRepository.getCuentaIdByClave(claveCuentaAutomatica);
+    if (!cuentaId) return null; // cuenta automática no configurada; nada que sincronizar todavía
+
+    const patrimonio = this.planCuentaRepository.findByCodigo('3105');
+    if (!patrimonio) return null; // no debería pasar: '3105' se siembra en la migración 006
+
+    const nombreCuenta = claveCuentaAutomatica === 'CAJA' ? 'Caja' : 'Bancos';
+
+    return this.crear({
+      fecha: new Date().toLocaleDateString('en-CA'),
+      concepto: `Saldo inicial de ${nombreCuenta} (configurado en Configuración)`,
+      tipoOrigen: 'Manual',
+      tipoComprobante: 'Apertura Saldo Inicial',
+      referenciaId,
+      referenciaTipo,
+      usuarioId,
+      sincronizarLedgerSimple: false,
+      lineas: [
+        { cuentaContableId: cuentaId, debito: monto, credito: 0 },
+        { cuentaContableId: patrimonio.id, debito: 0, credito: monto }
+      ]
+    });
+  }
+
   // Asiento manual, para todo lo que la generación automática no cubre (ajustes financieros,
   // depreciaciones, correcciones, partidas de apertura, etc).
   crearManual({ fecha, concepto, tipoComprobante = 'Asiento Contable', lineas, usuarioId = null, sincronizarLedgerSimple = true }) {
@@ -432,14 +475,15 @@ class AsientoContableService {
       // que pidió la reversión (GastoService.anular, ReciboService.anular) ya crea su propia
       // contrapartida en `movimientos`, así que no se duplica aquí.
       //
-      // Excepción: un Reembolso de Caja Menor es 'Manual' pero se creó a propósito con
-      // sincronizarLedgerSimple=false (es un traslado interno Caja General <-> Caja Menor que no
-      // cambia el efectivo total). Si su reversión sincronizara, el lado Caja General de la
-      // reversión SÍ calzaría con el prefijo de detección de "Caja" (a diferencia del lado Caja
-      // Menor, que ya no coincide desde que CAJA automática apunta a la subcuenta hoja 110505),
-      // generando una fila fantasma de Ingreso sin contrapartida. Se detecta por tipo_comprobante,
-      // el único campo que distingue este caso de una nota manual real que sí debe sincronizar.
-      const esReversionDeReembolsoCajaMenor = asiento.tipo_origen === 'Manual' && asiento.tipo_comprobante === 'Reembolso Caja Menor';
+      // Excepción: hay notas manuales cuyo efecto en el libro simple NO viene de sincronizarLineaConCajaBanco
+      // sino de otra fuente, así que sincronizar su reversión duplicaría el efecto en vez de neutralizarlo:
+      //   - 'Reembolso Caja Menor': es un traslado interno Caja General <-> Caja Menor que ya se creó
+      //     con sincronizarLedgerSimple=false (ver comentario histórico de este caso más abajo).
+      //   - 'Apertura Saldo Inicial': su contrapartida en el libro simple es el propio valor de
+      //     saldo_caja_inicial/saldo_banco_inicial en `configuracion` (ver CajaRepository.getSaldo()),
+      //     no una fila en `movimientos` — sincronizar la reversión insertaría una fila que no debe existir.
+      const TIPOS_MANUAL_SIN_SINCRONIZAR_EN_REVERSION = ['Reembolso Caja Menor', 'Apertura Saldo Inicial'];
+      const noDebeSincronizarReversion = asiento.tipo_origen === 'Manual' && TIPOS_MANUAL_SIN_SINCRONIZAR_EN_REVERSION.includes(asiento.tipo_comprobante);
       const reversionId = this.crear({
         fecha: new Date().toISOString().split('T')[0],
         concepto: `Reversión: ${asiento.concepto}`,
@@ -448,7 +492,7 @@ class AsientoContableService {
         referenciaId: asiento.id,
         referenciaTipo: 'Asiento',
         usuarioId,
-        sincronizarLedgerSimple: asiento.tipo_origen === 'Manual' && !esReversionDeReembolsoCajaMenor,
+        sincronizarLedgerSimple: asiento.tipo_origen === 'Manual' && !noDebeSincronizarReversion,
         lineas: asiento.lineas.map(l => ({
           cuentaContableId: l.cuenta_id,
           debito: l.credito,
