@@ -508,6 +508,34 @@ const Cuentas = {
           <input type="text" id="direccion" name="direccion" value="${cuenta ? cuenta.direccion : ''}" required>
         </div>
 
+        <h3 style="color: #1e40af; font-size: 16px; margin: 24px 0 16px 0; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">Ubicación (Coordenadas GPS)</h3>
+        <small style="color: #64748b; font-size: 0.875rem; display: block; margin-bottom: 12px;">
+          Opcional. Para copiarlas desde Google Maps: mantenga presionado el punto exacto en el mapa, toque las coordenadas que aparecen arriba y péguelas aquí (un número en cada campo).
+        </small>
+
+        <div class="form-group">
+          <label>Punto de Conexión de Agua (Acometida)</label>
+          <div style="display: flex; gap: 12px;">
+            <input type="number" step="any" id="lat_acometida" placeholder="Latitud" value="${cuenta?.lat_acometida ?? ''}">
+            <input type="number" step="any" id="lon_acometida" placeholder="Longitud" value="${cuenta?.lon_acometida ?? ''}">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
+            <input type="checkbox" id="mismo_punto" style="width: auto;" ${cuenta && cuenta.lat_acometida != null && cuenta.lat_acometida === cuenta.lat_vivienda && cuenta.lon_acometida === cuenta.lon_vivienda ? 'checked' : ''}>
+            El punto de la vivienda es el mismo que la acometida
+          </label>
+        </div>
+
+        <div class="form-group" id="grupoPuntoVivienda" style="${cuenta && cuenta.lat_acometida != null && cuenta.lat_acometida === cuenta.lat_vivienda && cuenta.lon_acometida === cuenta.lon_vivienda ? 'display: none;' : ''}">
+          <label>Punto de la Vivienda</label>
+          <div style="display: flex; gap: 12px;">
+            <input type="number" step="any" id="lat_vivienda" placeholder="Latitud" value="${cuenta?.lat_vivienda ?? ''}">
+            <input type="number" step="any" id="lon_vivienda" placeholder="Longitud" value="${cuenta?.lon_vivienda ?? ''}">
+          </div>
+        </div>
+
         ${!id ? `
           <div class="form-group">
             <label for="categoria_id">Categoría <span style="color: #ef4444;">*</span></label>
@@ -600,6 +628,10 @@ const Cuentas = {
       this.setupPropietarioTabs();
     }
 
+    document.getElementById('mismo_punto').addEventListener('change', (e) => {
+      document.getElementById('grupoPuntoVivienda').style.display = e.target.checked ? 'none' : 'block';
+    });
+
     document.getElementById('cuentaForm').addEventListener('submit', (e) => {
       e.preventDefault();
       this.saveCuenta(id);
@@ -667,6 +699,21 @@ const Cuentas = {
       direccion: document.getElementById('direccion').value.trim(),
       observaciones: document.getElementById('observaciones').value.trim()
     };
+
+    const latAcometida = document.getElementById('lat_acometida').value.trim();
+    const lonAcometida = document.getElementById('lon_acometida').value.trim();
+    formData.lat_acometida = latAcometida === '' ? null : parseFloat(latAcometida);
+    formData.lon_acometida = lonAcometida === '' ? null : parseFloat(lonAcometida);
+
+    if (document.getElementById('mismo_punto').checked) {
+      formData.lat_vivienda = formData.lat_acometida;
+      formData.lon_vivienda = formData.lon_acometida;
+    } else {
+      const latVivienda = document.getElementById('lat_vivienda').value.trim();
+      const lonVivienda = document.getElementById('lon_vivienda').value.trim();
+      formData.lat_vivienda = latVivienda === '' ? null : parseFloat(latVivienda);
+      formData.lon_vivienda = lonVivienda === '' ? null : parseFloat(lonVivienda);
+    }
 
     let valorConexion = 0;
     if (id) {
