@@ -248,6 +248,28 @@ const Cuentas = {
           </div>
 
           <div class="detail-section">
+            <h3>Ubicación</h3>
+            <div class="detail-row">
+              <div class="detail-label">Acometida (conexión de agua):</div>
+              <div class="detail-value">
+                ${cuenta.lat_acometida != null ? `
+                  ${cuenta.lat_acometida}, ${cuenta.lon_acometida}
+                  <button type="button" class="btn btn-secondary btn-icon" onclick="Cuentas.verEnMapa(${cuenta.lat_acometida}, ${cuenta.lon_acometida})">Ver en mapa</button>
+                ` : '<em>Sin coordenadas registradas</em>'}
+              </div>
+            </div>
+            <div class="detail-row">
+              <div class="detail-label">Vivienda:</div>
+              <div class="detail-value">
+                ${cuenta.lat_vivienda != null ? `
+                  ${cuenta.lat_vivienda}, ${cuenta.lon_vivienda}
+                  <button type="button" class="btn btn-secondary btn-icon" onclick="Cuentas.verEnMapa(${cuenta.lat_vivienda}, ${cuenta.lon_vivienda})">Ver en mapa</button>
+                ` : '<em>Sin coordenadas registradas</em>'}
+              </div>
+            </div>
+          </div>
+
+          <div class="detail-section">
             <div style="display: flex; justify-content: space-between; align-items: center;">
               <h3>Historial de Propietarios</h3>
               <button class="btn btn-secondary btn-icon" onclick="App.closeModal(); Cuentas.showCambiarPropietarioModal(${cuenta.id})">Cambiar Propietario</button>
@@ -801,6 +823,14 @@ const Cuentas = {
     } catch (error) {
       console.error('Error:', error);
       App.toast('Error al cambiar el estado', 'error');
+    }
+  },
+
+  async verEnMapa(lat, lon) {
+    const url = `https://www.google.com/maps?q=${lat},${lon}`;
+    const response = await window.api.sistema.abrirEnlaceExterno(url);
+    if (!response.success) {
+      App.toast('No se pudo abrir el mapa: ' + response.error, 'error');
     }
   },
 
