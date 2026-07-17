@@ -107,13 +107,17 @@ class CuentaRepository {
   create(cuenta) {
     const ejecutar = this.db.transaction(() => {
       const result = this.db.prepare(`
-        INSERT INTO cuentas (codigo, direccion, estado, observaciones)
-        VALUES (?, ?, ?, ?)
+        INSERT INTO cuentas (codigo, direccion, estado, observaciones, lat_acometida, lon_acometida, lat_vivienda, lon_vivienda)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         cuenta.codigo,
         cuenta.direccion,
         cuenta.estado || 'Activo',
-        cuenta.observaciones || null
+        cuenta.observaciones || null,
+        cuenta.lat_acometida ?? null,
+        cuenta.lon_acometida ?? null,
+        cuenta.lat_vivienda ?? null,
+        cuenta.lon_vivienda ?? null
       );
 
       const cuentaId = result.lastInsertRowid;
@@ -134,16 +138,21 @@ class CuentaRepository {
 
   update(id, cuenta) {
     const stmt = this.db.prepare(`
-      UPDATE cuentas 
+      UPDATE cuentas
       SET codigo = ?, direccion = ?, observaciones = ?,
+          lat_acometida = ?, lon_acometida = ?, lat_vivienda = ?, lon_vivienda = ?,
           fecha_actualizacion = CURRENT_TIMESTAMP
       WHERE id = ?
     `);
-    
+
     stmt.run(
       cuenta.codigo,
       cuenta.direccion,
       cuenta.observaciones || null,
+      cuenta.lat_acometida ?? null,
+      cuenta.lon_acometida ?? null,
+      cuenta.lat_vivienda ?? null,
+      cuenta.lon_vivienda ?? null,
       id
     );
   }
