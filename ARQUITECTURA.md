@@ -164,6 +164,22 @@ Para lo que la generación automática no cubre (partidas de apertura, ajustes, 
 
 `AsientoContableService.crear` es el único punto de entrada que de verdad inserta un asiento (tanto la generación automática como las notas manuales pasan por ahí). Verifica, por cada línea, que tenga exactamente un lado con valor (débito o crédito, no ambos ni ninguno), que la cuenta exista, esté activa y sea imputable, y que la suma total de débitos sea igual a la de créditos (con una tolerancia de centavos). Si algo no cuadra, lanza un error y toda la transacción (incluida la creación del gasto/recibo que lo disparó) se revierte: nunca puede quedar un gasto guardado sin su asiento, ni un asiento desbalanceado guardado.
 
+### 10.6 Cuentas Automáticas
+
+`CuentaAutomaticaService`/`CuentaAutomaticaRepository` mantienen una tabla `(clave → cuenta_contable_id)` para las claves internas que el propio sistema necesita resolver sin intervención del usuario (p. ej. `caja`, `banco`, `caja_menor`). Es distinta del Mapeo de Conceptos (que resuelve conceptos de negocio como "Mantenimiento"): esta tabla resuelve **infraestructura contable propia del sistema**, editable por un Administrador desde Contabilidad → Cuentas Automáticas, y solo admite cuentas imputables.
+
+### 10.7 Plantillas de Contabilización e Impuestos
+
+`PlantillaContabilizacionService` administra plantillas versionadas de asientos: cada plantilla tiene un `codigo` estable y varias versiones en el tiempo (`fecha_desde`/`fecha_hasta`), para que un cambio en la plantilla no reescriba cómo se contabilizaron los asientos históricos ya generados con la versión anterior. `ImpuestoService` define impuestos/retenciones (porcentaje, cuenta contable, lado del ajuste — crédito para ReteFuente/ICA que divide el pago, débito para IVA descontable que divide el gasto) y los asigna a una o más plantillas; `MotorContabilizacionService` es quien, dado un monto y una plantilla con sus impuestos vigentes a una fecha, calcula las líneas resultantes.
+
+### 10.8 Períodos Contables
+
+`PeriodoContableService.validarFechaPermitida(fechaISO)` es el guardián de fechas: crea automáticamente el período (año-mes) la primera vez que se contabiliza algo en él, y rechaza cualquier movimiento en un período `Cerrado`/`Bloqueado` o anterior al límite configurado en `periodo_bloqueo_anterior_a` (Configuración). Solo un Administrador puede cerrar, bloquear o reabrir un período.
+
+### 10.9 Caja Menor
+
+`CajaMenorService` no es un módulo contable aparte: es un **consumidor** del motor descrito arriba. Su saldo actual no se guarda en una columna propia, se calcula en vivo con `AsientoContableService.getLibroMayor()` sobre la cuenta imputable `110510` (Caja Menor) del PUC — así nunca puede desincronizarse del resto de la contabilidad. Se activa/desactiva desde Configuración (`caja_menor_activa`), con un responsable asignado (e historial de responsables) y reembolsos que también pasan por `PeriodoContableService` antes de generar su asiento.
+
 ## 11. Empaquetado y distribución
 
 `npm run dist` ejecuta `electron-rebuild` (recompila el binario nativo de `better-sqlite3` contra la versión exacta de Electron usada — un módulo nativo compilado para el Node del sistema no es compatible con el Node embebido en Electron) y luego `electron-builder --win`, que genera un instalador NSIS en `dist/`. El binario de `better-sqlite3` se deja sin empaquetar en el `.asar` (`asarUnpack`) porque los módulos nativos no pueden ejecutarse desde dentro de un archivo `.asar`.
@@ -189,3 +205,7 @@ El rol `Consulta` nunca tiene cambios propios que perder (no puede escribir nada
 ### 12.4 Canales que funcionan sin sesión
 
 `CANALES_SIN_SESION` (en `main.js`) es la única excepción a la regla de "todo canal exige sesión" (sección 5): la pantalla de **Configuración Inicial** (un equipo nuevo, base de datos vacía) necesita poder revisar y traer un respaldo de la nube *antes* de que exista cualquier usuario local con el que iniciar sesión.
+
+### 12.5 Soportes de gastos en la nube
+
+`ComprobanteCloudService` es un servicio aparte que reutiliza la misma cuenta de Google conectada (mismo archivo de token, mismo scope `drive.file`) pero para un propósito distinto: subir los soportes (facturas, comprobantes escaneados) que se adjuntan a un gasto, a una carpeta propia (`Acueducto Admin - Soportes`) separada de la del respaldo de la base de datos. No comparte clase base con `CloudBackupService`/`CloudBackupOrchestratorService` a propósito — la lógica de secuencia, retención y detección de conflictos de esos servicios no aplica aquí, así que forzar una jerarquía común solo para no repetir el bloque de autenticación OAuth no habría sido buena relación costo/beneficio.

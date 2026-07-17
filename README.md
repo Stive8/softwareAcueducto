@@ -34,14 +34,13 @@ No es un ERP completo: el sistema está acotado a lo que necesita una junta de a
 | Cuentas | Alta y gestión de predios, código manual, historial de propietarios y categorías |
 | Propietarios | Personas/entidades asociadas a una o más cuentas a lo largo del tiempo |
 | Categorías | Tipos de cuenta (Finca, Tienda, etc.) y su tarifa histórica de sostenimiento |
-| Pagos | Estado de cartera (al día/en mora/saldo a favor), registro de pagos y abonos |
+| Aportes | Estado de cartera (al día/en mora/saldo a favor), registro de pagos y abonos, y gestión de **Nuevos Puntos** (conexiones nuevas con valor total y abonos parciales hasta saldarse) |
 | Recibos | Comprobantes generados por cada pago, impresión y exportación a PDF |
-| Gastos | Egresos del acueducto, con su Tipo de Gasto (lista cerrada, define la cuenta contable — ver Mapeo de Conceptos) y, en su propia pestaña, el catálogo de **Terceros** (proveedores y otros aliados, para no reescribir nombre/identificación cada vez) |
-| Caja y Bancos | Saldos, movimientos, consignaciones, resumen de flujo del período |
-| Nuevos Puntos | Conexiones nuevas con valor total y abonos parciales hasta saldarse |
-| Contabilidad | Plan Único de Cuentas (catálogo jerárquico), Mapeo de Conceptos (qué cuenta usa cada tipo de gasto/recibo, con opción de agregar nuevos tipos), Asientos Contables (automáticos + Notas Contables manuales, con reversión), y sus reportes: Libro Diario, Libro Mayor, Balance de Prueba (general y por Tercero), Balance General, Estado de Resultados, Flujo de Caja, Historial de Pagos/Gastos, e Informe de Empalme (para entrega de junta) |
-| Reportes | Cuentas y Propietarios, y Estado de Cuentas (al día, en mora, saldo a favor, nuevos puntos) |
-| Configuración | Datos de la asociación, parámetros, cambio de contraseña, copia de seguridad/restauración local, respaldo en la nube, Modo de Pruebas |
+| Gastos | Egresos del acueducto, con su Tipo de Gasto (lista cerrada, define la cuenta contable — ver Mapeo de Conceptos), soportes adjuntos (facturas/comprobantes escaneados, con respaldo opcional en Google Drive) y, en su propia pestaña, el catálogo de **Terceros** (proveedores y otros aliados, para no reescribir nombre/identificación cada vez) |
+| Caja y Bancos | Saldos, movimientos, consignaciones, resumen de flujo del período, y **Caja Menor** (responsable asignado, historial de responsables, reembolsos y saldo objetivo configurable) |
+| Contabilidad | Dashboard Financiero, Plan Único de Cuentas (catálogo jerárquico), Cuentas Automáticas (mapeo de claves internas del sistema —Caja, Banco, Caja Menor— a su cuenta del PUC), Plantillas de Contabilización (versionadas), Impuestos (retenciones/tributos asignables a plantillas), Períodos Contables (apertura/cierre/bloqueo por fecha), Mapeo de Conceptos (qué cuenta usa cada tipo de gasto/recibo, con opción de agregar nuevos tipos), Asientos Contables (automáticos + Notas Contables manuales, con reversión), y sus reportes: Cartera por Edades, Historial de Aportes/Gastos, Ingresos/Gastos por Período, Balance General, Estado de Resultados, Flujo de Caja, Libro Diario, Libro Mayor, Balance de Prueba (general y por Tercero), e Informe de Empalme (para entrega de junta) |
+| Reportes | Cuentas y Propietarios, Estado de Cuentas (al día, en mora, saldo a favor, nuevos puntos), y Terceros con información incompleta |
+| Configuración | Datos de la asociación, parámetros, gestión de usuarios y roles (Administrador/Usuario/Consulta), Auditoría (bitácora de acciones), cambio de contraseña, copia de seguridad/restauración local, respaldo en la nube, Modo de Pruebas |
 
 ## Respaldo en la nube (opcional)
 
@@ -50,6 +49,8 @@ Cada equipo puede conectar su propia cuenta de Google Drive (Configuración → 
 - **Un solo escritor a la vez**: antes de subir un respaldo, el sistema detecta si otro equipo subió una versión más nueva que este no tiene, para no sobrescribir cambios ajenos sin avisar.
 - **Consulta es de solo-lectura ante la nube**: una sesión con rol Consulta nunca sube nada; al iniciar sesión, si hay una versión más reciente en la nube, la trae sola y reinicia la app, sin pedir confirmación (nunca tiene cambios propios que perder).
 - **Equipo nuevo**: si la base de datos local está vacía, la pantalla previa al login ofrece traer el respaldo más reciente de la nube en vez de empezar desde cero.
+
+La misma cuenta de Google Drive conectada también puede almacenar los **soportes de gastos** (facturas, comprobantes escaneados) que se adjuntan desde el módulo de Gastos, en una carpeta separada de la del respaldo de la base de datos.
 
 ## Arquitectura
 
@@ -68,6 +69,7 @@ Cada equipo puede conectar su propia cuenta de Google Drive (Configuración → 
 - **Asientos Contables** (`asientos_contables` + `movimientos_contables`): cada gasto, recibo (incluye meses de sostenimiento, abono a conexión y aplicación de saldo a favor en un solo asiento) y traslado Caja→Banco genera su asiento automáticamente, usando la cuenta ya resuelta por el mapeo. Anular el origen no borra el asiento: genera un asiento de **reversión** con las líneas invertidas, y dos asientos enlazados quedan en el histórico.
 - **Notas Contables**: asientos manuales para lo que la generación automática no cubre (ajustes, partidas de apertura, correcciones). Si una nota afecta Caja o Bancos, también se refleja en el saldo simple de Caja/Banco que usa el Dashboard, para que ambos siempre coincidan.
 - Reportes de doble partida: **Libro Diario** (todas las líneas, en orden cronológico), **Libro Mayor** (movimientos de una cuenta con saldo corriente) y **Balance de Prueba** (totales débito/crédito por cuenta, debe cuadrar siempre).
+- El motor también incluye **Cuentas Automáticas**, **Plantillas de Contabilización**, **Impuestos** y **Períodos Contables** (control de fechas cerradas/bloqueadas) — ver ARQUITECTURA.md §10.6-10.8 para el detalle de cada uno.
 
 ## Instalación y ejecución (desarrollo)
 
