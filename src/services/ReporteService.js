@@ -93,7 +93,11 @@ class ReporteService {
         { key: 'categoria', label: 'Categoría' },
         { key: 'propietario', label: 'Propietario' },
         { key: 'estado', label: 'Estado' },
-        { key: 'fecha_creacion', label: 'Fecha Creación', tipo: 'fecha' }
+        { key: 'fecha_creacion', label: 'Fecha Creación', tipo: 'fecha' },
+        { key: 'lat_acometida', label: 'Latitud Acometida' },
+        { key: 'lon_acometida', label: 'Longitud Acometida' },
+        { key: 'lat_vivienda', label: 'Latitud Vivienda' },
+        { key: 'lon_vivienda', label: 'Longitud Vivienda' }
       ],
       filas
     };

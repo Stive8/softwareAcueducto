@@ -16,7 +16,8 @@ class ReporteRepository {
   getCuentas(estado = '') {
     let query = `
       SELECT c.codigo, c.direccion, cat.nombre as categoria, p.nombre_completo as propietario,
-             c.estado, c.fecha_creacion
+             c.estado, c.fecha_creacion,
+             c.lat_acometida, c.lon_acometida, c.lat_vivienda, c.lon_vivienda
       FROM cuentas c
       LEFT JOIN cuenta_categorias cc ON cc.cuenta_id = c.id AND cc.fecha_fin IS NULL
       LEFT JOIN categorias cat ON cat.id = cc.categoria_id
