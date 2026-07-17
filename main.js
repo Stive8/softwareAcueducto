@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
 
 // Esta es una app de escritorio monousuario sobre un único archivo SQLite
 // (data/acueducto.db). Sin este candado, abrir el ejecutable dos veces crea dos procesos
@@ -116,7 +116,11 @@ const CANALES_SOLO_ADMIN = new Set([
 // fuera de la app, no con los roles internos. Ver ARQUITECTURA.md, sección de respaldo en la nube.
 const CANALES_PERMITIDOS_CONSULTA = new Set([
   'cloudBackup:conectar', 'cloudBackup:desconectar', 'cloudBackup:actualizarDesdeNube',
-  'cloudBackup:configurarEquipo', 'cloudBackup:actualizarSiHayNuevo'
+  'cloudBackup:configurarEquipo', 'cloudBackup:actualizarSiHayNuevo',
+  // Abrir un enlace en el navegador externo no modifica ningún dato del sistema (es
+  // funcionalmente una lectura), así que Consulta tampoco debe quedar bloqueado aquí aunque el
+  // nombre del canal no empiece por un prefijo de lectura.
+  'sistema:abrirEnlaceExterno'
 ]);
 
 // Canales que funcionan incluso SIN sesión: la pantalla de "Configuración inicial" (un PC nuevo,
@@ -2019,6 +2023,21 @@ function setupIpcHandlers() {
   envolverHandle('devtools:tieneDatosOperativos', async () => {
     try {
       return { success: true, data: devToolsService.tieneDatosOperativos() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Utilidades generales de sistema
+  envolverHandle('sistema:abrirEnlaceExterno', async (event, url) => {
+    try {
+      // Solo se permite https: evita que este canal genérico se use para abrir esquemas
+      // arbitrarios (file:, javascript:, etc.) si algún día recibe una URL no controlada.
+      if (typeof url !== 'string' || !/^https:\/\//.test(url)) {
+        throw new Error('Enlace externo inválido');
+      }
+      await shell.openExternal(url);
+      return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
     }

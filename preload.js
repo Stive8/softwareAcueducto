@@ -190,6 +190,9 @@ contextBridge.exposeInMainWorld('api', {
   devtools: {
     tieneDatosOperativos: () => ipcRenderer.invoke('devtools:tieneDatosOperativos')
   },
+  sistema: {
+    abrirEnlaceExterno: (url) => ipcRenderer.invoke('sistema:abrirEnlaceExterno', url)
+  },
   cloudBackup: {
     getEstado: () => ipcRenderer.invoke('cloudBackup:getEstado'),
     getRespaldosDisponibles: () => ipcRenderer.invoke('cloudBackup:getRespaldosDisponibles'),
