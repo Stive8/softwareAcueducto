@@ -154,9 +154,13 @@ Cada contrato del que depende el script se leyó directamente del código y de l
 - **`auditoria.usuario_id`** es FK nullable a `usuarios(id)`; existe el usuario `admin` con `id=1` → el import se atribuye a `usuarioId=1`.
 - **`gastos`** no tiene UNIQUE que sirva de idempotencia natural → se usa el marcador `[import:<hoja>#<fila>]` en `observaciones`.
 
-### Decisión de datos pendiente (requiere al usuario)
+### Reconciliación de terceros duplicados por typo de identificación (resuelta por frecuencia)
 
-En la BD ya existe un tercero **"Vicencio Herrera" (id=2) con cédula `93238699`**, pero el Excel usa consistentemente **`93328699`** (los dígitos `32`/`23` están transpuestos) en las decenas de filas de "PAGO SERVICIO FONTANERO" — el tercero más frecuente de todo el archivo. Una de las dos está mal escrita. Hay que decidir cuál es la correcta y reconciliar a **un solo** tercero, o el import creará un segundo "Vicencio Herrera" duplicado con la otra cédula. (El id=2 pudo haberse creado como dato de prueba; ver [[datos-prueba-descartables]].)
+Criterio acordado con el usuario: **gana la identificación que más se repite**; las variantes minoritarias se tratan como typo y se reconcilian a la mayoritaria.
+
+- **Vicencio Herrera** (el tercero más frecuente del archivo): `93328699` aparece **62 veces** en el Excel vs. `93238699` en un único registro de prueba en la BD (id=2) y una variante `933228699` (x2). **Canónica = `93328699`.** El paso de reconciliación corrige la cédula del tercero id=2 de `93238699` a `93328699` (vía SQL directo de reconciliación, una vez, documentado) y enlaza a él todas las filas; las variantes `933228699` se resuelven a ese mismo tercero.
+- **INGECOM**: aparece con dos NIT, `900351740-2` (x13) y `900531740-2` (x8) — dígitos `351`/`531` transpuestos, misma empresa. Canónico = `900351740` (el mayoritario, ya sin DV). El otro se reconcilia a él.
+- **Regla general en `preview.js`**: al proponer terceros, si dos identificaciones distintas comparten el mismo nombre normalizado (o dos nombres iguales tienen identificaciones que difieren solo por transposición/typo), se agrupan y se marca `accion=REVISAR` mostrando la frecuencia de cada variante, para que el usuario confirme la reconciliación antes del `commit`. Esto atrapa Vicencio, INGECOM y cualquier caso similar que aparezca al revisar los CSV.
 
 ## Riesgos / notas de implementación
 
