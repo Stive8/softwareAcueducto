@@ -19,6 +19,12 @@ test('normalizarFecha devuelve null para basura', () => {
   assert.equal(normalizarFecha('no es fecha'), null);
 });
 
+test('normalizarFecha rechaza fechas calendario inválidas en el fast-path YYYY-MM-DD', () => {
+  assert.equal(normalizarFecha('2024-13-40'), null);
+  assert.equal(normalizarFecha('2023-02-30'), null); // Feb 30 no existe
+  assert.equal(normalizarFecha('2024-06-15'), '2024-06-15');
+});
+
 test('normalizarTexto colapsa saltos de línea y espacios', () => {
   assert.equal(normalizarTexto('SERVICIO\n  HONORARIOS   CONTADOR'), 'SERVICIO HONORARIOS CONTADOR');
 });
@@ -45,6 +51,12 @@ test('clasificarFila corta en RETIROS DE LA CUENTA (2023)', () => {
   const cfg = CONFIG_HOJAS['2023'];
   const raw = [null, 'RETIROS DE LA CUENTA', null, 'RETIROS - RECAUDOS', 5777000];
   assert.equal(clasificarFila(raw, cfg, 315).tipo, 'truncar');
+});
+
+test('clasificarFila excluye valor 0 (límite de la exclusión valor <= 0)', () => {
+  const cfg = CONFIG_HOJAS['2025'];
+  const raw = [new Date('2025-01-10T00:00:00Z'), 'X', 1, 'CONCEPTO', 0];
+  assert.equal(clasificarFila(raw, cfg, 9).tipo, 'excluida');
 });
 
 test('clasificarFila en 2022 (sin columna id) deja identificacion null', () => {

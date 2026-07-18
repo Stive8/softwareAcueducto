@@ -15,7 +15,11 @@ function normalizarFecha(v) {
   let d;
   if (v instanceof Date) d = v;
   else if (typeof v === 'string') {
-    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) {
+      const dv = new Date(v + 'T00:00:00Z');
+      if (isNaN(dv.getTime()) || dv.toISOString().slice(0, 10) !== v) return null;
+      return v;
+    }
     d = new Date(v);
   } else return null;
   if (isNaN(d.getTime())) return null;
