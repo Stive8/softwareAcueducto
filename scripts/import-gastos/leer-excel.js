@@ -2,12 +2,25 @@
 const ExcelJS = require('exceljs');
 const { clasificarFila } = require('./normalizar');
 
-// Extrae el valor "plano" de una celda exceljs (resuelve fórmulas y rich-text a su valor final).
+// Extrae el valor "plano" de una celda exceljs. Detecta errores tanto literales ({error})
+// como los resultantes de una fórmula ({formula, result:{error}}) y los marca con el sentinel
+// __error para que leerHoja los excluya sin adivinar. Resuelve rich-text y hyperlinks a su texto.
 function valorCelda(cell) {
   let v = cell.value;
-  if (v && typeof v === 'object' && v.error !== undefined) return { __error: v.error };
-  if (v && typeof v === 'object' && v.result !== undefined) v = v.result;
-  if (v && typeof v === 'object' && v.text !== undefined) v = v.text;
+  if (v == null) return v;
+  if (typeof v === 'object') {
+    if (v.error !== undefined) return { __error: v.error };
+    if (v.result !== undefined) {
+      if (v.result && typeof v.result === 'object' && v.result.error !== undefined) {
+        return { __error: v.result.error };
+      }
+      v = v.result;
+    }
+    if (v && typeof v === 'object' && Array.isArray(v.richText)) {
+      return v.richText.map((rt) => rt.text).join('');
+    }
+    if (v && typeof v === 'object' && v.text !== undefined) return v.text; // hyperlink u otro con texto
+  }
   return v;
 }
 

@@ -31,3 +31,34 @@ test('leerHoja devuelve filas de datos y excluye la de TOTAL', async () => {
   assert.equal(excluidas.length, 1);
   assert.equal(excluidas[0].motivo, 'fila de total');
 });
+
+test('leerHoja excluye una fila con celda de error de fórmula (nunca la adivina)', async () => {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('GASTOS GENERALES 2025');
+  for (let i = 1; i <= 6; i++) ws.addRow([]);
+  ws.addRow(['FECHA', 'N RECIBO', 'CEDULA / NIT', 'CONCEPTO', 'VALOR']); // fila 7
+  const fila8 = ws.addRow([new Date('2025-03-01T00:00:00.000Z'), 'X', 1, null, 7000]); // 8: concepto con error
+  fila8.getCell(4).value = { formula: 'A1/0', result: { error: '#DIV/0!' } };
+  ws.addRow([new Date('2025-03-02T00:00:00.000Z'), 'DGV', 80765236, 'UNION DE 1/2', 8000]); // 9 válida
+
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xlsx-err-')), 'e.xlsx');
+  await wb.xlsx.writeFile(file);
+
+  const { filas, excluidas } = await leerHoja(file, 'GASTOS GENERALES 2025', CONFIG_HOJAS['2025']);
+  assert.equal(filas.length, 1); // solo la fila 9 válida
+  assert.ok(excluidas.some((e) => /error de fórmula/i.test(e.motivo)));
+});
+
+test('leerHoja resuelve una celda de concepto en rich-text a su texto', async () => {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('GASTOS GENERALES 2025');
+  for (let i = 1; i <= 6; i++) ws.addRow([]);
+  ws.addRow(['FECHA', 'N RECIBO', 'CEDULA / NIT', 'CONCEPTO', 'VALOR']);
+  const f = ws.addRow([new Date('2025-04-01T00:00:00.000Z'), 'X', 1, null, 5000]);
+  f.getCell(4).value = { richText: [{ text: 'UNION ' }, { text: 'DE 1/2' }] };
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xlsx-rt-')), 'r.xlsx');
+  await wb.xlsx.writeFile(file);
+  const { filas } = await leerHoja(file, 'GASTOS GENERALES 2025', CONFIG_HOJAS['2025']);
+  assert.equal(filas.length, 1);
+  assert.equal(filas[0].concepto, 'UNION DE 1/2');
+});
