@@ -72,3 +72,74 @@ test('re-ejecutar el mismo CSV es idempotente (no duplica)', () => {
     cerrarDbTemporal(ctx);
   }
 });
+
+test('ejecutarCommit registra la auditoría del gasto insertado', () => {
+  const ctx = crearDbTemporal();
+  try {
+    darSaldoCaja(ctx.dbService, 1000000);
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'out-'));
+    const csvPath = csvConUnaFila(outDir, '2026');
+
+    const r = ejecutarCommit({ csvPath, dbService: ctx.dbService });
+    assert.equal(r.insertadas, 1);
+
+    const auditorias = ctx.dbService.getDb().prepare(`SELECT * FROM auditoria WHERE tabla = 'gastos'`).all();
+    assert.ok(auditorias.length >= 1);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('una fila inválida no aborta el lote: se aísla como error y las demás se insertan', () => {
+  const ctx = crearDbTemporal();
+  try {
+    darSaldoCaja(ctx.dbService, 1000000);
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'out-'));
+    const filaValida = {
+      fila_excel: 8, hoja: '2026', accion: 'IMPORTAR', fecha: '2026-01-15', tercero_modo: 'nuevo',
+      tercero_id: '', tercero_tipo_id: 'NIT', tercero_numero_id: '80765236', tercero_nombre: 'DGV SUMINISTROS',
+      tipo_gasto: 'Accesorios y Materiales', confianza: 'media', valor: 48000,
+      concepto: 'SILLA SANI 4*3', observaciones: '',
+    };
+    const filaInvalida = {
+      fila_excel: 9, hoja: '2026', accion: 'IMPORTAR', fecha: '2026-01-16', tercero_modo: 'nuevo',
+      tercero_id: '', tercero_tipo_id: 'NIT', tercero_numero_id: '80765237', tercero_nombre: 'OTRO PROVEEDOR',
+      tipo_gasto: 'TipoInexistente', confianza: 'media', valor: 30000,
+      concepto: 'GASTO CON TIPO INVALIDO', observaciones: '',
+    };
+    const csvPath = path.join(outDir, `2026-preview.csv`);
+    fs.writeFileSync(csvPath, stringifyCsv(COLUMNAS, [filaValida, filaInvalida]), 'utf8');
+
+    const r = ejecutarCommit({ csvPath, dbService: ctx.dbService });
+    assert.equal(r.insertadas, 1);
+    assert.equal(r.errores, 1);
+
+    const n = ctx.dbService.getDb().prepare(`SELECT COUNT(*) n FROM gastos`).get().n;
+    assert.equal(n, 1);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('preflight aborta ANTES de escribir cuando la suma supera el saldo de Caja General', () => {
+  const ctx = crearDbTemporal();
+  try {
+    darSaldoCaja(ctx.dbService, 10000);
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'out-'));
+    const fila = {
+      fila_excel: 8, hoja: '2026', accion: 'IMPORTAR', fecha: '2026-01-15', tercero_modo: 'nuevo',
+      tercero_id: '', tercero_tipo_id: 'NIT', tercero_numero_id: '80765236', tercero_nombre: 'DGV SUMINISTROS',
+      tipo_gasto: 'Accesorios y Materiales', confianza: 'media', valor: 50000,
+      concepto: 'SILLA SANI 4*3', observaciones: '',
+    };
+    const csvPath = path.join(outDir, `2026-preview.csv`);
+    fs.writeFileSync(csvPath, stringifyCsv(COLUMNAS, [fila]), 'utf8');
+
+    assert.throws(() => ejecutarCommit({ csvPath, dbService: ctx.dbService }));
+
+    const n = ctx.dbService.getDb().prepare(`SELECT COUNT(*) n FROM gastos`).get().n;
+    assert.equal(n, 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

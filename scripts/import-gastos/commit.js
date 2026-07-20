@@ -39,7 +39,11 @@ function ejecutarCommit({ csvPath, dbService }) {
   const yaExiste = db.prepare(`SELECT 1 FROM gastos WHERE observaciones LIKE ?`);
   const cacheNuevos = new Map(); // numeroIdentificacion → terceroId (evita duplicar dentro de la corrida)
 
-  preflightSaldo(dbService, filas);
+  // Preflight solo sobre las filas AÚN NO importadas: en una re-corrida, las ya comprometidas en
+  // una corrida previa no deben volver a restarse del saldo actual de Caja General (que ya las
+  // refleja), o se abortaría el import innecesariamente.
+  const pendientes = filas.filter((f) => !yaExiste.get(`%${marcador(f.hoja, f.fila_excel)}%`));
+  preflightSaldo(dbService, pendientes);
 
   const log = [];
   let insertadas = 0, yaImportadas = 0, errores = 0;
@@ -72,10 +76,21 @@ function ejecutarCommit({ csvPath, dbService }) {
         observaciones: `${obsBase}${marca}`,
       };
       const gastoId = gastoService.create(gastoData, USUARIO_IMPORT);
-      auditoria.registrar({ usuarioId: USUARIO_IMPORT, accion: 'create', tabla: 'gastos', registroId: gastoId, datosNuevos: JSON.stringify(gastoData) });
 
+      // El gasto y su asiento ya son permanentes en este punto (create() ya hizo commit de su
+      // propia transacción). Un fallo al registrar la auditoría es un problema aparte y NO debe
+      // reportarse como ERROR de la fila: el marcador ya protege contra un reintento duplicado,
+      // pero marcar esta fila como ERROR le diría al operador (falsamente) que el gasto no se
+      // guardó, y podría llevarlo a reingresarlo manualmente por la UI (sin protección de
+      // marcador), generando una partida duplicada.
       insertadas++;
-      log.push({ fila: f.fila_excel, estado: 'INSERTADA', gastoId, terceroId });
+      const entradaLog = { fila: f.fila_excel, estado: 'INSERTADA', gastoId, terceroId };
+      try {
+        auditoria.registrar({ usuarioId: USUARIO_IMPORT, accion: 'create', tabla: 'gastos', registroId: gastoId, datosNuevos: JSON.stringify(gastoData) });
+      } catch (auditError) {
+        entradaLog.auditoriaWarning = auditError.message;
+      }
+      log.push(entradaLog);
     } catch (e) {
       errores++;
       log.push({ fila: f.fila_excel, estado: 'ERROR', mensaje: e.message });
