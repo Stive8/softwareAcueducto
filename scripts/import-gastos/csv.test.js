@@ -19,3 +19,10 @@ test('parseCsv respeta campos vacíos y espacios', () => {
   const back = parseCsv(csv);
   assert.deepEqual(back, [{ x: '', y: '  hola  ' }, { x: '1', y: '2' }]);
 });
+
+test('parseCsv ignora un BOM UTF-8 al inicio (Excel "CSV UTF-8")', () => {
+  const csv = '﻿fila_excel,valor\n8,1000';
+  const back = parseCsv(csv);
+  assert.equal(back[0].fila_excel, '8'); // sin el fix, la clave sería "﻿fila_excel" y esto es undefined
+  assert.equal(back[0].valor, '1000');
+});

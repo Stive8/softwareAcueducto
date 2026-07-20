@@ -38,7 +38,8 @@ function parsearLinea(linea) {
 }
 
 function parseCsv(texto) {
-  const lineas = texto.replace(/\r\n/g, '\n').split('\n').filter((l) => l.length > 0);
+  const sinBom = texto.charCodeAt(0) === 0xfeff ? texto.slice(1) : texto;
+  const lineas = sinBom.replace(/\r\n/g, '\n').split('\n').filter((l) => l.length > 0);
   if (lineas.length === 0) return [];
   const headers = parsearLinea(lineas[0]);
   return lineas.slice(1).map((linea) => {

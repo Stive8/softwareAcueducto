@@ -23,7 +23,14 @@ function preflightSaldo(dbService, filas) {
   const caja = planRepo.findByCodigo(CODIGO_CAJA_GENERAL);
   if (!caja) throw new Error(`No se encontró la cuenta ${CODIGO_CAJA_GENERAL}`);
   const saldo = asientoSvc.getLibroMayor(caja.id).saldoFinal;
-  const suma = filas.reduce((s, f) => s + Number(f.valor), 0);
+  let suma = 0;
+  for (const f of filas) {
+    const v = Number(f.valor);
+    if (!Number.isFinite(v)) {
+      throw new Error(`Preflight: la fila ${f.fila_excel} tiene un valor no numérico ("${f.valor}"). Corrija el CSV antes de importar.`);
+    }
+    suma += v;
+  }
   if (suma > saldo) {
     throw new Error(`Preflight de saldo: la suma a importar ($${suma.toLocaleString('es-CO')}) supera el saldo de Caja General ($${saldo.toLocaleString('es-CO')}). Import abortado.`);
   }

@@ -143,3 +143,24 @@ test('preflight aborta ANTES de escribir cuando la suma supera el saldo de Caja 
     cerrarDbTemporal(ctx);
   }
 });
+
+test('preflight aborta si una fila tiene valor no numérico', () => {
+  const ctx = crearDbTemporal();
+  try {
+    darSaldoCaja(ctx.dbService, 1000000);
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), 'out-'));
+    const fila = {
+      fila_excel: 8, hoja: '2026', accion: 'IMPORTAR', fecha: '2026-01-15', tercero_modo: 'no_informado',
+      tercero_id: '', tercero_tipo_id: '', tercero_numero_id: '', tercero_nombre: '',
+      tipo_gasto: 'Accesorios y Materiales', confianza: 'media', valor: 'ABC', // no numérico
+      concepto: 'FILA MALFORMADA', observaciones: '',
+    };
+    const csvPath = path.join(outDir, '2026-preview.csv');
+    fs.writeFileSync(csvPath, stringifyCsv(COLUMNAS, [fila]), 'utf8');
+    assert.throws(() => ejecutarCommit({ csvPath, dbService: ctx.dbService }), /no num/i);
+    const n = ctx.dbService.getDb().prepare(`SELECT COUNT(*) n FROM gastos`).get().n;
+    assert.equal(n, 0); // nada escrito
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
