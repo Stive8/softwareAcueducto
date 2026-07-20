@@ -64,10 +64,22 @@ const REGLAS_TIPO_GASTO = [
   { claves: ['HORAS', 'DIA DE', 'MANO DE OBRA', 'APOYO A', 'APOYO EN', 'JORNAL', 'OBRA', 'INSTALACION'], tipo: 'Mano de Obra Ocasional', confianza: 'media' },
 ];
 
+// Escapa metacaracteres de regex (los keywords son solo letras/espacios hoy, pero por robustez).
+function escapeRegex(s) {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Un keyword coincide si aparece al INICIO de una palabra (límite \b antes), permitiendo sufijos
+// (TUBERIA→TUBERIAS). Evita falsos positivos por substring dentro de otra palabra (BONO en ABONO,
+// OBRA en COBRANZA).
+function coincideClave(concepto, clave) {
+  return new RegExp('\\b' + escapeRegex(clave)).test(concepto);
+}
+
 function clasificarTipoGasto(concepto) {
   const c = sinAcentos(concepto);
   for (const regla of REGLAS_TIPO_GASTO) {
-    if (regla.claves.some((k) => c.includes(k))) {
+    if (regla.claves.some((k) => coincideClave(c, k))) {
       return { tipoGasto: regla.tipo, confianza: regla.confianza };
     }
   }

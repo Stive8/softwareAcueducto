@@ -45,6 +45,15 @@ test('clasificarTipoGasto: concepto sin patrón → null (Sin clasificar)', () =
   assert.equal(clasificarTipoGasto('ALGO COMPLETAMENTE INESPERADO XYZ').tipoGasto, null);
 });
 
+test('clasificarTipoGasto: ABONO no se confunde con BONO (word boundary)', () => {
+  // "ABONO TALONARIO..." NO debe ser Bonificaciones; cae en Papelería por TALONARIO.
+  assert.equal(clasificarTipoGasto('ABONO TALONARIO RECIBOS PAGO CUOTA').tipoGasto, 'Papelería');
+});
+
+test('clasificarTipoGasto: BONO sí matchea como palabra completa', () => {
+  assert.equal(clasificarTipoGasto('BONO FIN DE AÑO').tipoGasto, 'Bonificaciones');
+});
+
 test('resolverTercero: id existente por identificación', () => {
   const terceros = [{ id: 2, numero_identificacion: '93328699', nombre_norm: 'VICENCIO HERRERA' }];
   const p = resolverTercero({ nombre: 'VICENCIO HERRERA', identificacion: '93328699' }, { terceros });
