@@ -39,10 +39,24 @@ const assert = require('node:assert/strict');
 const { crearDbTemporal, cerrarDbTemporal } = require('../testUtils/dbTemporal');
 const CajaService = require('./CajaService');
 const AsientoContableService = require('./AsientoContableService');
+const ConfiguracionService = require('./ConfiguracionService');
 const ConfiguracionRepository = require('../repositories/ConfiguracionRepository');
 
 function seedSaldoBanco(dbService, monto) {
   new ConfiguracionRepository(dbService).actualizar('saldo_banco_inicial', String(monto));
+}
+
+// A diferencia de seedSaldoBanco() (que solo alimenta el libro simple vía un UPDATE crudo a
+// `configuracion`), este helper sincroniza TAMBIÉN la doble partida, igual que el camino real de
+// producción (Configuración -> ConfiguracionService.actualizar -> AsientoContableService.
+// sincronizarAperturaSaldoInicial). Es obligatorio para cualquier test que vaya a verificar
+// verificarConciliacionCajaBanco(): si el saldo inicial se siembra solo con seedSaldoBanco(), la
+// doble partida arranca en 0 mientras el libro simple arranca en el monto sembrado, y los dos
+// libros ya están desconciliados ANTES de que el test haga nada (mismo hallazgo que en
+// CajaService.regularizarSaldos.test.js, ver commit 69016e9 en la rama de esa feature).
+function seedSaldoBancoConciliado(dbService, monto) {
+  const asientoContableService = new AsientoContableService(dbService);
+  new ConfiguracionService(dbService, asientoContableService).actualizar({ saldo_banco_inicial: monto }, 1);
 }
 
 test('registrarRetiro() rechaza un monto de cero o negativo', () => {
@@ -146,7 +160,7 @@ test('registrarRetiro() genera el asiento contable correcto: débito Caja (11050
 test('registrarRetiro() deja el libro simple y la doble partida conciliados después del retiro', () => {
   const ctx = crearDbTemporal();
   try {
-    seedSaldoBanco(ctx.dbService, 5000000);
+    seedSaldoBancoConciliado(ctx.dbService, 5000000);
     const service = new CajaService(ctx.dbService);
     const asientoContableService = new AsientoContableService(ctx.dbService);
 
