@@ -310,6 +310,7 @@ const Gastos = {
 
         <div class="form-actions">
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+          ${gasto.estado !== 'Anulado' ? `<button class="btn btn-secondary" onclick="Gastos.showEditarDatosModal(${gasto.id})">Editar</button>` : ''}
           ${gasto.estado !== 'Anulado' ? `<button class="btn btn-secondary" onclick="Gastos.agregarSoporte(${gasto.id})">+ Agregar Soporte</button>` : ''}
           ${gasto.estado !== 'Anulado' ? `<button class="btn btn-secondary" onclick="Gastos.showCorregirMetodoPagoModal(${gasto.id}, '${gasto.metodo_pago}')">Corregir Método de Pago</button>` : ''}
           ${gasto.estado !== 'Anulado' ? `<button class="btn btn-warning" onclick="App.closeModal(); Gastos.showAnularModal(${gasto.id})">Anular</button>` : ''}
@@ -698,6 +699,69 @@ const Gastos = {
     });
   },
 
+  async showEditarDatosModal(id) {
+    const response = await window.api.gastos.getById(id);
+    if (!response.success) {
+      App.toast('Error al cargar el gasto: ' + response.error, 'error');
+      return;
+    }
+    const gasto = response.data;
+
+    const content = `
+      <div class="modal-header">
+        <h2>Editar Gasto</h2>
+      </div>
+
+      <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
+          <strong>Nota:</strong> Solo se corrige el concepto y las observaciones. El valor, la fecha, el tercero y el método de pago quedan intactos.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="editarDatosForm">
+        <div class="form-group">
+          <label for="concepto_editar">Concepto <span style="color: #ef4444;">*</span></label>
+          <input type="text" id="concepto_editar" name="concepto_editar" value="${this.escapeHtml(gasto.concepto)}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="observaciones_editar">Observaciones</label>
+          <textarea id="observaciones_editar" name="observaciones_editar">${this.escapeHtml(gasto.observaciones || '')}</textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Guardar Cambios</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    App.protegerEnvioDoble(document.getElementById('editarDatosForm'), async () => {
+      const concepto = document.getElementById('concepto_editar').value.trim();
+      const observaciones = document.getElementById('observaciones_editar').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.gastos.actualizarDatos({ id, concepto, observaciones });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadGastos();
+          App.toast('Gasto actualizado con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al actualizar el gasto</div>`;
+      }
+    });
+  },
+
   // --- Proveedores (catálogo de Terceros) ---
 
   TIPOS_IDENTIFICACION: ['Cédula de Ciudadanía', 'NIT', 'Cédula de Extranjería', 'Pasaporte', 'Registro Civil', 'Otro', 'No informado'],
@@ -984,5 +1048,14 @@ const Gastos = {
     if (!dateString) return '-';
     const date = new Date(dateString);
     return date.toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' });
+  },
+
+  escapeHtml(value) {
+    if (value === null || value === undefined) return '';
+    return String(value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
   }
 };
