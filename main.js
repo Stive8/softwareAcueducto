@@ -1343,6 +1343,16 @@ function setupIpcHandlers() {
     }
   });
 
+  envolverHandle('gastos:actualizarDatos', async (event, payload) => {
+    try {
+      const { id, concepto, observaciones } = payload;
+      gastoService.actualizarDatos(id, { concepto, observaciones });
+      return { success: true, data: { id } };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Soportes documentales de gastos (facturas, recibos, imágenes), guardados en Google Drive —
   // ver ComprobanteCloudService. El archivo nunca se queda en disco local de forma permanente.
   envolverHandle('gastos:adjuntarSoporte', async (event, gastoId, tipoSoporte) => {

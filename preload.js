@@ -75,6 +75,7 @@ contextBridge.exposeInMainWorld('api', {
     create: (gastoData) => ipcRenderer.invoke('gastos:create', gastoData),
     anular: (id, motivo) => ipcRenderer.invoke('gastos:anular', id, motivo),
     corregirMetodoPago: (id, nuevoMetodoPago, motivo) => ipcRenderer.invoke('gastos:corregirMetodoPago', id, nuevoMetodoPago, motivo),
+    actualizarDatos: (payload) => ipcRenderer.invoke('gastos:actualizarDatos', payload),
     adjuntarSoporte: (gastoId, tipoSoporte) => ipcRenderer.invoke('gastos:adjuntarSoporte', gastoId, tipoSoporte),
     getSoportes: (gastoId) => ipcRenderer.invoke('gastos:getSoportes', gastoId),
     getSoporte: (gastoId, soporteId) => ipcRenderer.invoke('gastos:getSoporte', gastoId, soporteId)
