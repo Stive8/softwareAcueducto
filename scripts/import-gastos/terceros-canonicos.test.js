@@ -13,6 +13,10 @@ test('canonicaliza el NIT alterno de INGECOM (sin DV) a 900351740', () => {
   assert.equal(canonicalizarIdentificacion('900531740'), '900351740');
 });
 
+test('canonicaliza el typo de Ferretería Juanjo (142365013) a 14236501', () => {
+  assert.equal(canonicalizarIdentificacion('142365013'), '14236501');
+});
+
 test('una identificación desconocida se devuelve igual', () => {
   assert.equal(canonicalizarIdentificacion('1007831935'), '1007831935');
 });
