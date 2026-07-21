@@ -141,7 +141,8 @@ const CANALES_SIN_SESION = new Set([
 // lado del renderer.
 const CANALES_IDEMPOTENTES = new Set([
   'asientos:crearManual', 'gastos:create', 'caja:registrarConsignacion',
-  'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento', 'caja:regularizarSaldos'
+  'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento', 'caja:regularizarSaldos',
+  'caja:registrarRetiro'
 ]);
 
 // opId -> Promise, mientras la operación sigue en curso (protege contra dos IPC casi
@@ -1421,6 +1422,15 @@ function setupIpcHandlers() {
   envolverHandle('caja:registrarConsignacion', async (event, payload) => {
     try {
       cajaService.registrarConsignacion(payload, sesionActual.id);
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('caja:registrarRetiro', async (event, payload) => {
+    try {
+      cajaService.registrarRetiro(payload, sesionActual.id);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
