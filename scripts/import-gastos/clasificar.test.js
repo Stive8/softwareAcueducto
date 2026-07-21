@@ -67,6 +67,18 @@ test('resolverTercero: sin identificación pero nombre coincide → revisar_nomb
   assert.equal(p.terceroIdSugerido, 2);
 });
 
+test('resolverTercero: match por nombre ignora un tercero desactivado (duplicado ya fusionado)', () => {
+  // El primero (id=8) es un duplicado por typo ya fusionado al id=28 y desactivado; el match por
+  // nombre debe encontrar el activo, nunca reintroducir el duplicado.
+  const terceros = [
+    { id: 8, numero_identificacion: '142365013', nombre_norm: 'FERRETERIA JUANJO', activo: 0 },
+    { id: 28, numero_identificacion: '14236501', nombre_norm: 'FERRETERIA JUANJO', activo: 1 },
+  ];
+  const p = resolverTercero({ nombre: 'FERRETERIA JUANJO', identificacion: null }, { terceros });
+  assert.equal(p.modo, 'revisar_nombre');
+  assert.equal(p.terceroIdSugerido, 28);
+});
+
 test('resolverTercero: número de factura como nombre y sin id → no_informado', () => {
   const p = resolverTercero({ nombre: 'FEP 10632', identificacion: null }, { terceros: [] });
   assert.equal(p.modo, 'no_informado');

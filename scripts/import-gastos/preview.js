@@ -13,7 +13,7 @@ const COLUMNAS = [
 ];
 
 function cargarTerceros(dbService) {
-  const rows = dbService.getDb().prepare(`SELECT id, numero_identificacion, nombre_razon_social FROM terceros`).all();
+  const rows = dbService.getDb().prepare(`SELECT id, numero_identificacion, nombre_razon_social, activo FROM terceros`).all();
   return rows.map((t) => ({ ...t, nombre_norm: normalizarNombre(t.nombre_razon_social) }));
 }
 

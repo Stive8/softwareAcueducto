@@ -103,10 +103,12 @@ function resolverTercero({ nombre, identificacion }, { terceros }) {
     return { modo: 'no_informado', nombreOriginal: nombre };
   }
 
-  // Sin identificación: intentar match por nombre contra el catálogo ya poblado.
+  // Sin identificación: intentar match por nombre contra el catálogo ya poblado. Nunca contra un
+  // tercero desactivado (ej. un duplicado ya fusionado a otro tras una reconciliación) — matchear
+  // por nombre a uno inactivo reintroduciría el mismo duplicado que se corrigió.
   if (esNombreValido(nombre)) {
     const nn = normalizarNombre(nombre);
-    const porNombre = terceros.find((t) => t.nombre_norm === nn);
+    const porNombre = terceros.find((t) => t.nombre_norm === nn && t.activo !== 0);
     if (porNombre) return { modo: 'revisar_nombre', terceroIdSugerido: porNombre.id, nombreOriginal: nombre };
   }
   return { modo: 'no_informado', nombreOriginal: nombre };
