@@ -55,6 +55,7 @@ const Caja = {
             <input type="date" id="fechaDesdeFilter" class="filter-select" title="Desde" value="${this.fechaDesde}">
             <input type="date" id="fechaHastaFilter" class="filter-select" title="Hasta" value="${this.fechaHasta}">
             <button class="btn btn-primary" id="btnConsignacion">+ Registrar Consignación</button>
+            ${App.currentUser.rol === 'Administrador' ? '<button class="btn btn-secondary" id="btnRegularizarSaldos">Ajustar saldos</button>' : ''}
           </div>
         </div>
 
@@ -101,6 +102,11 @@ const Caja = {
     document.getElementById('btnConsignacion').addEventListener('click', () => {
       this.showConsignacionModal();
     });
+
+    const btnRegularizarSaldos = document.getElementById('btnRegularizarSaldos');
+    if (btnRegularizarSaldos) {
+      btnRegularizarSaldos.addEventListener('click', () => this.showRegularizarSaldosModal());
+    }
   },
 
   async loadSaldos() {
@@ -114,6 +120,8 @@ const Caja = {
       }
 
       const { saldoCaja, saldoBanco } = response.data;
+      this.saldoCaja = saldoCaja;
+      this.saldoBanco = saldoBanco;
 
       saldosGrid.innerHTML = App.renderStatsGrid([
         { titulo: 'Saldo en Caja', valor: `$${this.formatNumber(saldoCaja)}`, icono: 'wallet' },
@@ -388,6 +396,115 @@ const Caja = {
       } catch (error) {
         console.error('Error:', error);
         errorDiv.innerHTML = `<div class="error-message">Error al registrar la consignación</div>`;
+      }
+    });
+  },
+
+  showRegularizarSaldosModal() {
+    const hoy = new Date().toISOString().split('T')[0];
+    const saldoCajaActual = this.saldoCaja || 0;
+    const saldoBancoActual = this.saldoBanco || 0;
+
+    const content = `
+      <div class="modal-header">
+        <h2>Ajustar Saldos de Caja y Banco</h2>
+      </div>
+
+      <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
+          Usa esto cuando el saldo real (arqueo físico de caja / extracto bancario) no coincide con el
+          saldo que calcula el sistema. La diferencia se registra como un asiento contable fechado y con
+          motivo contra la cuenta de Patrimonio — no borra ni reemplaza los movimientos históricos.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="regularizarSaldosForm">
+        <div class="form-group">
+          <label for="fecha_ajuste">Fecha del ajuste <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_ajuste" name="fecha_ajuste" value="${hoy}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="saldo_real_caja">Saldo real de Caja <span style="color: #ef4444;">*</span></label>
+          <div class="input-currency">
+            <span class="currency-symbol">$</span>
+            <input type="text" inputmode="numeric" id="saldo_real_caja" name="saldo_real_caja" value="${this.formatNumber(saldoCajaActual)}" required>
+          </div>
+          <small>Saldo calculado por el sistema: $${this.formatNumber(saldoCajaActual)}</small>
+        </div>
+
+        <div class="form-group">
+          <label for="saldo_real_banco">Saldo real de Banco <span style="color: #ef4444;">*</span></label>
+          <div class="input-currency">
+            <span class="currency-symbol">$</span>
+            <input type="text" inputmode="numeric" id="saldo_real_banco" name="saldo_real_banco" value="${this.formatNumber(saldoBancoActual)}" required>
+          </div>
+          <small>Saldo calculado por el sistema: $${this.formatNumber(saldoBancoActual)}</small>
+        </div>
+
+        <div id="previewAjusteSaldos" style="margin: 12px 0; font-size: 0.875rem; color: #64748b;"></div>
+
+        <div class="form-group">
+          <label for="motivo_ajuste">Motivo <span style="color: #ef4444;">*</span></label>
+          <textarea id="motivo_ajuste" name="motivo_ajuste" required placeholder="Ej: Regularización de saldos por registros históricos incompletos anteriores a 2026"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Registrar Ajuste</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    const inputCaja = document.getElementById('saldo_real_caja');
+    const inputBanco = document.getElementById('saldo_real_banco');
+    App.attachMoneyInput(inputCaja);
+    App.attachMoneyInput(inputBanco);
+
+    const actualizarPreview = () => {
+      const diferenciaCaja = App.parseMoneyValue(inputCaja.value) - saldoCajaActual;
+      const diferenciaBanco = App.parseMoneyValue(inputBanco.value) - saldoBancoActual;
+      const preview = document.getElementById('previewAjusteSaldos');
+      const partes = [];
+      if (diferenciaCaja !== 0) {
+        partes.push(`Caja: ${diferenciaCaja > 0 ? '+' : '-'}$${this.formatNumber(Math.abs(diferenciaCaja))}`);
+      }
+      if (diferenciaBanco !== 0) {
+        partes.push(`Banco: ${diferenciaBanco > 0 ? '+' : '-'}$${this.formatNumber(Math.abs(diferenciaBanco))}`);
+      }
+      preview.textContent = partes.length > 0 ? `Se registrará un ajuste de: ${partes.join(' | ')}` : 'No hay ninguna diferencia que ajustar.';
+    };
+
+    inputCaja.addEventListener('input', actualizarPreview);
+    inputBanco.addEventListener('input', actualizarPreview);
+    actualizarPreview();
+
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('regularizarSaldosForm'), async () => {
+      const fecha = document.getElementById('fecha_ajuste').value;
+      const saldoRealCaja = App.parseMoneyValue(inputCaja.value);
+      const saldoRealBanco = App.parseMoneyValue(inputBanco.value);
+      const motivo = document.getElementById('motivo_ajuste').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.caja.regularizarSaldos({ fecha, saldoRealCaja, saldoRealBanco, motivo, opId });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadSaldos();
+          this.loadMovimientos();
+          App.toast('Ajuste de saldos registrado con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar el ajuste de saldos</div>`;
       }
     });
   },
