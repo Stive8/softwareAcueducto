@@ -172,6 +172,20 @@ class GastoService {
     });
   }
 
+  // Corrige el concepto y/o las observaciones de un gasto, sin tocar contabilidad: estos dos
+  // campos nunca se copian a las líneas de un asiento (MotorContabilizacionService solo copia
+  // cuenta_contable_id, montos y datos de tercero), así que no hace falta revertir/regenerar
+  // nada. Por eso tampoco pasa por validarFechaPermitida: a diferencia de corregirMetodoPago,
+  // esto funciona aunque el período contable de la fecha del gasto ya esté Cerrado.
+  actualizarDatos(id, { concepto, observaciones }) {
+    const gasto = this.repository.findById(id);
+    if (!gasto) throw new Error('Gasto no encontrado');
+    if (gasto.estado === 'Anulado') throw new Error('No se puede editar un gasto anulado');
+    if (!concepto || !concepto.trim()) throw new Error('El concepto es obligatorio');
+
+    this.repository.actualizarDatos(id, { concepto, observaciones });
+  }
+
   // Adjuntar un soporte es solo metadata (referencia a Drive): no toca movimientos ni asientos
   // contables, así que no necesita transacción ni puede revertir nada al "deshacerse".
   adjuntarSoporte(gastoId, { tipoSoporte, driveFileId, nombreArchivo }) {

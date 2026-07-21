@@ -200,6 +200,12 @@ class GastoRepository {
     `).run(metodoPago, motivo, id);
   }
 
+  actualizarDatos(id, { concepto, observaciones }) {
+    this.db.prepare(`
+      UPDATE gastos SET concepto = ?, observaciones = ? WHERE id = ?
+    `).run(concepto, observaciones || null, id);
+  }
+
   anular(id, motivoAnulacion) {
     this.db.prepare(`
       UPDATE gastos
