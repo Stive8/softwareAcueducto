@@ -1,5 +1,5 @@
 # Ficha técnica y funcional — Acueducto Admin
-_Insumo para propuesta comercial. Generado 2026-07-04 a partir de una lectura completa del código, README, ARQUITECTURA.md y memoria de sesiones previas (auditoría de contabilidad 2026-07-03/04)._
+_Insumo para propuesta comercial. Generado 2026-07-04 a partir de una lectura completa del código, README, ARQUITECTURA.md y memoria de sesiones previas (auditoría de contabilidad 2026-07-03/04). Actualizado 2026-07-21: nuevas funciones en Cuentas (GPS), Gastos (edición parcial) y Caja/Bancos (Retiro, Ajustar Saldos); corrección importante en la sección 7 sobre el origen de los datos actuales — ver esa sección antes de usar este documento._
 
 ## 1. Qué es, en una frase
 
@@ -17,7 +17,7 @@ El propio README del proyecto es explícito: **"No es un ERP completo: el sistem
 Indicadores generales: cuentas al día / en mora / con saldo a favor, saldo de caja, saldo de banco, gráficos de ingresos vs. gastos (Chart.js).
 
 ### Cuentas
-Alta y gestión de predios/cuentas de servicio. Código manual (no autogenerado). Historial completo de propietarios y categorías a lo largo del tiempo — la cuenta/predio es la entidad central del sistema, no el usuario.
+Alta y gestión de predios/cuentas de servicio. Código manual (no autogenerado). Historial completo de propietarios y categorías a lo largo del tiempo — la cuenta/predio es la entidad central del sistema, no el usuario. Ubicación GPS opcional (punto de acometida y de vivienda) con enlace directo a Google Maps desde el detalle de la cuenta — útil para acueductos veredales donde las direcciones formales no siempre existen o son ambiguas.
 
 ### Propietarios
 Catálogo de personas/entidades asociadas a una o más cuentas a través del tiempo (un propietario puede vender el predio y el historial de la cuenta se conserva).
@@ -36,10 +36,12 @@ Comprobante generado automáticamente por cada pago. Impresión directa y export
 ### Gastos
 - Registro de egresos con **Tipo de Gasto como lista cerrada** (no texto libre): cada tipo ya tiene una cuenta contable asignada en Mapeo de Conceptos, así que un gasto nunca queda mal clasificado por error de tipeo. Un Administrador puede agregar tipos nuevos.
 - Tab **Proveedores** (catálogo de **Terceros**): proveedores y otros aliados, separado del catálogo de Propietarios (son relaciones de naturaleza distinta con el acueducto).
+- Un gasto ya registrado admite edición parcial (concepto y observaciones); el resto de campos (valor, fecha, tercero, tipo, método de pago) sigue sin edición libre por diseño — se corrige anulando y volviendo a registrar, para no perder el rastro contable.
 
 ### Caja / Banco
-Saldos, movimientos, consignaciones (traslado caja→banco), resumen de flujo de ingresos/gastos/flujo neto por período.
+Saldos, movimientos, consignaciones (traslado Caja→Banco) y retiros (traslado Banco→Caja), resumen de flujo de ingresos/gastos/flujo neto por período.
 
+- **Ajustar Saldos** (🔒 solo Administrador): corrige el saldo de Caja y/o Banco al valor real de un arqueo físico/extracto bancario, registrando la diferencia como un asiento contable auditable (fecha + motivo) contra Patrimonio — sin borrar ni alterar ningún movimiento histórico. Es la herramienta pensada para poner en cero cualquier desfase heredado de un registro histórico incompleto antes de una fecha de corte (ver sección 7).
 - **Caja Menor**: submódulo completo (asignación de responsable, historial de responsables, reembolsos, saldo objetivo configurable) — **construido y funcional, pero nunca activado con datos reales** en ninguna instalación hasta la fecha. Mencionarlo como funcionalidad disponible, no como algo "probado en campo".
 
 ### Contabilidad (el módulo más elaborado del sistema)
@@ -63,7 +65,6 @@ Cuentas, Propietarios, Historial de Pagos, Historial de Gastos, Cuentas al día 
 - **Auditoría**: bitácora de todas las acciones de escritura (quién hizo qué, cuándo), automática — no depende de que cada función la registre a mano.
 - Copia de seguridad manual + copia de seguridad automática local.
 - **Respaldo en la nube (Google Drive, opcional)**: sincroniza la base de datos completa entre varios equipos de la misma asociación (ej. tesorería y presidencia). Protocolo de "un solo escritor a la vez" (detecta si otro equipo subió una versión más nueva antes de sobrescribir). No es edición simultánea en tiempo real.
-- **Modo de Pruebas**: cargar/eliminar datos de ejemplo sin afectar el Plan de Cuentas, Mapeo de Conceptos, configuración ni usuarios.
 
 ## 4. Reglas de negocio como argumentos de venta
 
@@ -72,7 +73,7 @@ Estas son decisiones de diseño que resuelven problemas reales del sector y son 
 1. **Historial completo e inmutable**: nunca se borra nada (cuentas, gastos, asientos); todo se anula/desactiva con rastro. Relevante para juntas que rinden cuentas ante asamblea y para el "Informe de Empalme" entre juntas.
 2. **Tarifas históricas por año**: una deuda de hace 2 años se cobra al precio de hace 2 años, no al precio de hoy — evita errores de cobro y reclamos.
 3. **Contabilidad automática sin que nadie la lleve "a mano"**: cada gasto/recibo/traslado genera su asiento de doble partida solo, resuelto por un mapeo configurable — la asociación no necesita contratar un contador para el día a día, solo para revisión periódica.
-4. **Cero riesgo de doble contabilización**: protección explícita contra doble clic/doble envío en los 5 formularios financieros (hallazgo crítico de auditoría ya corregido, ver memoria `auditoria_contabilidad_2026-07`).
+4. **Cero riesgo de doble contabilización**: protección explícita contra doble clic/doble envío en los 7 canales financieros más sensibles (gastos, consignaciones, retiros, ajuste de saldos, reembolso de caja menor, pagos, notas contables) — hallazgo crítico de auditoría ya corregido, ver memoria `auditoria_contabilidad_2026-07`.
 5. **Trazabilidad total**: auditoría automática de cada escritura, reversión (no eliminación) de asientos anulados, balance de prueba que siempre debe cuadrar.
 6. **Simplicidad deliberada de despliegue**: sin servidor, sin nube obligatoria, sin licencias de terceros recurrentes (SQLite embebido) — instalación en un solo PC funciona de inmediato.
 
@@ -80,7 +81,7 @@ Estas son decisiones de diseño que resuelven problemas reales del sector y son 
 
 - **3 roles**: Administrador, Usuario, Consulta.
 - Rol **Consulta** solo puede leer, nunca escribir (aplicado automáticamente por convención de nombre del canal, no por configuración caso a caso).
-- Una lista de operaciones sensibles (gestión de usuarios, restaurar backup, Plan de Cuentas, Mapeo de Conceptos, Notas Contables/reversión, Períodos, Impuestos, Cuentas Automáticas, Caja Menor) está bloqueada para cualquier rol distinto de Administrador, **incluso si técnicamente es de solo lectura para otros roles**.
+- Una lista de operaciones sensibles (gestión de usuarios, restaurar backup, Plan de Cuentas, Mapeo de Conceptos, Notas Contables/reversión, Ajustar Saldos de Caja/Banco, Períodos, Impuestos, Cuentas Automáticas, Caja Menor) está bloqueada para cualquier rol distinto de Administrador, **incluso si técnicamente es de solo lectura para otros roles**.
 - Sesión única por instalación (no hay tokens ni sesiones concurrentes múltiples dentro del mismo proceso).
 - Auditoría automática de toda escritura exitosa (usuario, acción, módulo, registro afectado).
 
@@ -99,13 +100,16 @@ Estas son decisiones de diseño que resuelven problemas reales del sector y son 
 - **No es multi-empresa/multi-sede**: una instalación = una asociación. No hay multi-moneda (el contexto es un solo acueducto veredal en pesos colombianos).
 - **No genera facturación automática recurrente**: cada pago y gasto se registra manualmente, por diseño (control humano deliberado, apropiado para el tamaño de estas organizaciones).
 
-## 7. Estado de madurez del proyecto (importante para no sobrevender)
+## 7. Estado de madurez del proyecto (importante para no sobrevender) — CORREGIDA 2026-07-21
 
-- Proyecto iniciado 2026-06-21, ~84 commits a la fecha (2026-07-04): **desarrollo muy reciente**, no hay track record de años.
-- **Todos los datos actuales (gastos, pagos, recibos) son de prueba** y se borrarán antes de cualquier puesta en producción real (ver memoria `datos_prueba_descartables`) — **el sistema aún no ha sido usado por ninguna asociación real**. No presentar casos de uso/clientes reales en la propuesta a menos que ya exista uno confirmado fuera de este repositorio.
+> ⚠️ Esta sección reemplaza una versión anterior (2026-07-04) que afirmaba que los datos actuales eran de prueba y se borrarían antes de producción. Eso era **incorrecto**: son datos reales de la propia asociación cliente. Si ya se redactó una propuesta comercial usando la versión anterior de esta sección, revisarla antes de enviarla.
+
+- **El software es nuevo, los datos de la asociación no**: el desarrollo del sistema empezó el 2026-06-21 (134 commits al 2026-07-21, ~1 mes) — no presentar el *software* como algo con años de operación. Pero la base de datos actual contiene **registros reales de la asociación cliente**: pagos de sostenimiento desde 2017 y gastos desde 2022, migrados/cargados al sistema nuevo (no generados por ella). El sistema se entrega **con esos datos históricos incluidos**, no desde cero.
+- **El registro histórico previo a este sistema es incompleto**: como esos años se llevaron por otro medio (no en este software), hay movimientos reales que nunca quedaron registrados. Consecuencia concreta: el saldo de Caja/Banco que calcula el sistema a partir de lo migrado (~$129M) no coincide con el saldo real verificado por arqueo físico/extracto bancario (~$3M caja + ~$50M banco ≈ $53M) — una diferencia de ~$76M en movimientos históricos no registrados, no dinero perdido ni un error del software.
+- **Checkpoint de regularización, pendiente de ejecutar antes de la entrega final**: el plan acordado es (1) arqueo físico + extracto bancario a una fecha de corte (31/12/2025), (2) un asiento de ajuste contra Patrimonio usando la herramienta **"Ajustar Saldos"** (sección 3, Caja/Banco) fechado a ese corte, (3) cerrar/bloquear los períodos contables hasta esa fecha, y (4) disciplina mensual de arqueo+extracto+cierre desde enero 2026 en adelante. Ver `docs/guia-instalacion.md` §9 para el procedimiento paso a paso. **No presentar el sistema como "ya conciliado" hasta que este checkpoint se haya ejecutado realmente.**
 - Auditoría integral de Contabilidad realizada 2026-07-03: 54 hallazgos totales; los 13 Críticos/Altos ya corregidos y mergeados a `main` (2026-07-04). Quedan 41 hallazgos Medio/Bajo pendientes (no bloquean funcionalidad, son mejoras/deuda técnica).
-- Cobertura de pruebas automatizadas: 14 archivos de test unitarios, concentrados en la lógica financiera/contable más sensible (motor de asientos, reversión, conciliación, saldo inicial).
-- Submódulos **construidos pero sin ejercitar aún con datos reales**: Períodos Contables (cierre/bloqueo), Impuestos (motor tributario), Caja Menor (activable pero nunca activada). Funcionan y tienen tests, pero no hay evidencia de uso real todavía — presentarlos como "incluidos y disponibles", no como "probados en producción durante años".
+- Cobertura de pruebas automatizadas: archivos de test unitarios concentrados en la lógica financiera/contable más sensible (motor de asientos, reversión, conciliación, saldo inicial, regularización de saldos).
+- Submódulos **construidos pero sin ejercitar aún con datos reales**: Períodos Contables (cierre/bloqueo — precisamente lo que falta activar en el checkpoint de arriba), Impuestos (motor tributario), Caja Menor (activable pero nunca activada). Funcionan y tienen tests, pero no hay evidencia de uso real todavía — presentarlos como "incluidos y disponibles", no como "probados en producción durante años".
 
 ## 8. Requisitos técnicos y despliegue
 
@@ -119,5 +123,5 @@ Estas son decisiones de diseño que resuelven problemas reales del sector y son 
 
 - Usar el lenguaje de "ERP especializado para acueductos veredales" o "sistema administrativo y contable a la medida del sector", evitando la comparación directa con ERPs genéricos de mercado.
 - Separar claramente, en la sección de alcance, "Incluido" vs. "No incluido" (sección 6 de este documento) para evitar expectativas mal fundadas — esto además transmite profesionalismo y transparencia.
-- No mencionar años de operación ni clientes reales como referencia todavía (sección 7).
+- No presentar el *software* como algo con años de operación (tiene ~1 mes de desarrollo, sección 7) — pero sí se puede mencionar que se entrega precargado con el historial real de la asociación (pagos desde 2017, gastos desde 2022), como parte del valor de la migración. No presentarlo como "ya conciliado/cuadrado" hasta que el checkpoint de regularización de la sección 7 se haya ejecutado.
 - Los verdaderos diferenciadores para destacar son: historial inmutable con reversión contable, tarifas históricas, contabilización automática sin contador de planta, y el Informe de Empalme entre juntas — son necesidades muy específicas del sector que un ERP genérico no resuelve de fábrica.

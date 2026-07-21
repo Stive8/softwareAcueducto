@@ -7,3 +7,6 @@ dist/
 .env
 .claude/settings.local.json
 config/google-credentials.json
+
+# Salidas de la herramienta de import de gastos: contienen datos reales (nombres, cédulas, montos)
+scripts/import-gastos/output/

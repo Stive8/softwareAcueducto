@@ -31,16 +31,16 @@ No es un ERP completo: el sistema está acotado a lo que necesita una junta de a
 | Módulo | Qué hace |
 |---|---|
 | Dashboard | Indicadores generales: cuentas al día/en mora/con saldo a favor, caja, banco |
-| Cuentas | Alta y gestión de predios, código manual, historial de propietarios y categorías |
+| Cuentas | Alta y gestión de predios, código manual, historial de propietarios y categorías, y ubicación GPS opcional (acometida/vivienda) con enlace directo a Google Maps |
 | Propietarios | Personas/entidades asociadas a una o más cuentas a lo largo del tiempo |
 | Categorías | Tipos de cuenta (Finca, Tienda, etc.) y su tarifa histórica de sostenimiento |
 | Aportes | Estado de cartera (al día/en mora/saldo a favor), registro de pagos y abonos, y gestión de **Nuevos Puntos** (conexiones nuevas con valor total y abonos parciales hasta saldarse) |
 | Recibos | Comprobantes generados por cada pago, impresión y exportación a PDF |
-| Gastos | Egresos del acueducto, con su Tipo de Gasto (lista cerrada, define la cuenta contable — ver Mapeo de Conceptos), soportes adjuntos (facturas/comprobantes escaneados, con respaldo opcional en Google Drive) y, en su propia pestaña, el catálogo de **Terceros** (proveedores y otros aliados, para no reescribir nombre/identificación cada vez) |
-| Caja y Bancos | Saldos, movimientos, consignaciones, resumen de flujo del período, y **Caja Menor** (responsable asignado, historial de responsables, reembolsos y saldo objetivo configurable) |
+| Gastos | Egresos del acueducto, con su Tipo de Gasto (lista cerrada, define la cuenta contable — ver Mapeo de Conceptos), soportes adjuntos (facturas/comprobantes escaneados, con respaldo opcional en Google Drive) y, en su propia pestaña, el catálogo de **Terceros** (proveedores y otros aliados, para no reescribir nombre/identificación cada vez). Un gasto ya registrado se puede editar parcialmente (concepto y observaciones); el resto de campos (valor, fecha, tercero, tipo, método de pago) solo se corrige anulando y volviendo a registrar |
+| Caja y Bancos | Saldos, movimientos, consignaciones (Caja→Banco) y retiros (Banco→Caja), ajuste de saldos a la realidad tras un arqueo físico/extracto bancario (solo Administrador), resumen de flujo del período, y **Caja Menor** (responsable asignado, historial de responsables, reembolsos y saldo objetivo configurable) |
 | Contabilidad | Dashboard Financiero, Plan Único de Cuentas (catálogo jerárquico), Cuentas Automáticas (mapeo de claves internas del sistema —Caja, Banco, Caja Menor— a su cuenta del PUC), Plantillas de Contabilización (versionadas), Impuestos (retenciones/tributos asignables a plantillas), Períodos Contables (apertura/cierre/bloqueo por fecha), Mapeo de Conceptos (qué cuenta usa cada tipo de gasto/recibo, con opción de agregar nuevos tipos), Asientos Contables (automáticos + Notas Contables manuales, con reversión), y sus reportes: Cartera por Edades, Historial de Aportes/Gastos, Ingresos/Gastos por Período, Balance General, Estado de Resultados, Flujo de Caja, Libro Diario, Libro Mayor, Balance de Prueba (general y por Tercero), e Informe de Empalme (para entrega de junta) |
 | Reportes | Cuentas y Propietarios, Estado de Cuentas (al día, en mora, saldo a favor, nuevos puntos), y Terceros con información incompleta |
-| Configuración | Datos de la asociación, parámetros, gestión de usuarios y roles (Administrador/Usuario/Consulta), Auditoría (bitácora de acciones), cambio de contraseña, copia de seguridad/restauración local, respaldo en la nube, Modo de Pruebas |
+| Configuración | Datos de la asociación, parámetros, gestión de usuarios y roles (Administrador/Usuario/Consulta), Auditoría (bitácora de acciones), cambio de contraseña, copia de seguridad/restauración local, respaldo en la nube |
 
 ## Respaldo en la nube (opcional)
 
@@ -82,9 +82,11 @@ npm start
 
 En desarrollo la base de datos vive en `data/acueducto.db` dentro del proyecto (se crea sola en el primer arranque, junto con las categorías base y el usuario `admin`/`admin123`). Si necesitas reiniciarla por completo, usa `resetear_db.bat` o bórrala manualmente.
 
-### Modo de Pruebas
+No existe ningún botón en la interfaz para cargar o borrar datos de ejemplo/prueba: toda la información se registra igual sea de prueba o real, y nada se elimina de forma permanente (ver "Nada se elimina" arriba).
 
-Desde **Configuración → Modo de Pruebas** puedes cargar o eliminar datos de ejemplo (cuentas, propietarios, pagos, gastos, y sus asientos contables) mientras pruebas el sistema, sin afectar el Plan de Cuentas, el Mapeo de Conceptos, la configuración ni el usuario administrador. Eliminar datos operativos limpia también los asientos contables y reinicia su numeración, para no dejar registros huérfanos. Nunca se ejecuta automáticamente.
+## Importar gastos históricos desde Excel (herramienta puntual)
+
+`scripts/import-gastos/` es un conjunto de scripts de línea de comandos (sin UI) para migrar, una sola vez, el historial de gastos de una asociación desde un Excel externo hacia el sistema: lee cada hoja, clasifica el tipo de gasto y reconcilia terceros contra el catálogo existente, genera un CSV de previsualización para revisar antes de aplicar, y finalmente escribe los gastos vía los mismos `Service` reales de la aplicación (con respaldo previo de la base de datos e idempotencia, para poder reintentar sin duplicar). Pensado para el técnico que hace el despliegue, no para el usuario final del sistema.
 
 ## Generar el instalador de Windows
 

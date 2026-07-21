@@ -42,7 +42,9 @@ src/
                              cada uno un objeto global (p.ej. `Contabilidad`) con sus métodos
     pages/                 Fragmentos HTML que `app.js` inyecta al navegar
 assets/                   Íconos de la app e instalador
-scripts/                  Utilidades de build (generación de íconos, etc.)
+scripts/                  Utilidades de build (generación de íconos) e import-gastos/ (CLI
+                           puntual para migrar el historial de gastos de un Excel externo,
+                           sección "Importar gastos históricos" del README)
 ```
 
 No existe carpeta `controllers/` ni `models/`: el patrón es **Repository → Service → IPC handler → UI**, descrito abajo.
@@ -95,15 +97,16 @@ Toda la seguridad de la app pasa por una única función en `main.js`, `envolver
 2. **Lectura vs. escritura por convención de nombre**: el método del canal (`modulo:metodo`) se clasifica como lectura si empieza por `get`, `find`, `simular`, `tiene`, `imprimir`, `exportar` o `generar` (`PREFIJOS_LECTURA`). Todo lo demás es escritura. No hay que declarar esto por canal: se infiere del nombre, así que un canal nuevo solo necesita seguir la convención de nombres para heredar el comportamiento correcto.
 3. **Roles**: `Administrador`, `Usuario`, `Consulta`.
    - `Consulta` solo puede ejecutar canales de lectura.
-   - Ciertos canales sensibles (gestión de usuarios, restaurar backup, Modo de Pruebas, Plan de Cuentas, Mapeo de Conceptos, Notas Contables/reversión) están en `CANALES_SOLO_ADMIN` y se bloquean para cualquier rol que no sea `Administrador`, sin importar si son lectura o escritura.
+   - Ciertos canales sensibles (gestión de usuarios, restaurar backup, Plan de Cuentas, Mapeo de Conceptos, Notas Contables/reversión, Ajustar Saldos de Caja/Banco, Cuentas Automáticas, Períodos Contables) están en `CANALES_SOLO_ADMIN` y se bloquean para cualquier rol que no sea `Administrador`, sin importar si son lectura o escritura.
 4. **Auditoría automática**: toda escritura exitosa se registra sola en la tabla `auditoria` (usuario, acción, módulo, id del registro, payload), sin que cada `Service`/handler tenga que llamar nada explícitamente. Esto es lo que hace confiable el reporte de auditoría y el "Informe de Empalme" (quién hizo qué, sin necesidad de instrumentar cada función).
+5. **Protección contra doble envío (idempotencia)**: los canales financieros más sensibles a un doble clic o doble disparo de submit (`gastos:create`, `caja:registrarConsignacion`, `caja:registrarRetiro`, `caja:regularizarSaldos`, `cajaMenor:reembolsar`, `pagos:registrarPagoSostenimiento`, `asientos:crearManual` — el conjunto `CANALES_IDEMPOTENTES`) reciben un `opId` (UUID) generado por el renderer una sola vez al abrir el formulario, dentro del propio payload. `envolverHandle` lo intercepta antes de que llegue al `Service`: si esa operación ya está en curso (dos IPC casi simultáneos) devuelve la misma promesa en vez de ejecutar de nuevo, y si ya terminó con éxito hace poco (caché en memoria con TTL de 30 segundos) devuelve el mismo resultado sin volver a tocar la base de datos. Se agregó como corrección de un hallazgo Crítico de la auditoría de contabilidad (dos gastos/asientos/consignaciones idénticos por un doble clic).
 
 ## 6. Base de datos y migraciones
 
 - Un único archivo SQLite (`data/acueducto.db` en desarrollo; `%APPDATA%/acueducto-admin/data/acueducto.db` en la app instalada — nunca dentro de la carpeta de instalación, que no es escribible).
 - `journal_mode = WAL` y `foreign_keys = ON` activados al abrir la conexión.
 - **Migraciones** (`src/database/migrations/*.sql`): archivos numerados, cada uno se ejecuta una sola vez (registrado en la tabla `migrations`) la primera vez que arranca una base de datos que no los tiene. No se "deshacen": una vez mergeado un número, ese archivo no se vuelve a editar — una corrección posterior es siempre una migración nueva con un número más alto (así pasó con la `008`, que corrige datos sembrados por la `006`).
-- **Nunca se borra nada por diseño de esquema**: las tablas usan columnas `estado`/`activo`/`fecha_anulacion` en vez de `DELETE`. La única excepción es el botón explícito de **Modo de Pruebas → Eliminar Datos Operativos**, pensado solo para limpiar datos de ejemplo antes de poner el sistema en producción real.
+- **Nunca se borra nada por diseño de esquema**: las tablas usan columnas `estado`/`activo`/`fecha_anulacion` en vez de `DELETE`. No existe ningún botón en la interfaz que haga un `DELETE` real de datos operativos — toda corrección se hace por cambio de estado, anulación o reversión contable.
 
 ## 7. Patrón Repository / Service
 
@@ -148,7 +151,9 @@ Es la pieza más elaborada del sistema; vale la pena entenderla como un subsiste
 
 ### 10.2 Generación automática (sin lógica de negocio duplicada)
 
-`GastoService.create`, `PagoService.registrarPagoSostenimiento`, `NuevoPuntoService.registrarAbono` y `CajaService.registrarConsignacion` llaman, dentro de su propia transacción, a un método de `AsientoContableService` (`generarDesdeGasto`, `generarDesdeRecibo`, `generarDesdeMovimientoTraslado`). Estos métodos **no contienen reglas por nombre de concepto**: leen el `cuenta_contable_id` que el repositorio ya resolvió al crear el registro, y construyen las líneas débito/crédito a partir de ahí. Consecuencia práctica: si más adelante se reasigna un concepto a otra cuenta en el Mapeo, el generador de asientos no necesita cambiar — simplemente usará lo que el mapeo diga en ese momento, para registros nuevos.
+`GastoService.create`, `PagoService.registrarPagoSostenimiento`, `NuevoPuntoService.registrarAbono`, `CajaService.registrarConsignacion` y `CajaService.registrarRetiro` llaman, dentro de su propia transacción, a un método de `AsientoContableService` (`generarDesdeGasto`, `generarDesdeRecibo`, `generarDesdeMovimientoTraslado`). Estos métodos **no contienen reglas por nombre de concepto**: leen el `cuenta_contable_id` que el repositorio ya resolvió al crear el registro, y construyen las líneas débito/crédito a partir de ahí. Consecuencia práctica: si más adelante se reasigna un concepto a otra cuenta en el Mapeo, el generador de asientos no necesita cambiar — simplemente usará lo que el mapeo diga en ese momento, para registros nuevos.
+
+`CajaService.registrarRetiro` es el espejo exacto de `registrarConsignacion` con la dirección invertida (Banco→Caja en vez de Caja→Banco): ambos crean el mismo tipo de `movimiento` (`tipo: 'Traslado'`), y `generarDesdeMovimientoTraslado` resuelve a débito/crédito qué cuenta es cuál dinámicamente a partir de `origen`/`destino`, así que no hizo falta ninguna rama de código nueva ni tocar la plantilla `TRASLADO_CAJA_BANCO` para agregarlo — cualquier futuro traslado interno entre Caja y Banco, en cualquier dirección, puede seguir el mismo patrón.
 
 Caso particular: un recibo puede tener varios renglones en un solo cobro (meses de sostenimiento + abono a conexión + aplicación de saldo a favor). `generarDesdeRecibo` recorre **todos** los renglones del recibo y construye un único asiento balanceado: cada renglón positivo es un crédito, cada renglón negativo (aplicación de saldo a favor) es un débito por su valor absoluto, y si entró dinero real se agrega una línea de débito a Caja o Banco por el total cobrado.
 
@@ -158,7 +163,12 @@ Anular un gasto o un recibo no borra ni modifica su asiento original: `AsientoCo
 
 ### 10.4 Notas Contables (asientos manuales)
 
-Para lo que la generación automática no cubre (partidas de apertura, ajustes, correcciones), un Administrador puede crear una **Nota Contable** manual desde Contabilidad → Asientos Contables. Pasa por la misma validación (`AsientoContableService.crear`) que la generación automática: cuentas activas, imputables, balanceadas. Si una nota afecta a Caja o Bancos (p. ej. registrar el saldo inicial al migrar al sistema), también se replica automáticamente en el ledger simple de movimientos (la tabla `movimientos` que alimenta el Dashboard y el módulo de Caja), para que las dos vistas de la caja —la simple y la de doble partida— nunca se desincronicen.
+Para lo que la generación automática no cubre (partidas de apertura, ajustes, correcciones), un Administrador puede crear una **Nota Contable** manual desde Contabilidad → Asientos Contables. Pasa por la misma validación (`AsientoContableService.crear`) que la generación automática: cuentas activas, imputables, balanceadas. Si una nota afecta a Caja o Bancos, por defecto también se replica en el ledger simple de movimientos (la tabla `movimientos` que alimenta el Dashboard y el módulo de Caja: `crearManual` recibe `sincronizarLedgerSimple = true` por defecto), para que las dos vistas de la caja —la simple y la de doble partida— nunca se desincronicen. Hay dos excepciones deliberadas que pasan `sincronizarLedgerSimple: false`, porque su efecto en el libro simple ya viene de otro lado y sincronizar duplicaría el valor: el **Reembolso de Caja Menor** (traslado interno que no cambia el efectivo total) y el **asiento de apertura del saldo inicial** (`sincronizarAperturaSaldoInicial`, que se sincroniza/reemplaza automáticamente cada vez que se guarda `saldo_caja_inicial`/`saldo_banco_inicial` en Configuración — su contrapartida en el libro simple es directamente ese campo de `configuracion`, no una fila en `movimientos`; sin este asiento, `verificarConciliacionCajaBanco()` siempre reportaba una diferencia falsa igual al saldo inicial, hallazgo Alto de la auditoría de contabilidad, ya corregido).
+
+Dos casos más de asientos generados por código (no tecleados línea por línea por el usuario) reutilizan `crearManual`, contra la cuenta de **Patrimonio (3105)**:
+
+- **`ConfiguracionService.aperturaSaldoInicial`** (ver arriba).
+- **`CajaService.regularizarSaldos`** (Caja y Bancos → "Ajustar saldos", 🔒 solo Administrador): compara el saldo real de un arqueo físico/extracto bancario contra el saldo que calcula el sistema, y por cada cuenta con diferencia genera un asiento de tipo `Regularización de Saldos` (Caja/Banco vs. Patrimonio) fechado y con motivo — este sí sincroniza el ledger simple (a diferencia del saldo inicial), porque es la única forma de que el saldo mostrado en Dashboard/Caja realmente cambie al valor corregido. Pasa por `PeriodoContableService.validarFechaPermitida` igual que cualquier asiento, así que falla si la fecha del ajuste cae en un período ya Cerrado/Bloqueado.
 
 ### 10.5 Validación de balance
 
