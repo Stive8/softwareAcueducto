@@ -105,7 +105,14 @@ const Caja = {
 
     const btnRegularizarSaldos = document.getElementById('btnRegularizarSaldos');
     if (btnRegularizarSaldos) {
-      btnRegularizarSaldos.addEventListener('click', () => this.showRegularizarSaldosModal());
+      btnRegularizarSaldos.addEventListener('click', async () => {
+        const response = await window.api.caja.getSaldos();
+        if (!response.success) {
+          App.toast('No se pudieron cargar los saldos actuales', 'error');
+          return;
+        }
+        this.showRegularizarSaldosModal(response.data.saldoCaja, response.data.saldoBanco);
+      });
     }
   },
 
@@ -400,10 +407,8 @@ const Caja = {
     });
   },
 
-  showRegularizarSaldosModal() {
+  showRegularizarSaldosModal(saldoCajaActual, saldoBancoActual) {
     const hoy = new Date().toISOString().split('T')[0];
-    const saldoCajaActual = this.saldoCaja || 0;
-    const saldoBancoActual = this.saldoBanco || 0;
 
     const content = `
       <div class="modal-header">
