@@ -113,6 +113,46 @@ test('regularizarSaldos() deja el libro simple y la doble partida conciliados de
   }
 });
 
+test('regularizarSaldos() registra el asiento con la cuenta y el sentido débito/crédito correctos (auditable)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    seedSaldoCaja(ctx.dbService, 129000000);
+    seedSaldoBanco(ctx.dbService, 10000000);
+    const service = new CajaService(ctx.dbService);
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+
+    const resultado = service.regularizarSaldos({
+      fecha: '2025-12-31',
+      saldoRealCaja: 3000000, // diferencia negativa: -126.000.000
+      saldoRealBanco: 15000000, // diferencia positiva: +5.000.000
+      motivo: 'Prueba de auditabilidad del asiento',
+      usuarioId: 1
+    });
+
+    const asientoCaja = asientoContableService.getById(resultado.ajusteCaja);
+    assert.equal(asientoCaja.usuario_id, 1, 'El asiento debe quedar atribuido al usuario que hizo el ajuste');
+    const lineaCaja = asientoCaja.lineas.find(l => l.cuenta_codigo === '110505');
+    const lineaPatrimonioCaja = asientoCaja.lineas.find(l => l.cuenta_codigo === '3105');
+    assert.ok(lineaCaja && lineaPatrimonioCaja, 'El asiento de Caja debe tener una línea contra 110505 (Caja) y otra contra 3105 (Patrimonio)');
+    assert.equal(lineaCaja.credito, 126000000, 'Diferencia negativa: se acredita Caja');
+    assert.equal(lineaCaja.debito, 0);
+    assert.equal(lineaPatrimonioCaja.debito, 126000000, 'y se debita Patrimonio por el mismo monto');
+    assert.equal(lineaPatrimonioCaja.credito, 0);
+
+    const asientoBanco = asientoContableService.getById(resultado.ajusteBanco);
+    assert.equal(asientoBanco.usuario_id, 1);
+    const lineaBanco = asientoBanco.lineas.find(l => l.cuenta_codigo === '111005');
+    const lineaPatrimonioBanco = asientoBanco.lineas.find(l => l.cuenta_codigo === '3105');
+    assert.ok(lineaBanco && lineaPatrimonioBanco, 'El asiento de Banco debe tener una línea contra 111005 (Banco) y otra contra 3105 (Patrimonio)');
+    assert.equal(lineaBanco.debito, 5000000, 'Diferencia positiva: se debita Banco');
+    assert.equal(lineaBanco.credito, 0);
+    assert.equal(lineaPatrimonioBanco.credito, 5000000, 'y se acredita Patrimonio por el mismo monto');
+    assert.equal(lineaPatrimonioBanco.debito, 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('regularizarSaldos() rechaza el ajuste si los saldos reales ya coinciden con los calculados', () => {
   const ctx = crearDbTemporal();
   try {

@@ -106,12 +106,17 @@ const Caja = {
     const btnRegularizarSaldos = document.getElementById('btnRegularizarSaldos');
     if (btnRegularizarSaldos) {
       btnRegularizarSaldos.addEventListener('click', async () => {
-        const response = await window.api.caja.getSaldos();
-        if (!response.success) {
+        try {
+          const response = await window.api.caja.getSaldos();
+          if (!response.success) {
+            App.toast('No se pudieron cargar los saldos actuales', 'error');
+            return;
+          }
+          this.showRegularizarSaldosModal(response.data.saldoCaja, response.data.saldoBanco);
+        } catch (error) {
+          console.error('Error:', error);
           App.toast('No se pudieron cargar los saldos actuales', 'error');
-          return;
         }
-        this.showRegularizarSaldosModal(response.data.saldoCaja, response.data.saldoBanco);
       });
     }
   },
@@ -127,8 +132,6 @@ const Caja = {
       }
 
       const { saldoCaja, saldoBanco } = response.data;
-      this.saldoCaja = saldoCaja;
-      this.saldoBanco = saldoBanco;
 
       saldosGrid.innerHTML = App.renderStatsGrid([
         { titulo: 'Saldo en Caja', valor: `$${this.formatNumber(saldoCaja)}`, icono: 'wallet' },
