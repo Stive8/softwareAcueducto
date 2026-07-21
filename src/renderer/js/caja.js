@@ -55,6 +55,7 @@ const Caja = {
             <input type="date" id="fechaDesdeFilter" class="filter-select" title="Desde" value="${this.fechaDesde}">
             <input type="date" id="fechaHastaFilter" class="filter-select" title="Hasta" value="${this.fechaHasta}">
             <button class="btn btn-primary" id="btnConsignacion">+ Registrar Consignación</button>
+            <button class="btn btn-secondary" id="btnRetiro">+ Registrar Retiro</button>
             ${App.currentUser.rol === 'Administrador' ? '<button class="btn btn-secondary" id="btnRegularizarSaldos">Ajustar saldos</button>' : ''}
           </div>
         </div>
@@ -101,6 +102,10 @@ const Caja = {
 
     document.getElementById('btnConsignacion').addEventListener('click', () => {
       this.showConsignacionModal();
+    });
+
+    document.getElementById('btnRetiro').addEventListener('click', () => {
+      this.showRetiroModal();
     });
 
     const btnRegularizarSaldos = document.getElementById('btnRegularizarSaldos');
@@ -406,6 +411,76 @@ const Caja = {
       } catch (error) {
         console.error('Error:', error);
         errorDiv.innerHTML = `<div class="error-message">Error al registrar la consignación</div>`;
+      }
+    });
+  },
+
+  showRetiroModal() {
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const content = `
+      <div class="modal-header">
+        <h2>Registrar Retiro</h2>
+      </div>
+
+      <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
+          <strong>Nota:</strong> Disminuye el saldo de Banco y aumenta el saldo de Caja por el mismo monto.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="retiroForm">
+        <div class="form-group">
+          <label for="monto_retiro">Monto a Retirar <span style="color: #ef4444;">*</span></label>
+          <div class="input-currency">
+            <span class="currency-symbol">$</span>
+            <input type="text" inputmode="numeric" id="monto_retiro" name="monto_retiro" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="fecha_retiro">Fecha <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_retiro" name="fecha_retiro" value="${hoy}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="observaciones_retiro">Observaciones</label>
+          <textarea id="observaciones_retiro" name="observaciones_retiro"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Registrar Retiro</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+    App.attachMoneyInput(document.getElementById('monto_retiro'));
+
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('retiroForm'), async () => {
+      const monto = App.parseMoneyValue(document.getElementById('monto_retiro').value);
+      const fecha = document.getElementById('fecha_retiro').value;
+      const observaciones = document.getElementById('observaciones_retiro').value.trim();
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.caja.registrarRetiro({ monto, fecha, observaciones, opId });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadSaldos();
+          this.loadMovimientos();
+          App.toast('Retiro registrado con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar el retiro</div>`;
       }
     });
   },
