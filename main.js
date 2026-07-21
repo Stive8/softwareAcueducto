@@ -99,6 +99,7 @@ const CANALES_SOLO_ADMIN = new Set([
   'plancuentas:create', 'plancuentas:update', 'plancuentas:toggleActivo',
   'mapeocontable:actualizar', 'mapeocontable:crear',
   'asientos:crearManual', 'asientos:revertir',
+  'caja:regularizarSaldos',
   'cuentasautomaticas:actualizar',
   'periodos:cerrar', 'periodos:bloquear', 'periodos:reabrir', 'periodos:actualizarNotas',
   'plantillas:actualizarLineas',
@@ -140,7 +141,7 @@ const CANALES_SIN_SESION = new Set([
 // lado del renderer.
 const CANALES_IDEMPOTENTES = new Set([
   'asientos:crearManual', 'gastos:create', 'caja:registrarConsignacion',
-  'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento'
+  'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento', 'caja:regularizarSaldos'
 ]);
 
 // opId -> Promise, mientras la operación sigue en curso (protege contra dos IPC casi
@@ -1421,6 +1422,15 @@ function setupIpcHandlers() {
     try {
       cajaService.registrarConsignacion(payload, sesionActual.id);
       return { success: true };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('caja:regularizarSaldos', async (event, payload) => {
+    try {
+      const resultado = cajaService.regularizarSaldos({ ...payload, usuarioId: sesionActual.id });
+      return { success: true, data: resultado };
     } catch (error) {
       return { success: false, error: error.message };
     }
