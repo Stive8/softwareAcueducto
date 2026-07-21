@@ -1,10 +1,14 @@
 const CajaRepository = require('../repositories/CajaRepository');
 const AsientoContableService = require('./AsientoContableService');
+const CuentaAutomaticaRepository = require('../repositories/CuentaAutomaticaRepository');
+const PlanCuentaRepository = require('../repositories/PlanCuentaRepository');
 
 class CajaService {
   constructor(dbService) {
     this.repository = new CajaRepository(dbService);
     this.asientoContableService = new AsientoContableService(dbService);
+    this.cuentaAutomaticaRepository = new CuentaAutomaticaRepository(dbService);
+    this.planCuentaRepository = new PlanCuentaRepository(dbService);
   }
 
   getSaldos() {
@@ -48,6 +52,76 @@ class CajaService {
       this.asientoContableService.generarDesdeMovimientoTraslado(movimientoId, usuarioId);
 
       return movimientoId;
+    });
+  }
+
+  // Ajusta el saldo de Caja y/o Banco al valor real (arqueo físico / extracto bancario),
+  // registrando la diferencia como un asiento de "Regularización de Saldos" contra Patrimonio
+  // (3105). Reutiliza AsientoContableService.crearManual con sincronizarLedgerSimple (su valor
+  // por defecto), que sincroniza a la vez la doble partida y el libro simple `movimientos` que
+  // alimenta el Dashboard. Reutilizable: cada llamada lleva del saldo calculado actual al nuevo
+  // saldo real indicado, sin acumular con ajustes anteriores.
+  regularizarSaldos({ fecha, saldoRealCaja, saldoRealBanco, motivo, usuarioId = null }) {
+    if (!fecha) throw new Error('La fecha del ajuste es obligatoria');
+    if (typeof saldoRealCaja !== 'number' || Number.isNaN(saldoRealCaja) || saldoRealCaja < 0) {
+      throw new Error('El saldo real de Caja debe ser un número mayor o igual a cero');
+    }
+    if (typeof saldoRealBanco !== 'number' || Number.isNaN(saldoRealBanco) || saldoRealBanco < 0) {
+      throw new Error('El saldo real de Banco debe ser un número mayor o igual a cero');
+    }
+    if (!motivo || !motivo.trim()) throw new Error('Debe indicar el motivo del ajuste');
+
+    const diferenciaCaja = saldoRealCaja - this.repository.getSaldoCaja();
+    const diferenciaBanco = saldoRealBanco - this.repository.getSaldoBanco();
+
+    if (diferenciaCaja === 0 && diferenciaBanco === 0) {
+      throw new Error('No hay ninguna diferencia que ajustar: los saldos ya coinciden con los valores ingresados');
+    }
+
+    return this.repository.transaccion(() => {
+      const ajusteCaja = diferenciaCaja !== 0
+        ? this._crearAsientoAjuste('CAJA', 'Caja', diferenciaCaja, fecha, motivo, usuarioId)
+        : null;
+      const ajusteBanco = diferenciaBanco !== 0
+        ? this._crearAsientoAjuste('BANCO', 'Banco', diferenciaBanco, fecha, motivo, usuarioId)
+        : null;
+
+      return {
+        ajusteCaja,
+        ajusteBanco,
+        saldoFinalCaja: this.repository.getSaldoCaja(),
+        saldoFinalBanco: this.repository.getSaldoBanco()
+      };
+    });
+  }
+
+  // Un asiento por cuenta: si la diferencia es negativa (saldo real menor al calculado, el caso
+  // típico de egresos históricos no registrados), se acredita Caja/Banco y se debita Patrimonio.
+  // Si es positiva, al revés.
+  _crearAsientoAjuste(claveCuentaAutomatica, nombreCuenta, diferencia, fecha, motivo, usuarioId) {
+    const cuentaId = this.cuentaAutomaticaRepository.getCuentaIdByClave(claveCuentaAutomatica);
+    if (!cuentaId) throw new Error(`No hay una cuenta automática configurada para ${nombreCuenta}`);
+
+    const patrimonio = this.planCuentaRepository.findByCodigo('3105');
+    if (!patrimonio) throw new Error('No se encontró la cuenta de Patrimonio (3105) para registrar el ajuste');
+
+    const monto = Math.abs(diferencia);
+    const lineas = diferencia > 0
+      ? [
+          { cuentaContableId: cuentaId, debito: monto, credito: 0 },
+          { cuentaContableId: patrimonio.id, debito: 0, credito: monto }
+        ]
+      : [
+          { cuentaContableId: patrimonio.id, debito: monto, credito: 0 },
+          { cuentaContableId: cuentaId, debito: 0, credito: monto }
+        ];
+
+    return this.asientoContableService.crearManual({
+      fecha,
+      concepto: `Regularización de saldo de ${nombreCuenta} al ${fecha}: ${motivo}`,
+      tipoComprobante: 'Regularización de Saldos',
+      usuarioId,
+      lineas
     });
   }
 }
