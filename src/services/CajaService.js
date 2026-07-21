@@ -55,6 +55,38 @@ class CajaService {
     });
   }
 
+  // Retiro: se saca efectivo del banco para tener caja disponible.
+  // Aumenta caja, disminuye banco (un único movimiento de tipo Traslado). Espejo de
+  // registrarConsignacion con la dirección invertida — reutiliza el mismo motor de
+  // plantillas (TRASLADO_CAJA_BANCO ya resuelve la cuenta dinámicamente desde
+  // origen/destino, no hace falta ningún cambio ahí).
+  registrarRetiro({ monto, fecha, observaciones }, usuarioId = null) {
+    if (!monto || monto <= 0) throw new Error('El monto a retirar debe ser mayor a cero');
+    if (!fecha) throw new Error('La fecha es obligatoria');
+
+    const saldoBanco = this.repository.getSaldoBanco();
+    if (monto > saldoBanco) {
+      throw new Error(`El monto a retirar ($${monto}) supera el saldo disponible en banco ($${saldoBanco})`);
+    }
+
+    return this.repository.transaccion(() => {
+      const movimientoId = this.repository.crearMovimiento({
+        tipo: 'Traslado',
+        origen: 'Banco',
+        destino: 'Caja',
+        monto,
+        concepto: 'Retiro de banco a caja',
+        referenciaTipo: 'Retiro',
+        fechaMovimiento: fecha,
+        observaciones
+      });
+
+      this.asientoContableService.generarDesdeMovimientoTraslado(movimientoId, usuarioId);
+
+      return movimientoId;
+    });
+  }
+
   // Ajusta el saldo de Caja y/o Banco al valor real (arqueo físico / extracto bancario),
   // registrando la diferencia como un asiento de "Regularización de Saldos" contra Patrimonio
   // (3105). Reutiliza AsientoContableService.crearManual con sincronizarLedgerSimple (su valor
