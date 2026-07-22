@@ -222,16 +222,15 @@ body {
 }
 
 /* Acordeón de sub-páginas (Contabilidad, Gastos): colapsado por defecto, se abre con el clic en
-   la fila principal (no con el hover que expande el sidebar, para no abrirse solo de pasada). */
+   la fila principal (no con el hover que expande el sidebar, para no abrirse solo de pasada).
+   El alto real al abrirse lo calcula sidebar.js (scrollHeight) en vez de un valor fijo aquí,
+   porque cada módulo tiene una cantidad distinta de enlaces (Contabilidad tiene muchos más que
+   Gastos) y un límite fijo recortaba o directamente ocultaba los últimos ítems al crecer. */
 .nav-submenu {
   max-height: 0;
   overflow: hidden;
   background-color: rgba(0, 0, 0, 0.15);
   transition: max-height 0.2s ease;
-}
-
-.nav-submenu.open {
-  max-height: 240px;
 }
 
 .nav-submenu-link {

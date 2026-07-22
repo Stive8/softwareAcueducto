@@ -13,6 +13,17 @@ const Sidebar = {
     if (el) el.innerHTML = `<strong>${nombreCompleto}</strong><span>${rol}</span>`;
   },
 
+  // Cierra cualquier acordeón abierto llevando su max-height inline de vuelta a 0 (no basta con
+  // quitar la clase .open: el alto real quedó fijado en px por openSubmenu, y sin este paso el
+  // submenú se quedaría desplegado a ese alto para siempre).
+  closeAllSubmenus() {
+    document.querySelectorAll('.nav-submenu.open').forEach(s => {
+      s.style.maxHeight = '0px';
+      s.classList.remove('open');
+    });
+    document.querySelectorAll('.nav-item-main.open').forEach(m => m.classList.remove('open'));
+  },
+
   init() {
     document.querySelectorAll('.nav-item-main').forEach(item => {
       item.addEventListener('click', (e) => {
@@ -21,12 +32,14 @@ const Sidebar = {
         const estabaAbierto = submenu.classList.contains('open');
 
         // Solo un acordeón abierto a la vez, para no acumular paneles desplegados sin razón.
-        document.querySelectorAll('.nav-submenu.open').forEach(s => s.classList.remove('open'));
-        document.querySelectorAll('.nav-item-main.open').forEach(m => m.classList.remove('open'));
+        Sidebar.closeAllSubmenus();
 
         if (!estabaAbierto) {
           submenu.classList.add('open');
           item.classList.add('open');
+          // scrollHeight refleja el alto real de los enlaces que tenga este módulo en particular,
+          // así ningún ítem queda recortado ni oculto sin importar cuántos haya.
+          submenu.style.maxHeight = submenu.scrollHeight + 'px';
         }
 
         document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
@@ -52,8 +65,7 @@ const Sidebar = {
     // abierto se cierra: si no, con el sidebar angosto se veían las primeras letras de las
     // sub-páginas asomando fuera del riel de 64px, sin importar si se eligió una opción o no.
     document.querySelector('.sidebar').addEventListener('mouseleave', () => {
-      document.querySelectorAll('.nav-submenu.open').forEach(s => s.classList.remove('open'));
-      document.querySelectorAll('.nav-item-main.open').forEach(m => m.classList.remove('open'));
+      Sidebar.closeAllSubmenus();
     });
   }
 };
