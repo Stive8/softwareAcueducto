@@ -56,6 +56,10 @@ class AuthService {
       throw new Error('Usuario no encontrado');
     }
 
+    if (user.es_recuperacion) {
+      throw new Error('La cuenta de recuperación no se puede modificar desde aquí');
+    }
+
     if (!verifyPassword(passwordActual, user.password)) {
       throw new Error('La contraseña actual es incorrecta');
     }
@@ -104,6 +108,7 @@ class AuthService {
     if (id === usuarioQueEjecutaId) throw new Error('No puede desactivar su propio usuario');
     const user = this.repository.findById(id);
     if (!user) throw new Error('Usuario no encontrado');
+    if (user.es_recuperacion) throw new Error('La cuenta de recuperación no se puede desactivar');
     this.repository.toggleActivo(id, activo);
   }
 
@@ -113,6 +118,7 @@ class AuthService {
     if (!passwordNueva || passwordNueva.length < 4) throw new Error('La nueva contraseña debe tener al menos 4 caracteres');
     const user = this.repository.findById(id);
     if (!user) throw new Error('Usuario no encontrado');
+    if (user.es_recuperacion) throw new Error('La cuenta de recuperación no se puede modificar desde aquí');
     this.repository.updatePassword(id, hashPassword(passwordNueva));
   }
 }

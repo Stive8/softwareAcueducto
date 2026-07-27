@@ -50,3 +50,49 @@ test('login() rechaza el marcador __PENDIENTE_GENERAR__ como si fuera la contras
     cerrarDbTemporal(ctx);
   }
 });
+
+test('toggleActivoUsuario() rechaza desactivar la cuenta de recuperación', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const service = new AuthService(ctx.dbService);
+    const recuperacion = ctx.dbService.getDb().prepare(`SELECT id FROM usuarios WHERE usuario = 'recuperacion'`).get();
+
+    assert.throws(
+      () => service.toggleActivoUsuario(recuperacion.id, false, 999),
+      /La cuenta de recuperación no se puede desactivar/
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('resetearPassword() rechaza modificar la cuenta de recuperación', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const service = new AuthService(ctx.dbService);
+    const recuperacion = ctx.dbService.getDb().prepare(`SELECT id FROM usuarios WHERE usuario = 'recuperacion'`).get();
+
+    assert.throws(
+      () => service.resetearPassword(recuperacion.id, 'otraClave123'),
+      /La cuenta de recuperación no se puede modificar desde aquí/
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('cambiarPassword() rechaza que la propia cuenta de recuperación cambie su contraseña', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const service = new AuthService(ctx.dbService);
+    const passwordGenerada = service.generarCredencialRecuperacionSiHaceFalta();
+    const recuperacion = ctx.dbService.getDb().prepare(`SELECT id FROM usuarios WHERE usuario = 'recuperacion'`).get();
+
+    assert.throws(
+      () => service.cambiarPassword(recuperacion.id, passwordGenerada, 'otraClave123'),
+      /La cuenta de recuperación no se puede modificar desde aquí/
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
