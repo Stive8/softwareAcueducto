@@ -1,7 +1,13 @@
+const crypto = require('crypto');
 const UsuarioRepository = require('../repositories/UsuarioRepository');
 const { hashPassword, verifyPassword, isHashed } = require('../utils/passwordHasher');
 
 const ROLES_VALIDOS = ['Administrador', 'Usuario', 'Consulta'];
+
+// Marcador de la contraseña de la cuenta 'recuperacion' antes de que
+// generarCredencialRecuperacionSiHaceFalta() la reemplace por una generada al azar (ver
+// migración 035_admin_recuperacion.sql, que siembra la fila con este mismo valor literal).
+const PASSWORD_PENDIENTE_GENERAR = '__PENDIENTE_GENERAR__';
 
 class AuthService {
   constructor(dbService) {
@@ -15,6 +21,13 @@ class AuthService {
 
     const user = this.repository.findByUsuario(usuario.trim());
     if (!user || !user.activo) {
+      throw new Error('Usuario o contraseña incorrectos');
+    }
+
+    // La cuenta de recuperación todavía no tiene una contraseña real generada (ver
+    // generarCredencialRecuperacionSiHaceFalta) — se rechaza con el mismo mensaje genérico,
+    // para no revelar que la cuenta existe ni que el marcador es tratable como valor especial.
+    if (user.es_recuperacion && user.password === PASSWORD_PENDIENTE_GENERAR) {
       throw new Error('Usuario o contraseña incorrectos');
     }
 
@@ -48,6 +61,22 @@ class AuthService {
     }
 
     this.repository.updatePassword(usuarioId, hashPassword(passwordNueva));
+  }
+
+  // Genera y guarda la contraseña real de la cuenta de recuperación la primera vez que se llama
+  // tras la migración 035 (mientras siga con el marcador PASSWORD_PENDIENTE_GENERAR). Se llama
+  // una única vez al arrancar la app (ver main.js) y devuelve la contraseña en texto plano SOLO
+  // esa vez, para mostrarla al usuario; llamadas posteriores devuelven null porque ya no hay
+  // nada pendiente.
+  generarCredencialRecuperacionSiHaceFalta() {
+    const cuenta = this.repository.findByUsuario('recuperacion');
+    if (!cuenta || cuenta.password !== PASSWORD_PENDIENTE_GENERAR) {
+      return null;
+    }
+
+    const passwordGenerada = crypto.randomBytes(12).toString('base64url');
+    this.repository.updatePassword(cuenta.id, hashPassword(passwordGenerada));
+    return passwordGenerada;
   }
 
   // --- Gestión de usuarios (solo Administrador, validado en la capa de permisos de main.js) ---
