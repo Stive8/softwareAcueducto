@@ -346,6 +346,21 @@ app.whenReady().then(async () => {
 
   // No bloquea el arranque: corre en segundo plano y solo actúa si ya pasó el intervalo.
   backupService.ejecutarSiCorresponde();
+}).catch((error) => {
+  // Sin este catch, cualquier error durante el arranque (migración fallida, base de datos
+  // corrupta, un Service que lanza en su constructor, etc.) quedaba como un rechazo de promesa
+  // sin manejar: la ventana nunca se creaba, pero el proceso principal de Electron seguía vivo
+  // e indefinido en Administrador de Tareas -sin ninguna pista de qué pasó-, y una nueva
+  // instancia (doble clic, o el instalador intentando sobrescribir el .exe) quedaba bloqueada
+  // por el candado de instancia única que ese proceso zombie seguía sosteniendo.
+  console.error('Error fatal al iniciar la aplicación:', error);
+  dialog.showErrorBox(
+    'Acueducto Admin no pudo iniciar',
+    `La aplicación encontró un error al arrancar y se cerrará.\n\n` +
+    `Detalle técnico: ${error.message}\n\n` +
+    `Si el problema persiste, comparta este mensaje con soporte técnico.`
+  );
+  app.exit(1);
 });
 
 // Respaldo automático en la nube al cerrar la app (no a una hora fija: esta es una app de
