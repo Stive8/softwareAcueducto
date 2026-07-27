@@ -96,3 +96,31 @@ test('cambiarPassword() rechaza que la propia cuenta de recuperación cambie su 
     cerrarDbTemporal(ctx);
   }
 });
+
+test('crearUsuario() rechaza el nombre reservado "recuperacion" (en cualquier capitalización)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const service = new AuthService(ctx.dbService);
+
+    assert.throws(
+      () => service.crearUsuario({ usuario: 'Recuperacion', password: 'clave123', nombreCompleto: 'Alguien', rol: 'Usuario' }),
+      /Ese nombre de usuario está reservado/
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getAll() no incluye la cuenta de recuperación', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const service = new AuthService(ctx.dbService);
+
+    const usuarios = service.getAll();
+
+    assert.ok(usuarios.length > 0, 'debe seguir listando al resto de usuarios (ej. admin)');
+    assert.ok(!usuarios.some(u => u.usuario === 'recuperacion'), 'no debe incluir la cuenta de recuperación');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

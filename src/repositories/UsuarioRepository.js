@@ -14,7 +14,7 @@ class UsuarioRepository {
   findAll() {
     return this.db.prepare(`
       SELECT id, usuario, nombre_completo, rol, activo, fecha_creacion, fecha_ultimo_acceso
-      FROM usuarios ORDER BY id ASC
+      FROM usuarios WHERE es_recuperacion = 0 ORDER BY id ASC
     `).all();
   }
 

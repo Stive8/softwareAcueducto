@@ -91,6 +91,7 @@ class AuthService {
 
   crearUsuario({ usuario, password, nombreCompleto, rol }) {
     if (!usuario || !usuario.trim()) throw new Error('El nombre de usuario es obligatorio');
+    if (usuario.trim().toLowerCase() === 'recuperacion') throw new Error('Ese nombre de usuario está reservado');
     if (!password || password.length < 4) throw new Error('La contraseña debe tener al menos 4 caracteres');
     if (!nombreCompleto || !nombreCompleto.trim()) throw new Error('El nombre completo es obligatorio');
     if (!ROLES_VALIDOS.includes(rol)) throw new Error('Rol inválido');
