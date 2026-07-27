@@ -281,7 +281,7 @@ function createWindow() {
 // así que todo el arranque real queda condicionado explícitamente al candado para que esa
 // instancia no abra la base de datos ni una ventana antes de cerrarse.
 if (tieneCandadoUnico) {
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Empaquetada (instalada): app.getPath('userData'), la única carpeta escribible una vez
   // instalada en Program Files. En desarrollo (npm start): la carpeta del proyecto, para que
   // borrar/inspeccionar data/acueducto.db localmente tenga efecto real.
@@ -299,6 +299,7 @@ app.whenReady().then(() => {
   gastoService = new GastoService(dbService);
   cajaService = new CajaService(dbService);
   authService = new AuthService(dbService);
+  const passwordRecuperacionGenerada = authService.generarCredencialRecuperacionSiHaceFalta();
   backupService = new BackupService(dbService);
   nuevoPuntoService = new NuevoPuntoService(dbService);
   reporteService = new ReporteService(dbService);
@@ -318,6 +319,20 @@ app.whenReady().then(() => {
   motorContabilizacionService = new MotorContabilizacionService(dbService);
   cloudBackupService = new CloudBackupOrchestratorService(dbService, baseDirDb);
   comprobanteCloudService = new ComprobanteCloudService(baseDirDb);
+
+  if (passwordRecuperacionGenerada) {
+    await dialog.showMessageBox({
+      type: 'info',
+      title: 'Cuenta de recuperación creada',
+      message: 'Se generó una cuenta de recuperación de emergencia para este sistema.',
+      detail:
+        `Usuario: recuperacion\n` +
+        `Contraseña: ${passwordRecuperacionGenerada}\n\n` +
+        `Guarde esta contraseña en un lugar seguro (fuera de este equipo). No se volverá a ` +
+        `mostrar, y sirve para recuperar el acceso si todas las demás cuentas Administrador ` +
+        `quedan desactivadas o sin contraseña conocida.`
+    });
+  }
 
   setupIpcHandlers();
   createWindow();
