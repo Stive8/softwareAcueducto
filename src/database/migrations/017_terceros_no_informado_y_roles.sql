@@ -4,7 +4,10 @@
 -- CHECK ni quitar NOT NULL con ALTER TABLE, así que se recrea la tabla siguiendo el
 -- procedimiento oficial de SQLite (https://www.sqlite.org/lang_altertable.html, sección "Making
 -- Other Kinds Of Table Schema Changes"): desactivar foreign_keys, crear la tabla nueva, copiar,
--- dropear la vieja, renombrar, reactivar foreign_keys.
+-- dropear la vieja, renombrar, reactivar foreign_keys. DatabaseService.runMigrations() detecta
+-- este PRAGMA y lo ejecuta fuera de la transacción que envuelve la migración (ver ese archivo):
+-- SQLite exige que `foreign_keys` se cambie sin una transacción/SAVEPOINT activo, así que no
+-- podía hacerse dentro del .exec(sql) de esta migración por sí sola.
 PRAGMA foreign_keys = OFF;
 
 CREATE TABLE terceros_nueva (
