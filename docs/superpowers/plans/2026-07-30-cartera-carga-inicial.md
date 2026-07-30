@@ -690,8 +690,8 @@ git commit -m "feat(import-cartera): lector de Datos.xlsx con detección de cand
 - Produces:
   - `normalizarCodigo(codigo) -> string` (mayúsculas, sin espacios ni guiones — para cruzar Excel↔BD)
   - `EQUIVALENCIAS -> Map<string,string>` (código Excel normalizado → código real en la base). Solo tiene `'R0081' -> 'S058'`.
-  - `HUERFANO_A_CREAR -> { codigo: 'C021', nombre: 'CASTRO DIEGO', categoriaNombre: 'Finca', motivoSuspension: 'no encontrado' }`
-  - `CODIGOS_PENDIENTES -> Array<string>` (`['S03321']` — no se crean hasta que el usuario decida, spec §10.11)
+  - `HUERFANOS_A_CREAR -> Array<{ codigo, nombre, motivoSuspension: string|null }>` — las dos cuentas que de verdad faltan en la base: `C021` "CASTRO DIEGO" (`motivoSuspension: 'no encontrado'`) y `S03321` "MARIN HERRERA ORFILIA" (`motivoSuspension: null`, se crea Activa: tiene teléfono propio en `Datos.xlsx`, nada indica que no exista). El usuario decidió el 2026-07-30 que `S03321` es un punto aparte de `S022`, no su co-propietaria.
+  - `CODIGOS_PENDIENTES -> Array<string>` (`[]` — no queda ningún código sin resolver)
   - `resolverCodigo(codigoExcel, codigosEnBase) -> { cuentaId: null, codigoNormalizado: string, esPendiente: boolean } | { codigoBase: string }` — ver Step 3 para la forma exacta.
 
 - [ ] **Step 1: Write the failing test**
@@ -702,7 +702,7 @@ Crear `scripts/import-cartera/codigos.test.js`:
 // scripts/import-cartera/codigos.test.js
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { normalizarCodigo, EQUIVALENCIAS, HUERFANO_A_CREAR, CODIGOS_PENDIENTES, resolverCodigo } = require('./codigos');
+const { normalizarCodigo, EQUIVALENCIAS, HUERFANOS_A_CREAR, CODIGOS_PENDIENTES, resolverCodigo } = require('./codigos');
 
 test('normalizarCodigo quita espacios, guiones y pasa a mayúsculas', () => {
   assert.equal(normalizarCodigo('r019'), 'R019');
@@ -712,17 +712,20 @@ test('normalizarCodigo quita espacios, guiones y pasa a mayúsculas', () => {
 
 test('EQUIVALENCIAS mapea R0081 a S058, la cuenta real (mismo teléfono, mismo pago)', () => {
   assert.equal(EQUIVALENCIAS.get('R0081'), 'S058');
-  assert.equal(EQUIVALENCIAS.size, 1, 'solo esa equivalencia está resuelta; S03321 queda pendiente');
+  assert.equal(EQUIVALENCIAS.size, 1, 'solo esa equivalencia; C021 y S03321 se crean, no se mapean');
 });
 
-test('HUERFANO_A_CREAR describe a C021, la única cuenta que de verdad falta', () => {
-  assert.equal(HUERFANO_A_CREAR.codigo, 'C021');
-  assert.equal(HUERFANO_A_CREAR.categoriaNombre, 'Finca');
-  assert.equal(HUERFANO_A_CREAR.motivoSuspension, 'no encontrado');
+test('HUERFANOS_A_CREAR describe a C021 y S03321, las dos cuentas que de verdad faltan', () => {
+  assert.equal(HUERFANOS_A_CREAR.length, 2);
+  assert.equal(HUERFANOS_A_CREAR[0].codigo, 'C021');
+  assert.equal(HUERFANOS_A_CREAR[0].motivoSuspension, 'no encontrado');
+  assert.equal(HUERFANOS_A_CREAR[1].codigo, 'S03321');
+  assert.equal(HUERFANOS_A_CREAR[1].nombre, 'MARIN HERRERA ORFILIA');
+  assert.equal(HUERFANOS_A_CREAR[1].motivoSuspension, null, 'tiene teléfono propio en Datos.xlsx, se crea Activa');
 });
 
-test('CODIGOS_PENDIENTES contiene S03321, sin resolver hasta que el usuario decida', () => {
-  assert.deepEqual(CODIGOS_PENDIENTES, ['S03321']);
+test('CODIGOS_PENDIENTES queda vacío: ya no hay códigos sin resolver', () => {
+  assert.deepEqual(CODIGOS_PENDIENTES, []);
 });
 
 test('resolverCodigo mapea un código Excel a su equivalente real cuando existe equivalencia', () => {
@@ -737,11 +740,11 @@ test('resolverCodigo encuentra directo cuando el código normalizado ya existe e
   assert.equal(r.codigoBase, 'R034');
 });
 
-test('resolverCodigo marca pendiente cuando el código está en CODIGOS_PENDIENTES', () => {
+test('resolverCodigo marca huérfano para S03321: ya no está pendiente, se crea', () => {
   const enBase = new Set([]);
   const r = resolverCodigo('S03321', enBase);
-  assert.equal(r.esPendiente, true);
-  assert.equal(r.codigoBase, undefined);
+  assert.equal(r.esHuerfano, true);
+  assert.equal(r.esPendiente, false);
 });
 
 test('resolverCodigo marca huérfano cuando no está en la base, no tiene equivalencia y no está pendiente', () => {
@@ -766,11 +769,12 @@ Crear `scripts/import-cartera/codigos.js`:
 // Conciliación de códigos entre los Excel y la base (spec §10.11). Se verificaron los 22
 // códigos que aparecían en algún Excel y no en la base bajo el mismo código normalizado:
 //  - 19 eran solo desajustes de formato (guiones/ceros), ya resueltos por normalizarCodigo.
-//  - C021 falta de verdad: se crea.
+//  - C021 falta de verdad: se crea, Suspendida, motivo "no encontrado".
 //  - R0081 es la MISMA cuenta que S058 (mismo teléfono en Datos.xlsx, mismo pago de $500.000
 //    del 2026-01-31 ya registrado bajo S058): se mapea, nunca se crea.
-//  - S03321 es ambiguo (¿punto aparte de Orfilia Marín Herrera, o co-propietaria de S022?):
-//    queda pendiente de decisión del usuario, no se crea.
+//  - S03321 "MARIN HERRERA ORFILIA" tiene fila y teléfono propios en Datos.xlsx, aunque en la
+//    base su nombre quedó fundido con el de la propietaria de S022. El usuario decidió
+//    (2026-07-30) que es un punto aparte, no la co-propietaria de S022: se crea, Activa.
 function normalizarCodigo(codigo) {
   return String(codigo).trim().toUpperCase().replace(/[\s-]/g, '');
 }
@@ -779,14 +783,12 @@ const EQUIVALENCIAS = new Map([
   ['R0081', 'S058']
 ]);
 
-const HUERFANO_A_CREAR = {
-  codigo: 'C021',
-  nombre: 'CASTRO DIEGO',
-  categoriaNombre: 'Finca',
-  motivoSuspension: 'no encontrado'
-};
+const HUERFANOS_A_CREAR = [
+  { codigo: 'C021', nombre: 'CASTRO DIEGO', motivoSuspension: 'no encontrado' },
+  { codigo: 'S03321', nombre: 'MARIN HERRERA ORFILIA', motivoSuspension: null }
+];
 
-const CODIGOS_PENDIENTES = ['S03321'];
+const CODIGOS_PENDIENTES = [];
 
 // codigosEnBase: Set de códigos YA normalizados (normalizarCodigo aplicado) existentes en `cuentas`.
 function resolverCodigo(codigoExcel, codigosEnBase) {
@@ -798,7 +800,7 @@ function resolverCodigo(codigoExcel, codigosEnBase) {
   return { esHuerfano: true, esPendiente: false };
 }
 
-module.exports = { normalizarCodigo, EQUIVALENCIAS, HUERFANO_A_CREAR, CODIGOS_PENDIENTES, resolverCodigo };
+module.exports = { normalizarCodigo, EQUIVALENCIAS, HUERFANOS_A_CREAR, CODIGOS_PENDIENTES, resolverCodigo };
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -837,7 +839,7 @@ git commit -m "feat(import-cartera): normalización de códigos y resolución de
       saldoReferencia2025: number | null,
       tipoDatosXlsx: string | null
     }>,
-    huerfanoACrear: { codigo, nombre, categoriaNombre, motivoSuspension },
+    huerfanosACrear: Array<{ codigo, nombre, categoriaNombre, motivoSuspension, aperturaOpaca }>,
     codigosPendientes: string[],
     discrepanciasTipo: Array<{ codigo, tipoDatosXlsx, categoriaNombre }>,   // TIPO no corresponde a la categoría cargada
     aperturasSinDato: Array<{ codigo }>   // fuente 'ninguna' que no se pudo clasificar
@@ -985,7 +987,7 @@ test('resuelve R0081 a la cuenta real S058 vía la tabla de equivalencias', asyn
   }
 });
 
-test('reporta C021 como huérfano a crear y S03321 como pendiente, sin incluirlos en cuentas', async () => {
+test('reporta C021 y S03321 como huérfanos a crear, sin incluirlos en cuentas ni en pendientes', async () => {
   const ctx = crearDbTemporal();
   try {
     const filePathCartera = await crearExcelCartera([
@@ -996,8 +998,12 @@ test('reporta C021 como huérfano a crear y S03321 como pendiente, sin incluirlo
 
     const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
     assert.equal(plan.cuentas.length, 0);
-    assert.equal(plan.huerfanoACrear.codigo, 'C021');
-    assert.deepEqual(plan.codigosPendientes, ['S03321']);
+    assert.equal(plan.huerfanosACrear.length, 2);
+    assert.equal(plan.huerfanosACrear[0].codigo, 'C021');
+    assert.equal(plan.huerfanosACrear[0].categoriaNombre, 'Finca');
+    assert.equal(plan.huerfanosACrear[1].codigo, 'S03321');
+    assert.equal(plan.huerfanosACrear[1].motivoSuspension, null);
+    assert.deepEqual(plan.codigosPendientes, []);
   } finally {
     cerrarDbTemporal(ctx);
   }
