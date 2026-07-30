@@ -40,7 +40,7 @@ function crearRecibo(dbService, { cuentaId, propietarioId, numero, fecha, valor,
 test('causa desde el mes del primer recibo hasta el mes indicado, con la tarifa histórica correcta', () => {
   const ctx = crearDbTemporal();
   try {
-    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService);
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T001');
     crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2022-01-15', valor: 5000 });
 
     const r = causarYAbonar({ cuentaId, dbService: ctx.dbService, usuarioId: 1, hastaAnio: 2024, hastaMes: 1 });
@@ -58,7 +58,7 @@ test('causa incluso en meses de período contable Cerrado (bypass intencional de
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
-    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService);
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T002');
     crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2022-01-15', valor: 5000 });
     db.prepare(`INSERT INTO periodos_contables (anio, mes, estado) VALUES (2022, 3, 'Cerrado')`).run();
 
@@ -75,7 +75,7 @@ test('causa incluso en meses de período contable Cerrado (bypass intencional de
 test('no causa en los meses en que la cuenta estaba Suspendida', () => {
   const ctx = crearDbTemporal();
   try {
-    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService);
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T003');
     crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2022-01-15', valor: 5000 });
     new CuentaEstadoRepository(ctx.dbService).cambiarEstado({ cuentaId, estado: 'Suspendido', fechaInicio: '2022-04-01' });
 
@@ -90,7 +90,7 @@ test('no causa en los meses en que la cuenta estaba Suspendida', () => {
 test('es idempotente: correr dos veces no duplica cargos', () => {
   const ctx = crearDbTemporal();
   try {
-    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService);
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T004');
     crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2022-01-15', valor: 5000 });
 
     causarYAbonar({ cuentaId, dbService: ctx.dbService, usuarioId: 1, hastaAnio: 2022, hastaMes: 6 });
@@ -105,7 +105,7 @@ test('es idempotente: correr dos veces no duplica cargos', () => {
 test('carga como abono cada recibo de sostenimiento/deuda existente, en orden cronológico (FIFO)', () => {
   const ctx = crearDbTemporal();
   try {
-    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService);
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T005');
     crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2022-01-15', valor: 5000 });
     crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 2, fecha: '2022-07-07', valor: 50000, concepto: 'ABONO A LA DEUDA' });
 
@@ -124,7 +124,7 @@ test('carga como abono cada recibo de sostenimiento/deuda existente, en orden cr
 test('excluye los recibos de "PAGO PUNTO DE AGUA" / conexión: no son abonos de cartera', () => {
   const ctx = crearDbTemporal();
   try {
-    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService);
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T006');
     crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2022-01-15', valor: 5000 });
     crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 2, fecha: '2022-02-10', valor: 300000, concepto: 'PAGO PUNTO DE AGUA' });
 
@@ -143,7 +143,7 @@ test('excluye recibos anulados', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
-    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService);
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T007');
     crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2022-01-15', valor: 5000 });
     crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 2, fecha: '2022-02-10', valor: 5000 });
     db.prepare(`UPDATE recibos SET estado = 'Anulado' WHERE numero_recibo = 2`).run();

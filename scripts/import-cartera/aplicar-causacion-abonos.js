@@ -57,7 +57,8 @@ function cargarAbonos({ cuentaId, dbService, usuarioId }) {
 
   // better-sqlite3 no trae REGEXP registrado por defecto: se filtra con dos LIKE, equivalentes
   // en la práctica al patrón PATRON_CONEXION (verificado contra los 2.429 recibos reales).
-  const detalles = db.prepare(`
+  // Excluye conexión (PUNTO DE AGUA). Incluye sostenimiento e "ABONO A LA DEUDA".
+  const recibosAbono = db.prepare(`
     SELECT rd.id AS recibo_detalle_id, rd.concepto, rd.valor, r.fecha_recibo
     FROM recibo_detalles rd
     INNER JOIN recibos r ON r.id = rd.recibo_id
@@ -65,6 +66,11 @@ function cargarAbonos({ cuentaId, dbService, usuarioId }) {
       AND rd.concepto NOT LIKE '%PUNTO%AGUA%' AND rd.concepto NOT LIKE '%PUNTO NUEVO%'
     ORDER BY r.fecha_recibo ASC, r.numero_recibo ASC, rd.id ASC
   `).all(cuentaId);
+
+  // Si hay abonos explícitos (ABONO A LA DEUDA), usarlos. Si no, usar pagos de sostenimiento.
+  const detalles = recibosAbono.filter(d =>
+    d.concepto.includes('ABONO') || !recibosAbono.some(x => x.concepto.includes('ABONO'))
+  );
 
   let creados = 0, total = 0;
   for (const d of detalles) {
