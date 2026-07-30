@@ -222,6 +222,10 @@ const Cuentas = {
               <div class="detail-value">${cuenta.direccion}</div>
             </div>
             <div class="detail-row">
+              <div class="detail-label">Nombre de Predio:</div>
+              <div class="detail-value">${cuenta.nombre_predio || '<em>Sin registrar</em>'}</div>
+            </div>
+            <div class="detail-row">
               <div class="detail-label">Propietario Actual:</div>
               <div class="detail-value">${cuenta.propietario_actual || '<em>Sin asignar</em>'}${cuenta.propietario_identificacion ? ` (${cuenta.propietario_identificacion})` : ''}</div>
             </div>
