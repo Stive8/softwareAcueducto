@@ -170,3 +170,117 @@ test('marca aperturasSinDato cuando la fuente es "ninguna" y la cuenta no aparec
     cerrarDbTemporal(ctx);
   }
 });
+
+test('categoriaNombre2024 SÍ cambia cuando mensualidadVieja y mensualidad2024 caen en categorías distintas', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    sembrarCuenta(ctx.dbService, 'X004');
+    const filePathCartera = await crearExcelCartera([
+      { codigo: 'X004', mensualidadVieja: 5000, mensualidad2024: 16000 }   // Finca -> Finca con piscina
+    ]);
+    const filePathDatos = await crearExcelDatos([]);
+
+    const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
+    assert.equal(plan.cuentas[0].categoriaNombre, 'Finca');
+    assert.equal(plan.cuentas[0].categoriaNombre2024, 'Finca con piscina');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('un código que no está en la base, ni en equivalencias, ni en pendientes, ni en huérfanos conocidos se reporta sin romper nada', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    const filePathCartera = await crearExcelCartera([
+      { codigo: 'Z999', mensualidadVieja: 5000, mensualidad2024: 5000 }
+    ]);
+    const filePathDatos = await crearExcelDatos([]);
+
+    const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
+    assert.equal(plan.cuentas.length, 0);
+    assert.equal(plan.huerfanosACrear.length, 0);
+    assert.deepEqual(plan.codigosPendientes, []);
+    assert.equal(plan.aperturasSinDato.length, 1);
+    assert.equal(plan.aperturasSinDato[0].codigo, 'Z999');
+    assert.match(plan.aperturasSinDato[0].motivo, /no reconocido/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('si el Excel trae fila para R0081 Y para S058, la segunda no duplica la cuenta ni la apertura', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    sembrarCuenta(ctx.dbService, 'S058');
+    const filePathCartera = await crearExcelCartera([
+      { codigo: 'R0081', mensualidadVieja: 5000, mensualidad2024: 5000, saldoPagos2021: 500000 },
+      { codigo: 'S058', mensualidadVieja: 5000, mensualidad2024: 5000, saldoPagos2021: 999000 }
+    ]);
+    const filePathDatos = await crearExcelDatos([]);
+
+    const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
+    assert.equal(plan.cuentas.length, 1, 'solo una entrada para S058, no dos');
+    assert.equal(plan.cuentas[0].aperturaOpaca.monto, 500000, 'se queda con la primera fila resuelta, no la duplica');
+    assert.equal(plan.aperturasSinDato.length, 1);
+    assert.match(plan.aperturasSinDato[0].motivo, /duplicada/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('si el código de equivalencia no existe en la base, se reporta en vez de guardar cuentaId undefined', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    // No se siembra S058: el objetivo de la equivalencia no existe en la base.
+    const filePathCartera = await crearExcelCartera([
+      { codigo: 'R0081', mensualidadVieja: 5000, mensualidad2024: 5000 }
+    ]);
+    const filePathDatos = await crearExcelDatos([]);
+
+    const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
+    assert.equal(plan.cuentas.length, 0);
+    assert.equal(plan.aperturasSinDato.length, 1);
+    assert.equal(plan.aperturasSinDato[0].codigo, 'S058');
+    assert.match(plan.aperturasSinDato[0].motivo, /no existe en la base/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('una mensualidad que no corresponde a ninguna categoría conocida se reporta, no rompe el plan', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    sembrarCuenta(ctx.dbService, 'X005');
+    const filePathCartera = await crearExcelCartera([
+      { codigo: 'X005', mensualidadVieja: 1, mensualidad2024: 1 }
+    ]);
+    const filePathDatos = await crearExcelDatos([]);
+
+    const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
+    assert.equal(plan.cuentas.length, 0);
+    assert.equal(plan.aperturasSinDato.length, 1);
+    assert.equal(plan.aperturasSinDato[0].codigo, 'X005');
+    assert.match(plan.aperturasSinDato[0].motivo, /no corresponde a ninguna categoría/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('el TIPO/observación de Datos.xlsx se toma de la fila de la cuenta real, no del código crudo (alias) del Excel de cartera', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    sembrarCuenta(ctx.dbService, 'S058');
+    const filePathCartera = await crearExcelCartera([{ codigo: 'R0081', mensualidadVieja: 5000, mensualidad2024: 5000 }]);
+    // Datos.xlsx trae filas separadas para el alias (R0081) y la cuenta real (S058), con TIPO distinto.
+    const filePathDatos = await crearExcelDatos([
+      { codigo: 'R0081', tipo: 'COML' },
+      { codigo: 'S058', tipo: 'CASA' }
+    ]);
+
+    const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
+    assert.equal(plan.cuentas[0].codigo, 'S058');
+    assert.equal(plan.cuentas[0].tipoDatosXlsx, 'CASA', 'debe tomar el TIPO de la fila de S058 (la cuenta real), no el de R0081');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
