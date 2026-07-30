@@ -4,6 +4,8 @@ const PeriodoContableRepository = require('../repositories/PeriodoContableReposi
 const PagoRepository = require('../repositories/PagoRepository');
 const { codificarPeriodo, decodificarPeriodo, anioMesDeFecha, primerDiaDelMes } =
   require('./cartera/periodos');
+const { MODOS, distribuir, calcularCubiertoHasta } = require('./cartera/imputacion');
+const { redondear, esMayor } = require('./cartera/dinero');
 
 // La cartera de un asociado como cuenta corriente en dinero.
 //
@@ -97,6 +99,70 @@ class CarteraService {
 
     return { creados, omitidos };
   }
+
+  // Registra plata recibida y la imputa contra los cargos según el modo. Los cuatro modos
+  // crean UN solo Abono; lo único que cambia es contra qué cargos se computa la cobertura.
+  // Lo que no alcanza a imputarse queda como saldo a favor (un exigible negativo), sin tabla
+  // aparte: por eso cuenta_creditos queda sin uso.
+  registrarAbono({ cuentaId, fecha, monto, modo, cargosElegidos = [],
+    reciboDetalleId = null, observaciones = null, usuarioId = null }) {
+    if (!cuentaId) throw new Error('La cuenta es obligatoria');
+    if (!fecha) throw new Error('La fecha del abono es obligatoria');
+    if (!(Number(monto) > 0)) throw new Error('El monto del abono debe ser mayor a cero');
+    if (!Object.values(MODOS).includes(modo)) throw new Error(`Modo de imputación inválido: ${modo}`);
+    if (modo === MODOS.MESES_ESPECIFICOS && cargosElegidos.length === 0) {
+      throw new Error('Debe elegir al menos un mes a cubrir');
+    }
+
+    const esOpaco = modo === MODOS.ABONO_SALDO_OPACO;
+    const exigible = esOpaco ? 0 : 1;
+
+    if (esOpaco) {
+      const { saldoOpaco } = this.repository.getSaldos(cuentaId);
+      if (esMayor(monto, saldoOpaco)) {
+        throw new Error(
+          `El abono ($${redondear(monto)}) no puede exceder el saldo histórico ` +
+          `de la cuenta ($${saldoOpaco})`
+        );
+      }
+    }
+
+    return this.repository.transaccion(() => {
+      const cargos = this.repository.getCargosPendientes(cuentaId, exigible);
+      const { imputaciones, sobrante } = distribuir({ modo, cargos, monto, cargosElegidos });
+
+      const abonoId = this.repository.crearMovimiento({
+        cuentaId, fecha, tipo: 'Abono', exigible,
+        monto: -redondear(monto),
+        reciboDetalleId, observaciones, usuarioId
+      });
+
+      for (const imp of imputaciones) {
+        this.repository.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
+      }
+
+      const imputado = redondear(imputaciones.reduce((s, i) => s + i.monto, 0));
+      return { abonoId, imputado, sobrante };
+    });
+  }
+
+  // Estado de la cartera de una cuenta. El saldo opaco va SIEMPRE separado y nunca entra al
+  // total a cobrar: es informativo, no exigible.
+  getEstadoCartera(cuentaId) {
+    const { deudaExigible, saldoOpaco } = this.repository.getSaldos(cuentaId);
+    const cubiertoHasta = calcularCubiertoHasta(this.repository.getCargosConCobertura(cuentaId, 1));
+
+    return {
+      deudaExigible,
+      saldoOpaco,
+      saldoAFavor: deudaExigible < 0 ? redondear(-deudaExigible) : 0,
+      cubiertoHasta,
+      totalCobrarHoy: deudaExigible > 0 ? deudaExigible : 0,
+      totalReferencia: redondear((deudaExigible > 0 ? deudaExigible : 0) + saldoOpaco)
+    };
+  }
 }
+
+CarteraService.MODOS = MODOS;
 
 module.exports = CarteraService;
