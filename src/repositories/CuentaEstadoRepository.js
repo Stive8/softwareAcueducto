@@ -65,14 +65,22 @@ class CuentaEstadoRepository {
     return this.db.transaction(() => {
       const abierta = this.getVigenciaAbierta(cuentaId);
       if (abierta) {
-        if (fechaInicio <= abierta.fecha_inicio) {
+        if (fechaInicio < abierta.fecha_inicio) {
           throw new Error(
             `La fecha ${fechaInicio} es anterior al inicio de la vigencia actual ` +
             `(${abierta.fecha_inicio}); corrija esa vigencia antes de crear una nueva`
           );
         }
-        this.db.prepare(`UPDATE cuenta_estados SET fecha_fin = ? WHERE id = ?`)
-          .run(diaAnterior(fechaInicio), abierta.id);
+        if (fechaInicio === abierta.fecha_inicio) {
+          // La vigencia abierta arrancó el mismo día que la corrección: nunca debió tener ese
+          // estado, se reemplaza entera en vez de "cerrarla el día anterior" (eso dejaría
+          // fecha_fin antes que fecha_inicio en esa misma fila). Mismo caso que resuelve
+          // CarteraService.recategorizar para cuenta_categorias.
+          this.db.prepare(`DELETE FROM cuenta_estados WHERE id = ?`).run(abierta.id);
+        } else {
+          this.db.prepare(`UPDATE cuenta_estados SET fecha_fin = ? WHERE id = ?`)
+            .run(diaAnterior(fechaInicio), abierta.id);
+        }
       }
 
       const r = this.db.prepare(`

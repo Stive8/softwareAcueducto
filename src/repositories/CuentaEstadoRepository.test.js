@@ -114,6 +114,31 @@ test('cambiarEstado rechaza una fecha anterior al inicio de la vigencia abierta'
   }
 });
 
+test('cambiarEstado con fecha IGUAL al inicio de la vigencia abierta corrige esa vigencia, no la rechaza', () => {
+  // Caso real: se descubre que la cuenta nunca debió tener el estado con que se sembró desde
+  // el arranque (ej. debió quedar Suspendida desde el mismo día en que se creó su vigencia
+  // inicial). fechaInicio === abierta.fecha_inicio no es "anterior": es la corrección de esa
+  // misma vigencia, y debe reemplazarla en vez de lanzar error (mismo caso que ya resuelve
+  // CarteraService.recategorizar para cuenta_categorias).
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CuentaEstadoRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+    repo.sembrarVigenciaInicial({ cuentaId, estado: 'Activo', fechaInicio: '2022-01-01' });
+
+    repo.cambiarEstado({ cuentaId, estado: 'Suspendido', fechaInicio: '2022-01-01', motivo: 'nunca existió' });
+
+    const vigencias = repo.getVigencias(cuentaId);
+    assert.equal(vigencias.length, 1, 'reemplaza la vigencia inicial, no la acumula');
+    assert.equal(vigencias[0].estado, 'Suspendido');
+    assert.equal(vigencias[0].fecha_inicio, '2022-01-01');
+    assert.equal(vigencias[0].fecha_fin, null);
+    assert.equal(repo.estadoEnMes(cuentaId, 2022, 1), 'Suspendido');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('cambiarEstado rechaza un estado que no existe', () => {
   const ctx = crearDbTemporal();
   try {
