@@ -8,10 +8,11 @@ class CuentaRepository {
     const offset = (page - 1) * limit;
 
     let query = `
-      SELECT 
+      SELECT
         c.id,
         c.codigo,
         c.direccion,
+        c.nombre_predio,
         c.estado,
         c.observaciones,
         c.fecha_creacion,
@@ -27,12 +28,12 @@ class CuentaRepository {
     `;
     const queryParams = [];
 
-    // La búsqueda cubre código, dirección, y el nombre/identificación de CUALQUIER propietario
-    // que haya tenido la cuenta (actual o histórico): en la práctica la gente rara vez recuerda
-    // su código, a veces no sabe si la cuenta sigue a nombre del propietario anterior, y a veces
-    // solo tiene la cédula a mano.
+    // La búsqueda cubre código, dirección, nombre de predio, y el nombre/identificación de
+    // CUALQUIER propietario que haya tenido la cuenta (actual o histórico): en la práctica la
+    // gente rara vez recuerda su código, a veces no sabe si la cuenta sigue a nombre del
+    // propietario anterior, y a veces solo tiene la cédula a mano.
     const condicionBusqueda = `(
-      c.codigo LIKE ? OR c.direccion LIKE ? OR EXISTS (
+      c.codigo LIKE ? OR c.direccion LIKE ? OR c.nombre_predio LIKE ? OR EXISTS (
         SELECT 1 FROM cuenta_propietarios cp2
         INNER JOIN propietarios p2 ON p2.id = cp2.propietario_id
         WHERE cp2.cuenta_id = c.id
@@ -42,7 +43,7 @@ class CuentaRepository {
 
     if (search) {
       query += ` AND ${condicionBusqueda}`;
-      queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+      queryParams.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
     }
 
     if (estado) {
@@ -107,11 +108,12 @@ class CuentaRepository {
   create(cuenta) {
     const ejecutar = this.db.transaction(() => {
       const result = this.db.prepare(`
-        INSERT INTO cuentas (codigo, direccion, estado, observaciones, lat_acometida, lon_acometida, lat_vivienda, lon_vivienda)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO cuentas (codigo, direccion, nombre_predio, estado, observaciones, lat_acometida, lon_acometida, lat_vivienda, lon_vivienda)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         cuenta.codigo,
         cuenta.direccion,
+        cuenta.nombre_predio || null,
         cuenta.estado || 'Activo',
         cuenta.observaciones || null,
         cuenta.lat_acometida ?? null,
@@ -139,7 +141,7 @@ class CuentaRepository {
   update(id, cuenta) {
     const stmt = this.db.prepare(`
       UPDATE cuentas
-      SET codigo = ?, direccion = ?, observaciones = ?,
+      SET codigo = ?, direccion = ?, nombre_predio = ?, observaciones = ?,
           lat_acometida = ?, lon_acometida = ?, lat_vivienda = ?, lon_vivienda = ?,
           fecha_actualizacion = CURRENT_TIMESTAMP
       WHERE id = ?
@@ -148,6 +150,7 @@ class CuentaRepository {
     stmt.run(
       cuenta.codigo,
       cuenta.direccion,
+      cuenta.nombre_predio || null,
       cuenta.observaciones || null,
       cuenta.lat_acometida ?? null,
       cuenta.lon_acometida ?? null,
