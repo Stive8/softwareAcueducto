@@ -4,7 +4,15 @@ const assert = require('node:assert/strict');
 const { crearDbTemporal, cerrarDbTemporal } = require('../../src/testUtils/dbTemporal');
 const { causarYAbonar } = require('./aplicar-causacion-abonos');
 const CarteraService = require('../../src/services/CarteraService');
+const CarteraRepository = require('../../src/repositories/CarteraRepository');
 const CuentaEstadoRepository = require('../../src/repositories/CuentaEstadoRepository');
+
+function crearAperturaOpaca(dbService, cuentaId, monto) {
+  new CarteraRepository(dbService).crearMovimiento({
+    cuentaId, fecha: '2021-12-31', tipo: 'AperturaOpaca', exigible: 0, monto,
+    observaciones: 'Carga inicial cartera 2026-07 (fixture)'
+  });
+}
 
 function sembrarCuentaConCategoria(dbService, codigo, { tarifa = 5000, tarifa2024 = 10000 } = {}) {
   const db = dbService.getDb();
@@ -37,7 +45,7 @@ function crearRecibo(dbService, { cuentaId, propietarioId, numero, fecha, valor,
   db.prepare(`INSERT INTO recibo_detalles (recibo_id, concepto, valor) VALUES (?, ?, ?)`).run(reciboId, concepto, valor);
 }
 
-test('causa desde el mes del primer recibo hasta el mes indicado, con la tarifa histórica correcta', () => {
+test('causa desde 2022-01 hasta el mes indicado, con la tarifa histórica correcta', () => {
   const ctx = crearDbTemporal();
   try {
     const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T001');
@@ -166,6 +174,83 @@ test('excluye recibos anteriores al 2022-01-01: ya están implícitos en la aper
 
     assert.equal(r.abonosCreados, 1, 'solo el recibo de 2022; el de 2019 ya está implícito en la apertura opaca');
     assert.equal(r.totalAbonado, 5000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('el excedente de un abono FIFO se aplica contra el saldo histórico opaco, no se pierde', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T009');
+    crearAperturaOpaca(ctx.dbService, cuentaId, 300000);
+    // Causado ene-mar 2022 = 3 x 5.000 = 15.000 exigible; el pago de 65.000 sobra 50.000.
+    crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2022-01-15', valor: 65000, concepto: 'ABONO A LA DEUDA' });
+
+    const r = causarYAbonar({ cuentaId, dbService: ctx.dbService, usuarioId: 1, hastaAnio: 2022, hastaMes: 3 });
+
+    assert.equal(r.cargosCreados, 3);
+    assert.equal(r.aplicadoAOpaco, 50000, 'el excedente sobre la deuda exigible va contra el saldo opaco');
+    assert.equal(r.sobranteFinal, 0, 'el saldo opaco alcanzaba a absorberlo entero');
+
+    const estado = new CarteraService(ctx.dbService).getEstadoCartera(cuentaId);
+    assert.equal(estado.saldoOpaco, 250000, '300.000 - 50.000');
+    // Nota: el abono FIFO se registra por su monto completo en el bucket exigible, así que el
+    // excedente queda además como saldo a favor exigible (-50.000) al mismo tiempo que baja el
+    // opaco. totalReferencia (lo que se cobra) sigue siendo correcto porque el exigible negativo
+    // se clampea a 0, pero la cuenta muestra un "saldo a favor" que ya se aplicó al histórico.
+    // Punto abierto reportado en la revisión final; no se decide acá.
+    assert.equal(estado.totalReferencia, 250000, 'lo cobrable + histórico queda bien pese a lo anterior');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('un excedente que supera la deuda exigible Y el saldo opaco deja el opaco en 0 y reporta el sobrante, sin inventarle destino', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T010');
+    crearAperturaOpaca(ctx.dbService, cuentaId, 10000);
+    // Exigible ene-mar 2022 = 15.000, opaco = 10.000; el pago de 100.000 deja 75.000 a favor.
+    crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2022-01-15', valor: 100000, concepto: 'ABONO A LA DEUDA' });
+
+    const r = causarYAbonar({ cuentaId, dbService: ctx.dbService, usuarioId: 1, hastaAnio: 2022, hastaMes: 3 });
+
+    assert.equal(r.aplicadoAOpaco, 10000, 'solo se aplica hasta agotar el saldo opaco, nunca más');
+    assert.equal(r.sobranteFinal, 75000, '100.000 - 15.000 exigible - 10.000 opaco');
+
+    const estado = new CarteraService(ctx.dbService).getEstadoCartera(cuentaId);
+    assert.equal(estado.saldoOpaco, 0, 'el saldo opaco llega a cero, no queda negativo');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('causa desde el piso 2022-01 aunque la cuenta no tenga ningún recibo (la deuda se acumula se pague o no)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const { cuentaId } = sembrarCuentaConCategoria(ctx.dbService, 'T011');   // sin recibos
+
+    const r = causarYAbonar({ cuentaId, dbService: ctx.dbService, usuarioId: 1, hastaAnio: 2022, hastaMes: 3 });
+
+    assert.equal(r.cargosCreados, 3, 'ene, feb, mar 2022: sin ancla de recibo se usa el piso 2022-01');
+    assert.equal(r.abonosCreados, 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('causa desde 2022-01 aunque el primer recibo de la cuenta sea muy posterior', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T012');
+    crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2023-05-10', valor: 5000 });
+
+    const r = causarYAbonar({ cuentaId, dbService: ctx.dbService, usuarioId: 1, hastaAnio: 2023, hastaMes: 5 });
+
+    assert.equal(r.cargosCreados, 17, 'ene-2022 a may-2023, no solo desde el mes del primer recibo');
+    const carteraService = new CarteraService(ctx.dbService);
+    assert.ok(carteraService.repository.getCargoMensual(cuentaId, 2022, 1), 'el mes de piso también se causa');
   } finally {
     cerrarDbTemporal(ctx);
   }

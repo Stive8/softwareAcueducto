@@ -63,13 +63,13 @@ function sembrarEstado(estadoRepo, db, cuenta) {
   return true;
 }
 
-function crearAperturaSiHaceFalta(db, carteraRepo, cuentaId, apertura) {
+function crearAperturaSiHaceFalta(db, carteraRepo, cuentaId, apertura, usuarioId) {
   if (!(apertura.monto > 0)) return false;
   const yaExiste = db.prepare(`SELECT 1 FROM cartera_movimientos WHERE cuenta_id = ? AND tipo = 'AperturaOpaca'`).get(cuentaId);
   if (yaExiste) return false;
   carteraRepo.crearMovimiento({
     cuentaId, fecha: '2021-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: apertura.monto,
-    observaciones: `Carga inicial cartera 2026-07 (fuente: ${apertura.fuente})`
+    observaciones: `Carga inicial cartera 2026-07 (fuente: ${apertura.fuente})`, usuarioId
   });
   return true;
 }
@@ -118,7 +118,7 @@ function aplicarBase({ plan, dbService, usuarioId }) {
       asignarCategoria(db, categoriaRepo, cuenta);
       categoriasAsignadas++;
       if (sembrarEstado(estadoRepo, db, cuenta)) cuentasSuspendidas++;
-      if (crearAperturaSiHaceFalta(db, carteraRepo, cuenta.cuentaId, cuenta.aperturaOpaca)) {
+      if (crearAperturaSiHaceFalta(db, carteraRepo, cuenta.cuentaId, cuenta.aperturaOpaca, usuarioId)) {
         aperturasCreadas++;
         totalApertura += cuenta.aperturaOpaca.monto;
       }
@@ -130,7 +130,7 @@ function aplicarBase({ plan, dbService, usuarioId }) {
       if (creado) {
         huerfanosCreados++;
         if (huerfano.motivoSuspension) cuentasSuspendidas++;
-        if (crearAperturaSiHaceFalta(db, carteraRepo, cuentaId, huerfano.aperturaOpaca)) {
+        if (crearAperturaSiHaceFalta(db, carteraRepo, cuentaId, huerfano.aperturaOpaca, usuarioId)) {
           aperturasCreadas++;
           totalApertura += huerfano.aperturaOpaca.monto;
         }
