@@ -1039,7 +1039,7 @@ Crear `scripts/import-cartera/preview.js`:
 const { leerCartera } = require('./leer-cartera');
 const { leerDatosMaestros } = require('./leer-datos');
 const { categoriaPorMensualidad } = require('./categorizar');
-const { normalizarCodigo, resolverCodigo, HUERFANO_A_CREAR, CODIGOS_PENDIENTES } = require('./codigos');
+const { normalizarCodigo, resolverCodigo, HUERFANOS_A_CREAR, CODIGOS_PENDIENTES } = require('./codigos');
 
 function cargarCodigosEnBase(dbService) {
   const filas = dbService.getDb().prepare(`SELECT codigo FROM cuentas`).all();
@@ -1062,7 +1062,7 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
   const cuentas = [];
   const discrepanciasTipo = [];
   const aperturasSinDato = [];
-  let huerfanoACrear = null;
+  const huerfanosACrear = [];
   const codigosPendientes = [];
 
   for (const c of registrosCartera) {
@@ -1070,10 +1070,12 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
 
     if (resolucion.esPendiente) { codigosPendientes.push(normalizarCodigo(c.codigo)); continue; }
     if (resolucion.esHuerfano) {
-      // Solo se conoce un huérfano real (C021); cualquier otro huérfano no anticipado se
-      // reporta igual, para que quien corra el importador lo vea y lo resuelva a mano.
-      if (normalizarCodigo(c.codigo) === HUERFANO_A_CREAR.codigo) {
-        huerfanoACrear = { ...HUERFANO_A_CREAR, aperturaOpaca: c.aperturaOpaca };
+      // Los únicos huérfanos reales son los de HUERFANOS_A_CREAR (C021 y S03321); cualquier otro
+      // huérfano no anticipado se reporta aparte, para que quien corra el importador lo vea y lo
+      // resuelva a mano. Todos los huérfanos conocidos son categoría 'Finca'.
+      const huerfanoConocido = HUERFANOS_A_CREAR.find((h) => h.codigo === normalizarCodigo(c.codigo));
+      if (huerfanoConocido) {
+        huerfanosACrear.push({ ...huerfanoConocido, categoriaNombre: 'Finca', aperturaOpaca: c.aperturaOpaca });
       } else {
         aperturasSinDato.push({ codigo: c.codigo, motivo: 'huérfano no reconocido: revisar manualmente' });
       }
@@ -1112,7 +1114,7 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
     });
   }
 
-  return { cuentas, huerfanoACrear, codigosPendientes, discrepanciasTipo, aperturasSinDato };
+  return { cuentas, huerfanosACrear, codigosPendientes, discrepanciasTipo, aperturasSinDato };
 }
 
 module.exports = { generarPlan };
@@ -1140,7 +1142,7 @@ git commit -m "feat(import-cartera): preview.js arma el plan de acciones cruzand
 
 **Interfaces:**
 - Consumes: `Plan` de Task 6 (misma forma), `CategoriaRepository`, `CuentaRepository`, `CuentaEstadoRepository`, `CarteraRepository`, `periodos.js` (`primerDiaDelMes`).
-- Produces: `aplicarBase({ plan, dbService, usuarioId }) -> { categoriasAsignadas, cuentasSuspendidas, huerfanoCreado: boolean, aperturasCreadas, totalApertura }`
+- Produces: `aplicarBase({ plan, dbService, usuarioId }) -> { categoriasAsignadas, cuentasSuspendidas, huerfanosCreados: number, aperturasCreadas, totalApertura }`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1166,7 +1168,7 @@ function sembrarCuenta(dbService, codigo, estado = 'Activo') {
 }
 
 function planBase(cuentas, extra = {}) {
-  return { cuentas, huerfanoACrear: null, codigosPendientes: [], discrepanciasTipo: [], aperturasSinDato: [], ...extra };
+  return { cuentas, huerfanosACrear: [], codigosPendientes: [], discrepanciasTipo: [], aperturasSinDato: [], ...extra };
 }
 
 test('limpia las tarifas inválidas y carga el histórico limpio de las 4 categorías', () => {
@@ -1285,11 +1287,14 @@ test('crea AperturaOpaca con exigible=0 solo cuando el monto es mayor a cero', (
   }
 });
 
-test('crea C021 como cuenta nueva, Suspendida, con su apertura', () => {
+test('crea C021 y S03321 como cuentas nuevas, con su apertura cada una', () => {
   const ctx = crearDbTemporal();
   try {
     const plan = planBase([], {
-      huerfanoACrear: { codigo: 'C021', nombre: 'CASTRO DIEGO', categoriaNombre: 'Finca', motivoSuspension: 'no encontrado', aperturaOpaca: { monto: 0, fuente: 'ninguna' } }
+      huerfanosACrear: [
+        { codigo: 'C021', nombre: 'CASTRO DIEGO', categoriaNombre: 'Finca', motivoSuspension: 'no encontrado', aperturaOpaca: { monto: 0, fuente: 'ninguna' } },
+        { codigo: 'S03321', nombre: 'MARIN HERRERA ORFILIA', categoriaNombre: 'Finca', motivoSuspension: null, aperturaOpaca: { monto: 180000, fuente: 'saldo2020' } }
+      ]
     });
 
     const r = aplicarBase({ plan, dbService: ctx.dbService, usuarioId: 1 });
@@ -1298,10 +1303,18 @@ test('crea C021 como cuenta nueva, Suspendida, con su apertura', () => {
     const c021 = db.prepare(`SELECT id, estado FROM cuentas WHERE codigo = 'C021'`).get();
     assert.ok(c021, 'C021 se creó');
     assert.equal(c021.estado, 'Suspendido');
-    assert.equal(r.huerfanoCreado, true);
+
+    const s03321 = db.prepare(`SELECT id, estado FROM cuentas WHERE codigo = 'S03321'`).get();
+    assert.ok(s03321, 'S03321 se creó');
+    assert.equal(s03321.estado, 'Activo', 'motivoSuspension null: se crea Activa, no Suspendida');
+
+    assert.equal(r.huerfanosCreados, 2);
 
     const estadoRepo = new CuentaEstadoRepository(ctx.dbService);
     assert.equal(estadoRepo.getVigenciaAbierta(c021.id).motivo, 'no encontrado');
+
+    const carteraRepo = new CarteraRepository(ctx.dbService);
+    assert.equal(carteraRepo.getSaldos(s03321.id).saldoOpaco, 180000);
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -1419,8 +1432,11 @@ function crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, huerfano) {
   db.prepare(`INSERT INTO propietarios (nombre_completo) VALUES (?)`).run(huerfano.nombre);
   const propietarioId = db.prepare(`SELECT last_insert_rowid() AS id`).get().id;
 
+  // motivoSuspension null significa "se crea Activa" (caso S03321: tiene teléfono propio en
+  // Datos.xlsx, nada indica que no exista) — solo se suspende cuando hay un motivo real (C021).
+  const estadoInicial = huerfano.motivoSuspension ? 'Suspendido' : 'Activo';
   const cuentaId = cuentaRepo.create({
-    codigo: huerfano.codigo, direccion: 'Sin dirección registrada', estado: 'Suspendido',
+    codigo: huerfano.codigo, direccion: 'Sin dirección registrada', estado: estadoInicial,
     observaciones: 'Creada en la carga inicial de cartera: aparece en el Excel, no en la base.',
     categoria_id: categoria.id, categoria_fecha_inicio: ANCLA_CATEGORIA
   });
@@ -1429,7 +1445,9 @@ function crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, huerfano) {
     .run(cuentaId, propietarioId, ANCLA_CATEGORIA);
 
   estadoRepo.sembrarVigenciaInicial({ cuentaId, estado: 'Activo', fechaInicio: ANCLA_CATEGORIA, motivo: 'Carga inicial cartera 2026-07' });
-  estadoRepo.cambiarEstado({ cuentaId, estado: 'Suspendido', fechaInicio: ANCLA_CATEGORIA, motivo: huerfano.motivoSuspension });
+  if (huerfano.motivoSuspension) {
+    estadoRepo.cambiarEstado({ cuentaId, estado: 'Suspendido', fechaInicio: ANCLA_CATEGORIA, motivo: huerfano.motivoSuspension });
+  }
 
   return { cuentaId, creado: true };
 }
@@ -1456,20 +1474,20 @@ function aplicarBase({ plan, dbService, usuarioId }) {
       }
     }
 
-    let huerfanoCreado = false;
-    if (plan.huerfanoACrear) {
-      const { creado, cuentaId } = crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, plan.huerfanoACrear);
-      huerfanoCreado = creado;
+    let huerfanosCreados = 0;
+    for (const huerfano of plan.huerfanosACrear) {
+      const { creado, cuentaId } = crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, huerfano);
       if (creado) {
-        cuentasSuspendidas++;
-        if (crearAperturaSiHaceFalta(db, carteraRepo, cuentaId, plan.huerfanoACrear.aperturaOpaca)) {
+        huerfanosCreados++;
+        if (huerfano.motivoSuspension) cuentasSuspendidas++;
+        if (crearAperturaSiHaceFalta(db, carteraRepo, cuentaId, huerfano.aperturaOpaca)) {
           aperturasCreadas++;
-          totalApertura += plan.huerfanoACrear.aperturaOpaca.monto;
+          totalApertura += huerfano.aperturaOpaca.monto;
         }
       }
     }
 
-    return { categoriasAsignadas, cuentasSuspendidas, huerfanoCreado, aperturasCreadas, totalApertura };
+    return { categoriasAsignadas, cuentasSuspendidas, huerfanosCreados, aperturasCreadas, totalApertura };
   })();
 }
 
@@ -2086,7 +2104,7 @@ if (require.main === module) {
     console.log(`Categorías asignadas: ${r.aplicarBase.categoriasAsignadas} | suspendidas: ${r.aplicarBase.cuentasSuspendidas} | apertura total: $${r.aplicarBase.totalApertura.toLocaleString('es-CO')}`);
     console.log(`Causación: ${r.causacion.cargosCreados} cargos | Abonos: ${r.causacion.abonosCreados}`);
     console.log(`Conciliación: ${r.conciliacion.coinciden}/${r.conciliacion.comparadas} coinciden. Diferencias: ${r.conciliacion.difieren.length}`);
-    if (r.plan.huerfanoACrear) console.log(`Huérfano creado: ${r.plan.huerfanoACrear.codigo}`);
+    if (r.plan.huerfanosACrear.length) console.log(`Huérfanos creados: ${r.plan.huerfanosACrear.map((h) => h.codigo).join(', ')}`);
     if (r.plan.codigosPendientes.length) console.log(`Códigos pendientes de decisión: ${r.plan.codigosPendientes.join(', ')}`);
     if (r.plan.discrepanciasTipo.length) console.log(`Discrepancias TIPO vs categoría: ${r.plan.discrepanciasTipo.length} (ver reporte)`);
     console.log(`Reporte completo: ${reportePath}`);
@@ -2131,7 +2149,7 @@ git commit -m "feat(import-cartera): conciliación contra el Excel y CLI de comm
 | 8. Causar 2022→hoy + abonos desde recibos | Task 8 |
 | 9. Reporte de ~44 discrepancias TIPO, sin aplicar | Task 6 (`discrepanciasTipo`) |
 | 10. Conciliación contra `SALDO A 31/12/2025` | Task 9 (`conciliar.js`) |
-| 11. Códigos huérfanos (C021 crear, R0081 mapear, S03321 pendiente) | Task 5 (`codigos.js`), Task 7 |
+| 11. Códigos huérfanos (C021 y S03321 crear, R0081 mapear) | Task 5 (`codigos.js`), Task 7 |
 
 **2. El paso 5 del spec (recuperar meses de `pago_periodos` parseando texto) queda fuera de este plan**, y es una decisión de alcance explícita: el motor de cartera **no depende de `pago_periodos`** (Plan 1, §"pago_periodos se conserva como archivo histórico") — la causación sale de `cuenta_categorias`/`categoria_tarifas`, y los abonos salen de `recibo_detalles` directamente, no de qué mes les asignó el importador viejo. Recuperar esos meses mejoraría el detalle mes-a-mes de `pago_periodos` (que ya no es la fuente de la deuda), pero no cambia ni un peso del saldo que calcula `getEstadoCartera`. Se documenta como mejora futura, no como bloqueante.
 
@@ -2148,7 +2166,6 @@ git commit -m "feat(import-cartera): conciliación contra el Excel y CLI de comm
 
 - **Paso 5 del spec** (recuperación de meses vía texto de `recibo_detalles.concepto`) — ver Self-Review punto 2.
 - **Aplicar las ~44 recategorizaciones** — el usuario las hace a mano con `CarteraService.recategorizar` después de revisar el reporte que este plan genera (spec §11.1).
-- **Crear `S03321`** — pendiente de que el usuario decida si es un punto aparte o la co-propietaria de `S022` (spec §10.11).
 - **Actualización de datos maestros** (cédula, teléfono, coordenadas, `NOMBRE FINCA`) — entregable aparte, spec §12.
 - **Integración en la UI** (pantalla de pagos, IPC, estado de cuenta) — Plan 3, todavía sin escribir.
 
