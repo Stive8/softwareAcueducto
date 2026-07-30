@@ -105,3 +105,66 @@ test('ignora filas sin código', async () => {
   assert.equal(registros.length, 1);
   assert.equal(registros[0].codigo, 'X002');
 });
+
+test('celda15 guardada gana sobre mapa de movimiento cuando ambos existen con valores distintos', async () => {
+  const wb = new ExcelJS.Workbook();
+
+  const mov = wb.addWorksheet('estado cta con movimiento');
+  mov.addRow([]);
+  mov.addRow([]);
+  mov.getRow(3).getCell(1).value = 'R050';
+  mov.getRow(3).getCell(7).value = 999000;   // valor en mapa
+
+  const est = wb.addWorksheet('ESTADO DE CUENTA ASOCIADOS');
+  est.getRow(2).getCell(4).value = 'R050';
+  est.getRow(2).getCell(7).value = 5000;
+  est.getRow(2).getCell(15).value = 330000;  // celda15 guardada (distinta del mapa)
+
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xlsx-precedencia-')), 'f.xlsx');
+  await wb.xlsx.writeFile(file);
+
+  const registros = await leerCartera(file);
+  const r050 = registros.find((r) => r.codigo === 'R050');
+  assert.deepEqual(r050.aperturaOpaca, { monto: 330000, fuente: 'vlookup' }, 'celda15 guardada debe ganar sobre mapa');
+});
+
+test('duplicados en hoja fuente usan la PRIMERA fila, nunca la última', async () => {
+  const wb = new ExcelJS.Workbook();
+
+  const mov = wb.addWorksheet('estado cta con movimiento');
+  mov.addRow([]);
+  mov.addRow([]);
+  mov.getRow(3).getCell(1).value = 'R055';
+  mov.getRow(3).getCell(7).value = 100000;   // PRIMERA fila con R055
+  mov.getRow(4).getCell(1).value = 'R055';
+  mov.getRow(4).getCell(7).value = 500000;   // SEGUNDA fila con R055 (debe ignorarse)
+
+  const est = wb.addWorksheet('ESTADO DE CUENTA ASOCIADOS');
+  est.getRow(2).getCell(4).value = 'R055';
+  est.getRow(2).getCell(7).value = 5000;
+  // celda15 vacía para forzar resolución vía mapa
+
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xlsx-duplicados-')), 'f.xlsx');
+  await wb.xlsx.writeFile(file);
+
+  const registros = await leerCartera(file);
+  const r055 = registros.find((r) => r.codigo === 'R055');
+  assert.deepEqual(r055.aperturaOpaca, { monto: 100000, fuente: 'vlookup' }, 'debe usar la PRIMERA fila del código duplicado en hoja fuente');
+});
+
+test('mensualidad2024 fallback a mensualidadVieja cuando columna 26 falta', async () => {
+  const wb = new ExcelJS.Workbook();
+  wb.addWorksheet('estado cta con movimiento').addRow([]);
+
+  const est = wb.addWorksheet('ESTADO DE CUENTA ASOCIADOS');
+  est.getRow(2).getCell(4).value = 'X003';
+  est.getRow(2).getCell(7).value = 7500;  // mensualidadVieja
+  // SIN columna 26 (mensualidad2024)
+
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xlsx-fallback-mens-')), 'f.xlsx');
+  await wb.xlsx.writeFile(file);
+
+  const registros = await leerCartera(file);
+  assert.equal(registros[0].mensualidadVieja, 7500);
+  assert.equal(registros[0].mensualidad2024, 7500, 'mensualidad2024 debe caer a mensualidadVieja cuando falta columna 26');
+});

@@ -34,7 +34,7 @@ function construirMapaMovimiento(ws) {
     const codigo = texto(valorCelda(row.getCell(COL_MOV.codigo)));
     if (!codigo) continue;
     const saldoMes = num(valorCelda(row.getCell(COL_MOV.saldoMes)));
-    if (saldoMes !== null) mapa.set(codigo, saldoMes);
+    if (saldoMes !== null && !mapa.has(codigo)) mapa.set(codigo, saldoMes);
   }
   return mapa;
 }
