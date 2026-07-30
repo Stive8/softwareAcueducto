@@ -36,3 +36,29 @@ test('reporteCuentas() incluye las coordenadas de acometida y vivienda, en colum
     cerrarDbTemporal(ctx);
   }
 });
+
+test('reporteCuentas() incluye el nombre de predio, en columnas y filas', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const cuentaRepo = new CuentaRepository(ctx.dbService);
+    const categoriaId = ctx.dbService.getDb().prepare(`SELECT id FROM categorias WHERE nombre = 'Finca'`).get().id;
+
+    cuentaRepo.create({
+      codigo: 'C-201',
+      direccion: 'Vereda El Guayabo',
+      categoria_id: categoriaId,
+      nombre_predio: 'Finca El Guayabo'
+    });
+
+    const service = new ReporteService(ctx.dbService);
+    const reporte = service.reporteCuentas({});
+
+    const keysColumnas = reporte.columnas.map(c => c.key);
+    assert.ok(keysColumnas.includes('nombre_predio'));
+
+    const fila = reporte.filas.find(f => f.codigo === 'C-201');
+    assert.equal(fila.nombre_predio, 'Finca El Guayabo');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
