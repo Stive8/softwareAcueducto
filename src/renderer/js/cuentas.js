@@ -135,6 +135,7 @@ const Cuentas = {
           <tr>
             <th>Código</th>
             <th>Dirección</th>
+            <th>Nombre de Predio</th>
             <th>Propietario</th>
             <th>Categoría</th>
             <th>Estado</th>
@@ -147,6 +148,7 @@ const Cuentas = {
             <tr>
               <td><strong>${cuenta.codigo}</strong></td>
               <td>${cuenta.direccion}</td>
+              <td>${cuenta.nombre_predio || '-'}</td>
               <td>${cuenta.propietario_actual || '<em>Sin asignar</em>'}</td>
               <td>${cuenta.categoria_actual || '<em>Sin asignar</em>'}</td>
               <td><span class="badge badge-${cuenta.estado.toLowerCase()}">${cuenta.estado}</span></td>
