@@ -152,6 +152,33 @@ test('duplicados en hoja fuente usan la PRIMERA fila, nunca la última', async (
   assert.deepEqual(r055.aperturaOpaca, { monto: 100000, fuente: 'vlookup' }, 'debe usar la PRIMERA fila del código duplicado en hoja fuente');
 });
 
+test('el fallback VLOOKUP compara códigos normalizados: el mismo código escrito distinto en cada hoja se resuelve igual', async () => {
+  const wb = new ExcelJS.Workbook();
+
+  const mov = wb.addWorksheet('estado cta con movimiento');
+  mov.addRow([]);
+  mov.addRow([]);
+  mov.getRow(3).getCell(1).value = 'R-034';    // con guion en la hoja fuente
+  mov.getRow(3).getCell(7).value = 240000;
+  mov.getRow(4).getCell(1).value = ' s058 ';   // con espacios y en minúscula
+  mov.getRow(4).getCell(7).value = 180000;
+
+  const est = wb.addWorksheet('ESTADO DE CUENTA ASOCIADOS');
+  est.getRow(2).getCell(4).value = 'R034';     // sin guion en la hoja de estado
+  est.getRow(2).getCell(7).value = 5000;
+  est.getRow(3).getCell(4).value = 'S058';
+  est.getRow(3).getCell(7).value = 5000;
+
+  const file = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xlsx-normalizado-')), 'f.xlsx');
+  await wb.xlsx.writeFile(file);
+
+  const registros = await leerCartera(file);
+  const r034 = registros.find((r) => r.codigo === 'R034');
+  assert.deepEqual(r034.aperturaOpaca, { monto: 240000, fuente: 'vlookup' }, 'R-034 y R034 son el mismo código: no debe caer a saldo2020 ni a "ninguna"');
+  const s058 = registros.find((r) => r.codigo === 'S058');
+  assert.deepEqual(s058.aperturaOpaca, { monto: 180000, fuente: 'vlookup' }, 'espacios y minúsculas tampoco deben romper el lookup');
+});
+
 test('mensualidad2024 fallback a mensualidadVieja cuando columna 26 falta', async () => {
   const wb = new ExcelJS.Workbook();
   wb.addWorksheet('estado cta con movimiento').addRow([]);

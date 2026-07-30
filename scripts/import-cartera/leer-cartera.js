@@ -1,5 +1,6 @@
 // scripts/import-cartera/leer-cartera.js
 const { abrirLibro, hoja, valorCelda } = require('./leer-excel');
+const { normalizarCodigo } = require('./codigos');
 
 const HOJA_ESTADO = 'ESTADO DE CUENTA ASOCIADOS';
 const HOJA_MOVIMIENTO = 'estado cta con movimiento';
@@ -27,14 +28,20 @@ const texto = (v) => {
 
 // Resuelve el VLOOKUP que la hoja ESTADO DE CUENTA ASOCIADOS no alcanzó a guardar, buscando el
 // código en la hoja fuente "estado cta con movimiento" (números planos, sin fórmulas).
+//
+// El mapa se indexa por el código NORMALIZADO, y se consulta igual: las dos hojas escriben el
+// mismo código con formatos distintos (R-034 / R034), que es el desajuste que explica el 86% de
+// los códigos huérfanos reales (ver codigos.js). Comparando el texto crudo, el lookup fallaba en
+// silencio y la apertura opaca caía a saldo2020 o a 'ninguna', perdiendo el dato real.
 function construirMapaMovimiento(ws) {
   const mapa = new Map();
   for (let i = PRIMERA_FILA_DATOS_MOV; i <= ws.rowCount; i++) {
     const row = ws.getRow(i);
     const codigo = texto(valorCelda(row.getCell(COL_MOV.codigo)));
     if (!codigo) continue;
+    const codigoNorm = normalizarCodigo(codigo);
     const saldoMes = num(valorCelda(row.getCell(COL_MOV.saldoMes)));
-    if (saldoMes !== null && !mapa.has(codigo)) mapa.set(codigo, saldoMes);
+    if (saldoMes !== null && !mapa.has(codigoNorm)) mapa.set(codigoNorm, saldoMes);
   }
   return mapa;
 }
@@ -46,7 +53,8 @@ function construirMapaMovimiento(ws) {
 //  4) si no hay ningún dato, fuente 'ninguna' con monto 0 (preview.js decide si es legítimo)
 function resolverApertura(celda15, codigo, mapaMovimiento, saldo2020) {
   if (typeof celda15 === 'number') return { monto: celda15, fuente: 'vlookup' };
-  if (mapaMovimiento.has(codigo)) return { monto: mapaMovimiento.get(codigo), fuente: 'vlookup' };
+  const codigoNorm = normalizarCodigo(codigo);
+  if (mapaMovimiento.has(codigoNorm)) return { monto: mapaMovimiento.get(codigoNorm), fuente: 'vlookup' };
   if (typeof saldo2020 === 'number') return { monto: saldo2020, fuente: 'saldo2020' };
   return { monto: 0, fuente: 'ninguna' };
 }
