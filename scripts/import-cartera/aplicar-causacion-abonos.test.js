@@ -111,11 +111,11 @@ test('carga como abono cada recibo de sostenimiento/deuda existente, en orden cr
 
     const r = causarYAbonar({ cuentaId, dbService: ctx.dbService, usuarioId: 1, hastaAnio: 2022, hastaMes: 12 });
 
-    assert.equal(r.abonosCreados, 1);
-    assert.equal(r.totalAbonado, 50000);
+    assert.equal(r.abonosCreados, 2, 'el concepto del recibo no filtra nada, salvo conexión');
+    assert.equal(r.totalAbonado, 55000);
     const carteraService = new CarteraService(ctx.dbService);
-    // Causado ene-dic 2022 = 12 x 5.000 = 60.000, menos 50.000 abonados = 10.000.
-    assert.equal(carteraService.getEstadoCartera(cuentaId).deudaExigible, 10000);
+    // Causado ene-dic 2022 = 12 x 5.000 = 60.000, menos 55.000 abonados = 5.000.
+    assert.equal(carteraService.getEstadoCartera(cuentaId).deudaExigible, 5000);
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -150,6 +150,22 @@ test('excluye recibos anulados', () => {
 
     const r = causarYAbonar({ cuentaId, dbService: ctx.dbService, usuarioId: 1, hastaAnio: 2022, hastaMes: 3 });
     assert.equal(r.abonosCreados, 1);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('excluye recibos anteriores al 2022-01-01: ya están implícitos en la apertura opaca, no se cuentan dos veces', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T008');
+    crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2019-06-01', valor: 20000 });
+    crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 2, fecha: '2022-01-15', valor: 5000 });
+
+    const r = causarYAbonar({ cuentaId, dbService: ctx.dbService, usuarioId: 1, hastaAnio: 2022, hastaMes: 1 });
+
+    assert.equal(r.abonosCreados, 1, 'solo el recibo de 2022; el de 2019 ya está implícito en la apertura opaca');
+    assert.equal(r.totalAbonado, 5000);
   } finally {
     cerrarDbTemporal(ctx);
   }

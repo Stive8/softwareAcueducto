@@ -49,28 +49,33 @@ function causarHistorico({ cuentaId, dbService, hastaAnio, hastaMes }) {
 }
 
 // Cada recibo_detalle de sostenimiento o "abono a la deuda" (todo lo que no sea conexión) se
-// registra como un Abono en cartera, en orden cronológico, con imputación FIFO -- el mismo
-// orden en que el Excel de cartera los fue restando de la deuda acumulada.
+// registra como un Abono en cartera, en orden cronológico, con imputación FIFO. El concepto del
+// recibo (CUOTA DE SOSTENIMIENTO vs ABONO A LA DEUDA) es solo el hábito de redacción del cajero,
+// no una categoría contable real -- no se usa para decidir qué cuenta como abono. La única
+// exclusión legítima por concepto es conexión (PUNTO DE AGUA / PUNTO NUEVO), que es dinero de
+// otro concepto, no cartera.
+//
+// Solo se consideran recibos DESDE después del 2021-12-31 (la fecha ancla de la apertura opaca
+// que crea aplicar-base.js): los recibos anteriores ya están implícitos en el saldo de apertura
+// opaca (el Excel de cartera lo calcula como la deuda NETA después de descontar todos los pagos
+// hechos hasta esa fecha), así que volver a aplicarlos aquí los contaría dos veces.
+const ANCLA_APERTURA = '2021-12-31';
+
 function cargarAbonos({ cuentaId, dbService, usuarioId }) {
   const db = dbService.getDb();
   const carteraService = new CarteraService(dbService);
 
   // better-sqlite3 no trae REGEXP registrado por defecto: se filtra con dos LIKE, equivalentes
   // en la práctica al patrón PATRON_CONEXION (verificado contra los 2.429 recibos reales).
-  // Excluye conexión (PUNTO DE AGUA). Incluye sostenimiento e "ABONO A LA DEUDA".
-  const recibosAbono = db.prepare(`
+  const detalles = db.prepare(`
     SELECT rd.id AS recibo_detalle_id, rd.concepto, rd.valor, r.fecha_recibo
     FROM recibo_detalles rd
     INNER JOIN recibos r ON r.id = rd.recibo_id
     WHERE r.cuenta_id = ? AND r.estado != 'Anulado' AND rd.valor > 0
+      AND r.fecha_recibo > ?
       AND rd.concepto NOT LIKE '%PUNTO%AGUA%' AND rd.concepto NOT LIKE '%PUNTO NUEVO%'
     ORDER BY r.fecha_recibo ASC, r.numero_recibo ASC, rd.id ASC
-  `).all(cuentaId);
-
-  // Si hay abonos explícitos (ABONO A LA DEUDA), usarlos. Si no, usar pagos de sostenimiento.
-  const detalles = recibosAbono.filter(d =>
-    d.concepto.includes('ABONO') || !recibosAbono.some(x => x.concepto.includes('ABONO'))
-  );
+  `).all(cuentaId, ANCLA_APERTURA);
 
   let creados = 0, total = 0;
   for (const d of detalles) {
