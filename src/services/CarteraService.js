@@ -2,7 +2,7 @@ const CarteraRepository = require('../repositories/CarteraRepository');
 const CuentaEstadoRepository = require('../repositories/CuentaEstadoRepository');
 const PeriodoContableRepository = require('../repositories/PeriodoContableRepository');
 const PagoRepository = require('../repositories/PagoRepository');
-const { codificarPeriodo, decodificarPeriodo, anioMesDeFecha, primerDiaDelMes } =
+const { codificarPeriodo, decodificarPeriodo, anioMesDeFecha, primerDiaDelMes, diaAnterior } =
   require('./cartera/periodos');
 const { MODOS, distribuir, calcularCubiertoHasta } = require('./cartera/imputacion');
 const { redondear, esMayor } = require('./cartera/dinero');
@@ -160,6 +160,113 @@ class CarteraService {
       totalCobrarHoy: deudaExigible > 0 ? deudaExigible : 0,
       totalReferencia: redondear((deudaExigible > 0 ? deudaExigible : 0) + saldoOpaco)
     };
+  }
+
+  // Cambia la categoría de una cuenta con una fecha de vigencia que puede ser pasada, y
+  // corrige los cargos ya emitidos desde esa fecha.
+  //
+  // NUNCA muta un CargoMensual emitido: emite un AjusteCategoria por la diferencia. Así:
+  //  - no se reescribe historia (queda qué se cobró, cuánto se corrigió, cuándo y con qué acta);
+  //  - ninguna imputación se deshace: si el cargo sube, el ajuste es un pendiente más que el
+  //    FIFO ve normalmente; si baja, el ajuste negativo reduce el saldo directo y, si el mes
+  //    ya estaba pagado, eso se vuelve saldo a favor por la propia fórmula del saldo.
+  // Funciona porque el saldo sale de los movimientos, no de las imputaciones.
+  //
+  // No genera asientos contables (la causación tampoco), así que corregir meses de un período
+  // contable cerrado no lo reexpresa.
+  recategorizar({ cuentaId, categoriaId, fechaVigencia, documento = null,
+    observaciones = null, usuarioId = null }) {
+    if (!cuentaId) throw new Error('La cuenta es obligatoria');
+    if (!categoriaId) throw new Error('La categoría es obligatoria');
+    if (!fechaVigencia) throw new Error('La fecha de vigencia es obligatoria');
+
+    const categoria = this.db.prepare(`SELECT id, nombre FROM categorias WHERE id = ?`).get(categoriaId);
+    if (!categoria) throw new Error(`Categoría no encontrada: ${categoriaId}`);
+
+    const hoy = new Date();
+    const hastaCod = codificarPeriodo(hoy.getFullYear(), hoy.getMonth() + 1);
+    const desde = anioMesDeFecha(fechaVigencia);
+    const desdeCod = codificarPeriodo(desde.anio, desde.mes);
+
+    return this.repository.transaccion(() => {
+      // 1) Mover la vigencia de categoría.
+      const vigenciaAbierta = this.db.prepare(`
+        SELECT id, categoria_id, fecha_inicio FROM cuenta_categorias
+        WHERE cuenta_id = ? AND fecha_fin IS NULL
+        ORDER BY fecha_inicio DESC, id DESC LIMIT 1
+      `).get(cuentaId);
+
+      const yaEstaEnEsaCategoria = vigenciaAbierta
+        && vigenciaAbierta.categoria_id === categoriaId
+        && vigenciaAbierta.fecha_inicio <= fechaVigencia;
+
+      if (!yaEstaEnEsaCategoria) {
+        if (vigenciaAbierta) {
+          if (fechaVigencia < vigenciaAbierta.fecha_inicio) {
+            throw new Error(
+              `La fecha ${fechaVigencia} es anterior al inicio de la categoría actual ` +
+              `(${vigenciaAbierta.fecha_inicio}); corrija esa vigencia primero`
+            );
+          }
+          if (fechaVigencia === vigenciaAbierta.fecha_inicio) {
+            // La vigencia abierta arrancó el mismo día que la corrección: nunca debió tener
+            // esa categoría, se reemplaza entera en vez de "cerrarla el día anterior" (eso
+            // dejaría fecha_fin antes que fecha_inicio en esa misma fila).
+            this.db.prepare(`DELETE FROM cuenta_categorias WHERE id = ?`).run(vigenciaAbierta.id);
+          } else {
+            this.db.prepare(`UPDATE cuenta_categorias SET fecha_fin = ? WHERE id = ?`)
+              .run(diaAnterior(fechaVigencia), vigenciaAbierta.id);
+          }
+        }
+        this.db.prepare(`
+          INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio, observaciones)
+          VALUES (?, ?, ?, ?)
+        `).run(cuentaId, categoriaId, fechaVigencia, observaciones);
+      }
+
+      // 2) Corregir por diferencia los meses ya causados desde la vigencia.
+      const ajustes = [];
+      const fechaAjuste = new Date().toISOString().split('T')[0];
+
+      for (let cod = desdeCod; cod <= hastaCod; cod++) {
+        const { anio, mes } = decodificarPeriodo(cod);
+
+        const cargoOriginal = this.repository.getCargoMensual(cuentaId, anio, mes);
+        if (!cargoOriginal) continue;   // mes no causado: no hay nada que corregir
+
+        const tarifaCorrecta = this.pagoRepository.getCategoriaTarifaParaMes(cuentaId, anio, mes);
+        if (!tarifaCorrecta) continue;
+
+        // Lo cobrado hoy por ese mes es el cargo más los ajustes previos.
+        const cobrado = this.db.prepare(`
+          SELECT COALESCE(SUM(monto), 0) AS total FROM cartera_movimientos
+          WHERE cuenta_id = ? AND anio = ? AND mes = ?
+            AND tipo IN ('CargoMensual', 'AjusteCategoria')
+        `).get(cuentaId, anio, mes).total;
+
+        const diferencia = redondear(tarifaCorrecta.tarifa_sostenimiento - cobrado);
+        if (!esMayor(Math.abs(diferencia), 0)) continue;
+
+        this.repository.crearMovimiento({
+          cuentaId,
+          fecha: fechaAjuste,
+          tipo: 'AjusteCategoria',
+          exigible: 1,
+          monto: diferencia,
+          anio, mes,
+          documento,
+          observaciones: observaciones
+            || `Recategorización a ${categoria.nombre} con vigencia ${fechaVigencia}`,
+          usuarioId
+        });
+        ajustes.push({ anio, mes, diferencia });
+      }
+
+      return {
+        ajustes,
+        totalAjustado: redondear(ajustes.reduce((s, a) => s + a.diferencia, 0))
+      };
+    });
   }
 }
 
