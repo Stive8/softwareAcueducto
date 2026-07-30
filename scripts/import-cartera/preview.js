@@ -56,7 +56,7 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
       continue;
     }
 
-    const categoriaNombre = categoriaPorMensualidad(c.mensualidadVieja);
+    const categoriaNombre = categoriaPorMensualidad(c.mensualidadVieja, 'vieja');
     if (categoriaNombre === null) {
       aperturasSinDato.push({ codigo, motivo: `mensualidad ${c.mensualidadVieja} no corresponde a ninguna categoría conocida: revisar manualmente` });
       continue;
@@ -64,7 +64,7 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
 
     codigosCuentasVistos.add(codigoNormalizado);
 
-    const categoria2024 = categoriaPorMensualidad(c.mensualidad2024);
+    const categoria2024 = categoriaPorMensualidad(c.mensualidad2024, '2024');
     const categoriaNombre2024 = (categoria2024 && categoria2024 !== categoriaNombre) ? categoria2024 : null;
 
     // Se busca por el código YA RESUELTO (el de la cuenta real), no por el código crudo del
@@ -81,7 +81,7 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
     }
 
     if (c.aperturaOpaca.fuente === 'ninguna' && !candidatoSuspension) {
-      aperturasSinDato.push({ codigo });
+      aperturasSinDato.push({ codigo, motivo: 'sin saldo de apertura resuelto y no es candidata a suspensión: revisar manualmente' });
     }
 
     cuentas.push({
@@ -101,3 +101,39 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
 }
 
 module.exports = { generarPlan };
+
+// --- CLI ---
+// Dry-run: NO escribe nada en la base, solo arma el plan y lo deja en output/ para inspeccionarlo
+// antes de correr commit.js (que sí escribe, y es irreversible).
+if (require.main === module) {
+  const fs = require('fs');
+  const path = require('path');
+  const DatabaseService = require('../../src/database/DatabaseService');
+
+  const filePathCartera = process.argv[2] || 'C:\\Users\\Brayhan\\Documents\\ACUEDUCTO\\CARTERA CON SALDO A 2025.xlsx';
+  const filePathDatos = process.argv[3] || 'C:\\Users\\Brayhan\\Documents\\ACUEDUCTO\\Datos.xlsx';
+
+  const dbService = new DatabaseService(path.join(__dirname, '..', '..'));
+  dbService.initialize();
+
+  generarPlan({ filePathCartera, filePathDatos, dbService })
+    .then((plan) => {
+      const outDir = path.join(__dirname, 'output');
+      fs.mkdirSync(outDir, { recursive: true });
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      const planPath = path.join(outDir, `preview-plan_${stamp}.json`);
+      fs.writeFileSync(planPath, JSON.stringify(plan, null, 2), 'utf8');
+
+      console.log(`Cuentas en el plan: ${plan.cuentas.length}`);
+      console.log(`Huérfanos a crear: ${plan.huerfanosACrear.length}${plan.huerfanosACrear.length ? ' (' + plan.huerfanosACrear.map((h) => h.codigo).join(', ') + ')' : ''}`);
+      console.log(`Códigos pendientes de decisión: ${plan.codigosPendientes.length}${plan.codigosPendientes.length ? ' (' + plan.codigosPendientes.join(', ') + ')' : ''}`);
+      console.log(`Discrepancias TIPO vs categoría: ${plan.discrepanciasTipo.length}`);
+      console.log(`Aperturas sin dato (revisar manualmente): ${plan.aperturasSinDato.length}`);
+      if (plan.aperturasSinDato.length) {
+        for (const a of plan.aperturasSinDato) console.log(`  - ${a.codigo}: ${a.motivo}`);
+      }
+      console.log(`Plan completo: ${planPath}`);
+      dbService.close();
+    })
+    .catch((e) => { console.error(e); dbService.close(); process.exit(1); });
+}

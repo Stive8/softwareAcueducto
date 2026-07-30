@@ -166,6 +166,7 @@ test('marca aperturasSinDato cuando la fuente es "ninguna" y la cuenta no aparec
     const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
     assert.equal(plan.aperturasSinDato.length, 1);
     assert.equal(plan.aperturasSinDato[0].codigo, 'X003');
+    assert.match(plan.aperturasSinDato[0].motivo, /sin saldo de apertura resuelto/, 'toda entrada de aperturasSinDato trae motivo, para que el reporte de consola pueda imprimirlo');
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -183,6 +184,40 @@ test('categoriaNombre2024 SÍ cambia cuando mensualidadVieja y mensualidad2024 c
     const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
     assert.equal(plan.cuentas[0].categoriaNombre, 'Finca');
     assert.equal(plan.cuentas[0].categoriaNombre2024, 'Finca con piscina');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('mensualidadVieja de $20.000 es "Finca para alquiler" (tarifa 2022-2023), no "Tienda" (que cobra $20.000 recién desde 2024)', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    sembrarCuenta(ctx.dbService, 'X006');
+    const filePathCartera = await crearExcelCartera([
+      { codigo: 'X006', mensualidadVieja: 20000, mensualidad2024: 50000 }
+    ]);
+    const filePathDatos = await crearExcelDatos([]);
+
+    const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
+    assert.equal(plan.cuentas[0].categoriaNombre, 'Finca para alquiler');
+    assert.equal(plan.cuentas[0].categoriaNombre2024, null, '20.000 -> 50.000 es la MISMA categoría entre eras');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('mensualidad2024 de $20.000 sí es "Tienda": la misma cifra significa cosas distintas según la columna', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    sembrarCuenta(ctx.dbService, 'X007');
+    const filePathCartera = await crearExcelCartera([
+      { codigo: 'X007', mensualidadVieja: 12000, mensualidad2024: 20000 }
+    ]);
+    const filePathDatos = await crearExcelDatos([]);
+
+    const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
+    assert.equal(plan.cuentas[0].categoriaNombre, 'Tienda');
+    assert.equal(plan.cuentas[0].categoriaNombre2024, null, '12.000 -> 20.000 es Tienda en las dos eras');
   } finally {
     cerrarDbTemporal(ctx);
   }

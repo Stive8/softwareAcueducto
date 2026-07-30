@@ -102,3 +102,54 @@ test('el pipeline completo carga categoría, apertura, causación y abonos, y co
     cerrarDbTemporal(ctx);
   }
 });
+
+test('una cuenta que falla no aborta el resto del pipeline: se reporta en fallos y las demás se procesan igual', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+
+    const wbCartera = new ExcelJS.Workbook();
+    wbCartera.addWorksheet('estado cta con movimiento').addRow([]);
+    const est = wbCartera.addWorksheet('ESTADO DE CUENTA ASOCIADOS');
+    const fila = (r, valores) => { for (const [c, v] of Object.entries(valores)) est.getRow(r).getCell(Number(c)).value = v; };
+    fila(2, { 4: 'R034', 7: 5000, 26: 10000 });
+    fila(3, { 4: 'R037', 7: 5000, 26: 10000 });
+    const filePathCartera = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xlsx-cartera-fallo-')), 'c.xlsx');
+    await wbCartera.xlsx.writeFile(filePathCartera);
+
+    const wbDatos = new ExcelJS.Workbook();
+    wbDatos.addWorksheet('Hoja1').addRow([]);
+    const filePathDatos = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'xlsx-datos-fallo-')), 'd.xlsx');
+    await wbDatos.xlsx.writeFile(filePathDatos);
+
+    const cuentaIdOk = sembrarCuentaConRecibos(ctx.dbService, 'R034', [{ numero: 1, fecha: '2022-01-15', valor: 5000 }]);
+    const cuentaIdFalla = sembrarCuentaConRecibos(ctx.dbService, 'R037', [{ numero: 2, fecha: '2022-01-20', valor: 5000 }]);
+
+    // Corrompe el valor del detalle de R037: la columna es REAL pero SQLite guarda el texto tal
+    // cual, y `valor > 0` da true para texto -- así que el detalle pasa el filtro de cargarAbonos
+    // y revienta recién en registrarAbono ("El monto del abono debe ser mayor a cero").
+    db.prepare(`UPDATE recibo_detalles SET valor = 'CORRUPTO'
+                WHERE recibo_id = (SELECT id FROM recibos WHERE numero_recibo = 2)`).run();
+
+    const r = await ejecutarCommit({
+      filePathCartera, filePathDatos, dbService: ctx.dbService, usuarioId: 1,
+      hastaAnio: 2022, hastaMes: 3
+    });
+
+    assert.equal(r.causacion.fallos.length, 1);
+    assert.equal(r.causacion.fallos[0].codigo, 'R037');
+    assert.equal(r.causacion.fallos[0].cuentaId, cuentaIdFalla);
+    assert.match(r.causacion.fallos[0].error, /monto del abono/);
+
+    assert.equal(r.causacion.cuentasProcesadas, 1, 'solo R034; R037 falló y no cuenta como procesada');
+    assert.equal(r.causacion.cargosCreados, 3, 'los 3 cargos de R034: el fallo de R037 no cortó el loop');
+
+    const carteraService = new CarteraService(ctx.dbService);
+    assert.equal(carteraService.getEstadoCartera(cuentaIdOk).deudaExigible, 10000, '15.000 causados - 5.000 abonados');
+    // La transacción por cuenta hizo rollback de lo suyo: R037 no quedó a medio causar.
+    const movimientosFalla = db.prepare(`SELECT COUNT(*) AS n FROM cartera_movimientos WHERE cuenta_id = ? AND tipo != 'AperturaOpaca'`).get(cuentaIdFalla).n;
+    assert.equal(movimientosFalla, 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
