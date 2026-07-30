@@ -10,7 +10,7 @@ test('crearDbTemporal aplica todas las migraciones y siembra el plan de cuentas'
     assert.ok(totalCuentas > 100, `Se esperaban >100 cuentas sembradas, hubo ${totalCuentas}`);
 
     const totalMigraciones = db.prepare('SELECT COUNT(*) as c FROM migrations').get().c;
-    assert.equal(totalMigraciones, 35, 'Deben quedar registradas las 35 migraciones (001, 003-036)');
+    assert.equal(totalMigraciones, 35, 'Deben quedar registradas las 35 migraciones (001, 003-035, 037)');
   } finally {
     cerrarDbTemporal(ctx);
   }

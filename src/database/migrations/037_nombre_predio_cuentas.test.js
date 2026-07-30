@@ -2,7 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { crearDbTemporal, cerrarDbTemporal } = require('../../testUtils/dbTemporal');
 
-test('la migración 036 agrega la columna nombre_predio a cuentas, opcional', () => {
+test('la migración 037 agrega la columna nombre_predio a cuentas, opcional', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
