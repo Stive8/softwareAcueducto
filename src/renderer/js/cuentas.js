@@ -530,6 +530,11 @@ const Cuentas = {
           <input type="text" id="direccion" name="direccion" value="${cuenta ? cuenta.direccion : ''}" required>
         </div>
 
+        <div class="form-group">
+          <label for="nombre_predio">Nombre de Predio (opcional)</label>
+          <input type="text" id="nombre_predio" name="nombre_predio" value="${cuenta?.nombre_predio ?? ''}" placeholder="Ej. Finca La Esperanza">
+        </div>
+
         <h3 style="color: #1e40af; font-size: 16px; margin: 24px 0 16px 0; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">Ubicación (Coordenadas GPS)</h3>
         <small style="color: #64748b; font-size: 0.875rem; display: block; margin-bottom: 12px;">
           Opcional. Para copiarlas desde Google Maps: mantenga presionado el punto exacto en el mapa, toque las coordenadas que aparecen arriba y péguelas aquí (un número en cada campo).
@@ -719,6 +724,7 @@ const Cuentas = {
     const formData = {
       codigo: document.getElementById('codigo').value.trim(),
       direccion: document.getElementById('direccion').value.trim(),
+      nombre_predio: document.getElementById('nombre_predio').value.trim(),
       observaciones: document.getElementById('observaciones').value.trim()
     };
 
