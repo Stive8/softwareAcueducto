@@ -15,7 +15,7 @@ class ReporteRepository {
 
   getCuentas(estado = '') {
     let query = `
-      SELECT c.codigo, c.direccion, cat.nombre as categoria, p.nombre_completo as propietario,
+      SELECT c.codigo, c.direccion, c.nombre_predio, cat.nombre as categoria, p.nombre_completo as propietario,
              c.estado, c.fecha_creacion,
              c.lat_acometida, c.lon_acometida, c.lat_vivienda, c.lon_vivienda
       FROM cuentas c

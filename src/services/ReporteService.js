@@ -90,6 +90,7 @@ class ReporteService {
       columnas: [
         { key: 'codigo', label: 'Código' },
         { key: 'direccion', label: 'Dirección' },
+        { key: 'nombre_predio', label: 'Nombre de Predio' },
         { key: 'categoria', label: 'Categoría' },
         { key: 'propietario', label: 'Propietario' },
         { key: 'estado', label: 'Estado' },
