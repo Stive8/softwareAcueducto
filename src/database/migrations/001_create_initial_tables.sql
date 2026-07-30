@@ -293,7 +293,6 @@ INSERT INTO configuracion (clave, valor, descripcion) VALUES
 
 -- Categorías predeterminadas
 INSERT INTO categorias (nombre, descripcion) VALUES
-  ('Sin clasificar', 'Categoría temporal para cuentas sin clasificar'),
   ('Finca', 'Finca residencial'),
   ('Finca con piscina', 'Finca con piscina'),
   ('Tienda', 'Establecimiento comercial'),
