@@ -68,7 +68,9 @@ test('el pipeline completo carga categoría, apertura, causación y abonos, y co
       { numero: 6, fecha: '2024-02-10', valor: 50000, concepto: 'ABONO A LA DEUDA' },
       { numero: 7, fecha: '2025-06-21', valor: 100000, concepto: 'ABONO A DEUDA PENDIENTE' }
     ]);
-    sembrarCuentaConRecibos(ctx.dbService, 'R002', [{ numero: 8, fecha: '2018-06-10', valor: 5000 }]);
+    // R002: se siembra para ejercitar la suspensión y verificar que no se compara (sin saldoReferencia2025).
+    // El recibo antiguo (2018) no participa en este test; la cobertura de piso de fecha vive en aplicar-causacion-abonos.test.js.
+    const cuentaIdR002 = sembrarCuentaConRecibos(ctx.dbService, 'R002', [{ numero: 8, fecha: '2018-06-10', valor: 5000 }]);
 
     const r = await ejecutarCommit({
       filePathCartera, filePathDatos, dbService: ctx.dbService, usuarioId: 1,
@@ -81,7 +83,7 @@ test('el pipeline completo carga categoría, apertura, causación y abonos, y co
     const carteraService = new CarteraService(ctx.dbService);
     const estado = carteraService.getEstadoCartera(cuentaId);
     assert.equal(estado.saldoOpaco, 240000);
-    // Causado ene-2022 a dic-2025 = (5.000 x 24) + (10.000 x 24) = 360.000, menos 350.000 abonados = 10.000.
+    // Causado ene-2022 a dic-2025 = (5.000 x 24) + (10.000 x 24) = 360.000, menos 355.000 abonados = 5.000.
     assert.equal(estado.deudaExigible, 5000);
     assert.equal(estado.totalReferencia, 245000);
 
@@ -92,6 +94,10 @@ test('el pipeline completo carga categoría, apertura, causación y abonos, y co
     // no para afirmar que coincide. Ver el assert siguiente.
     assert.equal(r.conciliacion.difieren.length, 1);
     assert.equal(r.conciliacion.difieren[0].codigo, 'R034');
+
+    // Verificar que R002 suspendida no causa cargos.
+    const estadoR002 = carteraService.getEstadoCartera(cuentaIdR002);
+    assert.equal(estadoR002.deudaExigible, 0);
   } finally {
     cerrarDbTemporal(ctx);
   }
