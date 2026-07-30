@@ -268,6 +268,72 @@ class CarteraService {
       };
     });
   }
+
+  // Suspende una cuenta a partir de una fecha que puede ser pasada, y anula los cargos ya
+  // causados desde ahí. La suspensión significa que en ese lapso no había servicio que
+  // cobrar, así que la deuda de esos meses no debe existir.
+  //
+  // Los cargos NO se borran: se anulan con una contrapartida negativa, igual que en
+  // recategorizar. Queda el rastro de que se causaron y de que se anularon.
+  suspender({ cuentaId, fechaDesde, motivo, usuarioId = null }) {
+    if (!cuentaId) throw new Error('La cuenta es obligatoria');
+    if (!fechaDesde) throw new Error('La fecha desde la que se suspende es obligatoria');
+    if (!motivo || !String(motivo).trim()) throw new Error('Debe indicar el motivo de la suspensión');
+
+    return this.repository.transaccion(() => {
+      const vigenciaId = this.estadoRepository.cambiarEstado({
+        cuentaId, estado: 'Suspendido', fechaInicio: fechaDesde, motivo, usuarioId
+      });
+
+      const desde = anioMesDeFecha(fechaDesde);
+      const desdeCod = codificarPeriodo(desde.anio, desde.mes);
+      const hoy = new Date();
+      const hastaCod = codificarPeriodo(hoy.getFullYear(), hoy.getMonth() + 1);
+      const fechaAjuste = new Date().toISOString().split('T')[0];
+
+      let cargosAnulados = 0;
+      let totalAnulado = 0;
+
+      for (let cod = desdeCod; cod <= hastaCod; cod++) {
+        const { anio, mes } = decodificarPeriodo(cod);
+        const neto = this.db.prepare(`
+          SELECT COALESCE(SUM(monto), 0) AS total FROM cartera_movimientos
+          WHERE cuenta_id = ? AND anio = ? AND mes = ?
+            AND tipo IN ('CargoMensual', 'AjusteCategoria')
+        `).get(cuentaId, anio, mes).total;
+
+        if (!esMayor(Math.abs(neto), 0)) continue;
+
+        this.repository.crearMovimiento({
+          cuentaId,
+          fecha: fechaAjuste,
+          tipo: 'AjusteCategoria',
+          exigible: 1,
+          monto: redondear(-neto),
+          anio, mes,
+          observaciones: `Anulación por suspensión desde ${fechaDesde}: ${motivo}`,
+          usuarioId
+        });
+        cargosAnulados++;
+        totalAnulado = redondear(totalAnulado - neto);
+      }
+
+      return { vigenciaId, cargosAnulados, totalAnulado };
+    });
+  }
+
+  // Reactiva una cuenta. La causación se reanuda desde fechaDesde; los meses en que estuvo
+  // suspendida NO se causan retroactivamente. Si en algún caso se quisiera cobrarlos, es un
+  // AjusteAsamblea explícito y documentado, nunca un efecto automático de reactivar.
+  reactivar({ cuentaId, fechaDesde, motivo = null, usuarioId = null }) {
+    if (!cuentaId) throw new Error('La cuenta es obligatoria');
+    if (!fechaDesde) throw new Error('La fecha desde la que se reactiva es obligatoria');
+
+    const vigenciaId = this.estadoRepository.cambiarEstado({
+      cuentaId, estado: 'Activo', fechaInicio: fechaDesde, motivo, usuarioId
+    });
+    return { vigenciaId };
+  }
 }
 
 CarteraService.MODOS = MODOS;
