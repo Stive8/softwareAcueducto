@@ -301,6 +301,45 @@ test('una mensualidad que no corresponde a ninguna categoría conocida se report
   }
 });
 
+test('CORRECCIÓN 2026-07-31: sin mensualidad pero con TIPO conocido en Datos.xlsx, se usa el TIPO en vez de saltar la cuenta', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    sembrarCuenta(ctx.dbService, 'R0031');
+    const filePathCartera = await crearExcelCartera([
+      { codigo: 'R0031', mensualidadVieja: null, mensualidad2024: null, saldo2020: 300000, saldo2025: 300000 }
+    ]);
+    const filePathDatos = await crearExcelDatos([{ codigo: 'R0031', tipo: 'CASA' }]);
+
+    const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
+
+    assert.equal(plan.cuentas.length, 1, 'ya no se salta: el TIPO resuelve la categoría');
+    assert.equal(plan.cuentas[0].categoriaNombre, 'Finca');
+    assert.equal(plan.aperturasSinDato.length, 0, 'ninguna razón para reportarla: ya tiene categoría');
+    assert.equal(plan.discrepanciasTipo.length, 0, 'la categoría SALIÓ del TIPO, no hay nada que contradiga');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('sin mensualidad y sin TIPO reconocido en Datos.xlsx, se sigue reportando (el respaldo por TIPO no alcanza)', async () => {
+  const ctx = crearDbTemporal();
+  try {
+    sembrarCuenta(ctx.dbService, 'R0032');
+    const filePathCartera = await crearExcelCartera([
+      { codigo: 'R0032', mensualidadVieja: null, mensualidad2024: null }
+    ]);
+    const filePathDatos = await crearExcelDatos([]);
+
+    const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
+
+    assert.equal(plan.cuentas.length, 0);
+    assert.equal(plan.aperturasSinDato.length, 1);
+    assert.match(plan.aperturasSinDato[0].motivo, /no corresponde a ninguna categoría/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('el TIPO/observación de Datos.xlsx se toma de la fila de la cuenta real, no del código crudo (alias) del Excel de cartera', async () => {
   const ctx = crearDbTemporal();
   try {

@@ -4,6 +4,8 @@ const { leerDatosMaestros } = require('./leer-datos');
 const { categoriaPorMensualidad } = require('./categorizar');
 const { normalizarCodigo, resolverCodigo, HUERFANOS_A_CREAR } = require('./codigos');
 
+const CATEGORIA_POR_TIPO = { CASA: 'Finca', PISC: 'Finca con piscina', COML: 'Tienda', ALQL: 'Finca para alquiler' };
+
 async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
   const [registrosCartera, registrosDatos] = await Promise.all([
     leerCartera(filePathCartera),
@@ -57,7 +59,21 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
       continue;
     }
 
-    const categoriaNombre = categoriaPorMensualidad(c.mensualidadVieja, 'vieja');
+    // Se busca por el código YA RESUELTO (el de la cuenta real), no por el código crudo del
+    // Excel: si el código venía por equivalencia (ej. R0081 -> S058), el TIPO/observación que
+    // cuenta es el de la fila de Datos.xlsx de la cuenta real (S058), no el de su alias.
+    const datos = datosPorCodigo.get(codigoNormalizado);
+
+    // CORRECCIÓN 2026-07-31: 22 cuentas reales (confirmado contra la base y Datos.xlsx) traen la
+    // mensualidad vacía en este Excel de cartera -- antes se saltaban por completo (sin
+    // categoría, sin apertura, sin causación). Si Datos.xlsx trae un TIPO reconocido, se usa como
+    // respaldo en vez de descartar la cuenta entera; solo se reporta para revisión manual cuando
+    // NI la mensualidad NI el TIPO alcanzan a resolver una categoría.
+    let categoriaNombre = categoriaPorMensualidad(c.mensualidadVieja, 'vieja');
+    const usoTipoComoRespaldo = categoriaNombre === null && !!(datos && datos.tipo && CATEGORIA_POR_TIPO[datos.tipo]);
+    if (usoTipoComoRespaldo) {
+      categoriaNombre = CATEGORIA_POR_TIPO[datos.tipo];
+    }
     if (categoriaNombre === null) {
       aperturasSinDato.push({ codigo, motivo: `mensualidad ${c.mensualidadVieja} no corresponde a ninguna categoría conocida: revisar manualmente` });
       continue;
@@ -68,14 +84,12 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
     const categoria2024 = categoriaPorMensualidad(c.mensualidad2024, '2024');
     const categoriaNombre2024 = (categoria2024 && categoria2024 !== categoriaNombre) ? categoria2024 : null;
 
-    // Se busca por el código YA RESUELTO (el de la cuenta real), no por el código crudo del
-    // Excel: si el código venía por equivalencia (ej. R0081 -> S058), el TIPO/observación que
-    // cuenta es el de la fila de Datos.xlsx de la cuenta real (S058), no el de su alias.
-    const datos = datosPorCodigo.get(codigoNormalizado);
     const candidatoSuspension = datos ? datos.candidatoSuspension : false;
 
-    if (datos && datos.tipo) {
-      const categoriaEsperadaPorTipo = { CASA: 'Finca', PISC: 'Finca con piscina', COML: 'Tienda', ALQL: 'Finca para alquiler' }[datos.tipo];
+    // Si la categoría salió del TIPO (no había mensualidad), no hay discrepancia que reportar:
+    // la categoría YA ES la del TIPO, por construcción.
+    if (!usoTipoComoRespaldo && datos && datos.tipo) {
+      const categoriaEsperadaPorTipo = CATEGORIA_POR_TIPO[datos.tipo];
       if (categoriaEsperadaPorTipo && categoriaEsperadaPorTipo !== categoriaNombre) {
         discrepanciasTipo.push({ codigo, tipoDatosXlsx: datos.tipo, categoriaNombre });
       }
