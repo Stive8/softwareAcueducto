@@ -690,8 +690,8 @@ git commit -m "feat(import-cartera): lector de Datos.xlsx con detección de cand
 - Produces:
   - `normalizarCodigo(codigo) -> string` (mayúsculas, sin espacios ni guiones — para cruzar Excel↔BD)
   - `EQUIVALENCIAS -> Map<string,string>` (código Excel normalizado → código real en la base). Solo tiene `'R0081' -> 'S058'`.
-  - `HUERFANO_A_CREAR -> { codigo: 'C021', nombre: 'CASTRO DIEGO', categoriaNombre: 'Finca', motivoSuspension: 'no encontrado' }`
-  - `CODIGOS_PENDIENTES -> Array<string>` (`['S03321']` — no se crean hasta que el usuario decida, spec §10.11)
+  - `HUERFANOS_A_CREAR -> Array<{ codigo, nombre, motivoSuspension: string|null }>` — las dos cuentas que de verdad faltan en la base: `C021` "CASTRO DIEGO" (`motivoSuspension: 'no encontrado'`) y `S03321` "MARIN HERRERA ORFILIA" (`motivoSuspension: null`, se crea Activa: tiene teléfono propio en `Datos.xlsx`, nada indica que no exista). El usuario decidió el 2026-07-30 que `S03321` es un punto aparte de `S022`, no su co-propietaria.
+  - `CODIGOS_PENDIENTES -> Array<string>` (`[]` — no queda ningún código sin resolver)
   - `resolverCodigo(codigoExcel, codigosEnBase) -> { cuentaId: null, codigoNormalizado: string, esPendiente: boolean } | { codigoBase: string }` — ver Step 3 para la forma exacta.
 
 - [ ] **Step 1: Write the failing test**
@@ -702,7 +702,7 @@ Crear `scripts/import-cartera/codigos.test.js`:
 // scripts/import-cartera/codigos.test.js
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { normalizarCodigo, EQUIVALENCIAS, HUERFANO_A_CREAR, CODIGOS_PENDIENTES, resolverCodigo } = require('./codigos');
+const { normalizarCodigo, EQUIVALENCIAS, HUERFANOS_A_CREAR, CODIGOS_PENDIENTES, resolverCodigo } = require('./codigos');
 
 test('normalizarCodigo quita espacios, guiones y pasa a mayúsculas', () => {
   assert.equal(normalizarCodigo('r019'), 'R019');
@@ -712,17 +712,20 @@ test('normalizarCodigo quita espacios, guiones y pasa a mayúsculas', () => {
 
 test('EQUIVALENCIAS mapea R0081 a S058, la cuenta real (mismo teléfono, mismo pago)', () => {
   assert.equal(EQUIVALENCIAS.get('R0081'), 'S058');
-  assert.equal(EQUIVALENCIAS.size, 1, 'solo esa equivalencia está resuelta; S03321 queda pendiente');
+  assert.equal(EQUIVALENCIAS.size, 1, 'solo esa equivalencia; C021 y S03321 se crean, no se mapean');
 });
 
-test('HUERFANO_A_CREAR describe a C021, la única cuenta que de verdad falta', () => {
-  assert.equal(HUERFANO_A_CREAR.codigo, 'C021');
-  assert.equal(HUERFANO_A_CREAR.categoriaNombre, 'Finca');
-  assert.equal(HUERFANO_A_CREAR.motivoSuspension, 'no encontrado');
+test('HUERFANOS_A_CREAR describe a C021 y S03321, las dos cuentas que de verdad faltan', () => {
+  assert.equal(HUERFANOS_A_CREAR.length, 2);
+  assert.equal(HUERFANOS_A_CREAR[0].codigo, 'C021');
+  assert.equal(HUERFANOS_A_CREAR[0].motivoSuspension, 'no encontrado');
+  assert.equal(HUERFANOS_A_CREAR[1].codigo, 'S03321');
+  assert.equal(HUERFANOS_A_CREAR[1].nombre, 'MARIN HERRERA ORFILIA');
+  assert.equal(HUERFANOS_A_CREAR[1].motivoSuspension, null, 'tiene teléfono propio en Datos.xlsx, se crea Activa');
 });
 
-test('CODIGOS_PENDIENTES contiene S03321, sin resolver hasta que el usuario decida', () => {
-  assert.deepEqual(CODIGOS_PENDIENTES, ['S03321']);
+test('CODIGOS_PENDIENTES queda vacío: ya no hay códigos sin resolver', () => {
+  assert.deepEqual(CODIGOS_PENDIENTES, []);
 });
 
 test('resolverCodigo mapea un código Excel a su equivalente real cuando existe equivalencia', () => {
@@ -737,11 +740,11 @@ test('resolverCodigo encuentra directo cuando el código normalizado ya existe e
   assert.equal(r.codigoBase, 'R034');
 });
 
-test('resolverCodigo marca pendiente cuando el código está en CODIGOS_PENDIENTES', () => {
+test('resolverCodigo marca huérfano para S03321: ya no está pendiente, se crea', () => {
   const enBase = new Set([]);
   const r = resolverCodigo('S03321', enBase);
-  assert.equal(r.esPendiente, true);
-  assert.equal(r.codigoBase, undefined);
+  assert.equal(r.esHuerfano, true);
+  assert.equal(r.esPendiente, false);
 });
 
 test('resolverCodigo marca huérfano cuando no está en la base, no tiene equivalencia y no está pendiente', () => {
@@ -766,11 +769,12 @@ Crear `scripts/import-cartera/codigos.js`:
 // Conciliación de códigos entre los Excel y la base (spec §10.11). Se verificaron los 22
 // códigos que aparecían en algún Excel y no en la base bajo el mismo código normalizado:
 //  - 19 eran solo desajustes de formato (guiones/ceros), ya resueltos por normalizarCodigo.
-//  - C021 falta de verdad: se crea.
+//  - C021 falta de verdad: se crea, Suspendida, motivo "no encontrado".
 //  - R0081 es la MISMA cuenta que S058 (mismo teléfono en Datos.xlsx, mismo pago de $500.000
 //    del 2026-01-31 ya registrado bajo S058): se mapea, nunca se crea.
-//  - S03321 es ambiguo (¿punto aparte de Orfilia Marín Herrera, o co-propietaria de S022?):
-//    queda pendiente de decisión del usuario, no se crea.
+//  - S03321 "MARIN HERRERA ORFILIA" tiene fila y teléfono propios en Datos.xlsx, aunque en la
+//    base su nombre quedó fundido con el de la propietaria de S022. El usuario decidió
+//    (2026-07-30) que es un punto aparte, no la co-propietaria de S022: se crea, Activa.
 function normalizarCodigo(codigo) {
   return String(codigo).trim().toUpperCase().replace(/[\s-]/g, '');
 }
@@ -779,14 +783,12 @@ const EQUIVALENCIAS = new Map([
   ['R0081', 'S058']
 ]);
 
-const HUERFANO_A_CREAR = {
-  codigo: 'C021',
-  nombre: 'CASTRO DIEGO',
-  categoriaNombre: 'Finca',
-  motivoSuspension: 'no encontrado'
-};
+const HUERFANOS_A_CREAR = [
+  { codigo: 'C021', nombre: 'CASTRO DIEGO', motivoSuspension: 'no encontrado' },
+  { codigo: 'S03321', nombre: 'MARIN HERRERA ORFILIA', motivoSuspension: null }
+];
 
-const CODIGOS_PENDIENTES = ['S03321'];
+const CODIGOS_PENDIENTES = [];
 
 // codigosEnBase: Set de códigos YA normalizados (normalizarCodigo aplicado) existentes en `cuentas`.
 function resolverCodigo(codigoExcel, codigosEnBase) {
@@ -798,7 +800,7 @@ function resolverCodigo(codigoExcel, codigosEnBase) {
   return { esHuerfano: true, esPendiente: false };
 }
 
-module.exports = { normalizarCodigo, EQUIVALENCIAS, HUERFANO_A_CREAR, CODIGOS_PENDIENTES, resolverCodigo };
+module.exports = { normalizarCodigo, EQUIVALENCIAS, HUERFANOS_A_CREAR, CODIGOS_PENDIENTES, resolverCodigo };
 ```
 
 - [ ] **Step 4: Run test to verify it passes**
@@ -837,7 +839,7 @@ git commit -m "feat(import-cartera): normalización de códigos y resolución de
       saldoReferencia2025: number | null,
       tipoDatosXlsx: string | null
     }>,
-    huerfanoACrear: { codigo, nombre, categoriaNombre, motivoSuspension },
+    huerfanosACrear: Array<{ codigo, nombre, categoriaNombre, motivoSuspension, aperturaOpaca }>,
     codigosPendientes: string[],
     discrepanciasTipo: Array<{ codigo, tipoDatosXlsx, categoriaNombre }>,   // TIPO no corresponde a la categoría cargada
     aperturasSinDato: Array<{ codigo }>   // fuente 'ninguna' que no se pudo clasificar
@@ -985,7 +987,7 @@ test('resuelve R0081 a la cuenta real S058 vía la tabla de equivalencias', asyn
   }
 });
 
-test('reporta C021 como huérfano a crear y S03321 como pendiente, sin incluirlos en cuentas', async () => {
+test('reporta C021 y S03321 como huérfanos a crear, sin incluirlos en cuentas ni en pendientes', async () => {
   const ctx = crearDbTemporal();
   try {
     const filePathCartera = await crearExcelCartera([
@@ -996,8 +998,12 @@ test('reporta C021 como huérfano a crear y S03321 como pendiente, sin incluirlo
 
     const plan = await generarPlan({ filePathCartera, filePathDatos, dbService: ctx.dbService });
     assert.equal(plan.cuentas.length, 0);
-    assert.equal(plan.huerfanoACrear.codigo, 'C021');
-    assert.deepEqual(plan.codigosPendientes, ['S03321']);
+    assert.equal(plan.huerfanosACrear.length, 2);
+    assert.equal(plan.huerfanosACrear[0].codigo, 'C021');
+    assert.equal(plan.huerfanosACrear[0].categoriaNombre, 'Finca');
+    assert.equal(plan.huerfanosACrear[1].codigo, 'S03321');
+    assert.equal(plan.huerfanosACrear[1].motivoSuspension, null);
+    assert.deepEqual(plan.codigosPendientes, []);
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -1033,7 +1039,7 @@ Crear `scripts/import-cartera/preview.js`:
 const { leerCartera } = require('./leer-cartera');
 const { leerDatosMaestros } = require('./leer-datos');
 const { categoriaPorMensualidad } = require('./categorizar');
-const { normalizarCodigo, resolverCodigo, HUERFANO_A_CREAR, CODIGOS_PENDIENTES } = require('./codigos');
+const { normalizarCodigo, resolverCodigo, HUERFANOS_A_CREAR } = require('./codigos');
 
 function cargarCodigosEnBase(dbService) {
   const filas = dbService.getDb().prepare(`SELECT codigo FROM cuentas`).all();
@@ -1056,7 +1062,7 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
   const cuentas = [];
   const discrepanciasTipo = [];
   const aperturasSinDato = [];
-  let huerfanoACrear = null;
+  const huerfanosACrear = [];
   const codigosPendientes = [];
 
   for (const c of registrosCartera) {
@@ -1064,10 +1070,15 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
 
     if (resolucion.esPendiente) { codigosPendientes.push(normalizarCodigo(c.codigo)); continue; }
     if (resolucion.esHuerfano) {
-      // Solo se conoce un huérfano real (C021); cualquier otro huérfano no anticipado se
-      // reporta igual, para que quien corra el importador lo vea y lo resuelva a mano.
-      if (normalizarCodigo(c.codigo) === HUERFANO_A_CREAR.codigo) {
-        huerfanoACrear = { ...HUERFANO_A_CREAR, aperturaOpaca: c.aperturaOpaca };
+      // Solo se conocen dos huérfanos reales (C021, S03321); cualquier otro huérfano no
+      // anticipado se reporta igual, para que quien corra el importador lo vea y lo resuelva a mano.
+      const huerfano = HUERFANOS_A_CREAR.find((h) => h.codigo === normalizarCodigo(c.codigo));
+      if (huerfano) {
+        huerfanosACrear.push({
+          ...huerfano,
+          categoriaNombre: categoriaPorMensualidad(c.mensualidadVieja),
+          aperturaOpaca: c.aperturaOpaca
+        });
       } else {
         aperturasSinDato.push({ codigo: c.codigo, motivo: 'huérfano no reconocido: revisar manualmente' });
       }
@@ -1106,7 +1117,7 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
     });
   }
 
-  return { cuentas, huerfanoACrear, codigosPendientes, discrepanciasTipo, aperturasSinDato };
+  return { cuentas, huerfanosACrear, codigosPendientes, discrepanciasTipo, aperturasSinDato };
 }
 
 module.exports = { generarPlan };
@@ -1134,7 +1145,7 @@ git commit -m "feat(import-cartera): preview.js arma el plan de acciones cruzand
 
 **Interfaces:**
 - Consumes: `Plan` de Task 6 (misma forma), `CategoriaRepository`, `CuentaRepository`, `CuentaEstadoRepository`, `CarteraRepository`, `periodos.js` (`primerDiaDelMes`).
-- Produces: `aplicarBase({ plan, dbService, usuarioId }) -> { categoriasAsignadas, cuentasSuspendidas, huerfanoCreado: boolean, aperturasCreadas, totalApertura }`
+- Produces: `aplicarBase({ plan, dbService, usuarioId }) -> { categoriasAsignadas, cuentasSuspendidas, huerfanosCreados: number, aperturasCreadas, totalApertura }`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1160,7 +1171,7 @@ function sembrarCuenta(dbService, codigo, estado = 'Activo') {
 }
 
 function planBase(cuentas, extra = {}) {
-  return { cuentas, huerfanoACrear: null, codigosPendientes: [], discrepanciasTipo: [], aperturasSinDato: [], ...extra };
+  return { cuentas, huerfanosACrear: [], codigosPendientes: [], discrepanciasTipo: [], aperturasSinDato: [], ...extra };
 }
 
 test('limpia las tarifas inválidas y carga el histórico limpio de las 4 categorías', () => {
@@ -1283,7 +1294,7 @@ test('crea C021 como cuenta nueva, Suspendida, con su apertura', () => {
   const ctx = crearDbTemporal();
   try {
     const plan = planBase([], {
-      huerfanoACrear: { codigo: 'C021', nombre: 'CASTRO DIEGO', categoriaNombre: 'Finca', motivoSuspension: 'no encontrado', aperturaOpaca: { monto: 0, fuente: 'ninguna' } }
+      huerfanosACrear: [{ codigo: 'C021', nombre: 'CASTRO DIEGO', categoriaNombre: 'Finca', motivoSuspension: 'no encontrado', aperturaOpaca: { monto: 0, fuente: 'ninguna' } }]
     });
 
     const r = aplicarBase({ plan, dbService: ctx.dbService, usuarioId: 1 });
@@ -1292,10 +1303,32 @@ test('crea C021 como cuenta nueva, Suspendida, con su apertura', () => {
     const c021 = db.prepare(`SELECT id, estado FROM cuentas WHERE codigo = 'C021'`).get();
     assert.ok(c021, 'C021 se creó');
     assert.equal(c021.estado, 'Suspendido');
-    assert.equal(r.huerfanoCreado, true);
+    assert.equal(r.huerfanosCreados, 1);
 
     const estadoRepo = new CuentaEstadoRepository(ctx.dbService);
     assert.equal(estadoRepo.getVigenciaAbierta(c021.id).motivo, 'no encontrado');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('crea S03321 como cuenta nueva, Activa (no suspendida): tiene teléfono propio en Datos.xlsx', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const plan = planBase([], {
+      huerfanosACrear: [{ codigo: 'S03321', nombre: 'MARIN HERRERA ORFILIA', categoriaNombre: 'Finca', motivoSuspension: null, aperturaOpaca: { monto: 0, fuente: 'ninguna' } }]
+    });
+
+    const r = aplicarBase({ plan, dbService: ctx.dbService, usuarioId: 1 });
+
+    const db = ctx.dbService.getDb();
+    const s03321 = db.prepare(`SELECT id, estado FROM cuentas WHERE codigo = 'S03321'`).get();
+    assert.ok(s03321, 'S03321 se creó');
+    assert.equal(s03321.estado, 'Activo');
+    assert.equal(r.huerfanosCreados, 1);
+
+    const estadoRepo = new CuentaEstadoRepository(ctx.dbService);
+    assert.equal(estadoRepo.getVigencias(s03321.id).length, 1, 'una sola vigencia Activa, no se llama a cambiarEstado');
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -1413,8 +1446,12 @@ function crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, huerfano) {
   db.prepare(`INSERT INTO propietarios (nombre_completo) VALUES (?)`).run(huerfano.nombre);
   const propietarioId = db.prepare(`SELECT last_insert_rowid() AS id`).get().id;
 
+  // estado aquí es solo el valor inicial de creación; sembrarVigenciaInicial (abajo) lo
+  // sincroniza a 'Activo' de inmediato, y cambiarEstado lo vuelve a sincronizar si corresponde
+  // suspender. Se pasa el valor final igual, para no crear la fila en un estado transitorio raro.
   const cuentaId = cuentaRepo.create({
-    codigo: huerfano.codigo, direccion: 'Sin dirección registrada', estado: 'Suspendido',
+    codigo: huerfano.codigo, direccion: 'Sin dirección registrada',
+    estado: huerfano.motivoSuspension ? 'Suspendido' : 'Activo',
     observaciones: 'Creada en la carga inicial de cartera: aparece en el Excel, no en la base.',
     categoria_id: categoria.id, categoria_fecha_inicio: ANCLA_CATEGORIA
   });
@@ -1423,7 +1460,11 @@ function crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, huerfano) {
     .run(cuentaId, propietarioId, ANCLA_CATEGORIA);
 
   estadoRepo.sembrarVigenciaInicial({ cuentaId, estado: 'Activo', fechaInicio: ANCLA_CATEGORIA, motivo: 'Carga inicial cartera 2026-07' });
-  estadoRepo.cambiarEstado({ cuentaId, estado: 'Suspendido', fechaInicio: ANCLA_CATEGORIA, motivo: huerfano.motivoSuspension });
+  // motivoSuspension null (caso S03321: tiene teléfono propio en Datos.xlsx, nada indica que no
+  // exista) deja la cuenta Activa; solo se suspende cuando hay un motivo real (caso C021).
+  if (huerfano.motivoSuspension) {
+    estadoRepo.cambiarEstado({ cuentaId, estado: 'Suspendido', fechaInicio: ANCLA_CATEGORIA, motivo: huerfano.motivoSuspension });
+  }
 
   return { cuentaId, creado: true };
 }
@@ -1450,20 +1491,19 @@ function aplicarBase({ plan, dbService, usuarioId }) {
       }
     }
 
-    let huerfanoCreado = false;
-    if (plan.huerfanoACrear) {
-      const { creado, cuentaId } = crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, plan.huerfanoACrear);
-      huerfanoCreado = creado;
-      if (creado) {
-        cuentasSuspendidas++;
-        if (crearAperturaSiHaceFalta(db, carteraRepo, cuentaId, plan.huerfanoACrear.aperturaOpaca)) {
-          aperturasCreadas++;
-          totalApertura += plan.huerfanoACrear.aperturaOpaca.monto;
-        }
+    let huerfanosCreados = 0;
+    for (const huerfano of plan.huerfanosACrear) {
+      const { creado, cuentaId } = crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, huerfano);
+      if (!creado) continue;
+      huerfanosCreados++;
+      if (huerfano.motivoSuspension) cuentasSuspendidas++;
+      if (crearAperturaSiHaceFalta(db, carteraRepo, cuentaId, huerfano.aperturaOpaca)) {
+        aperturasCreadas++;
+        totalApertura += huerfano.aperturaOpaca.monto;
       }
     }
 
-    return { categoriasAsignadas, cuentasSuspendidas, huerfanoCreado, aperturasCreadas, totalApertura };
+    return { categoriasAsignadas, cuentasSuspendidas, huerfanosCreados, aperturasCreadas, totalApertura };
   })();
 }
 
@@ -1473,7 +1513,7 @@ module.exports = { aplicarBase };
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test`
-Expected: los 7 tests de `aplicar-base.test.js` pasan.
+Expected: los 8 tests de `aplicar-base.test.js` pasan.
 
 - [ ] **Step 5: Commit**
 
@@ -2080,7 +2120,7 @@ if (require.main === module) {
     console.log(`Categorías asignadas: ${r.aplicarBase.categoriasAsignadas} | suspendidas: ${r.aplicarBase.cuentasSuspendidas} | apertura total: $${r.aplicarBase.totalApertura.toLocaleString('es-CO')}`);
     console.log(`Causación: ${r.causacion.cargosCreados} cargos | Abonos: ${r.causacion.abonosCreados}`);
     console.log(`Conciliación: ${r.conciliacion.coinciden}/${r.conciliacion.comparadas} coinciden. Diferencias: ${r.conciliacion.difieren.length}`);
-    if (r.plan.huerfanoACrear) console.log(`Huérfano creado: ${r.plan.huerfanoACrear.codigo}`);
+    if (r.plan.huerfanosACrear.length) console.log(`Huérfanos creados: ${r.plan.huerfanosACrear.map((h) => h.codigo).join(', ')}`);
     if (r.plan.codigosPendientes.length) console.log(`Códigos pendientes de decisión: ${r.plan.codigosPendientes.join(', ')}`);
     if (r.plan.discrepanciasTipo.length) console.log(`Discrepancias TIPO vs categoría: ${r.plan.discrepanciasTipo.length} (ver reporte)`);
     console.log(`Reporte completo: ${reportePath}`);
@@ -2125,7 +2165,7 @@ git commit -m "feat(import-cartera): conciliación contra el Excel y CLI de comm
 | 8. Causar 2022→hoy + abonos desde recibos | Task 8 |
 | 9. Reporte de ~44 discrepancias TIPO, sin aplicar | Task 6 (`discrepanciasTipo`) |
 | 10. Conciliación contra `SALDO A 31/12/2025` | Task 9 (`conciliar.js`) |
-| 11. Códigos huérfanos (C021 crear, R0081 mapear, S03321 pendiente) | Task 5 (`codigos.js`), Task 7 |
+| 11. Códigos huérfanos (C021 y S03321 crear, R0081 mapear) | Task 5 (`codigos.js`), Task 7 |
 
 **2. El paso 5 del spec (recuperar meses de `pago_periodos` parseando texto) queda fuera de este plan**, y es una decisión de alcance explícita: el motor de cartera **no depende de `pago_periodos`** (Plan 1, §"pago_periodos se conserva como archivo histórico") — la causación sale de `cuenta_categorias`/`categoria_tarifas`, y los abonos salen de `recibo_detalles` directamente, no de qué mes les asignó el importador viejo. Recuperar esos meses mejoraría el detalle mes-a-mes de `pago_periodos` (que ya no es la fuente de la deuda), pero no cambia ni un peso del saldo que calcula `getEstadoCartera`. Se documenta como mejora futura, no como bloqueante.
 
@@ -2142,7 +2182,6 @@ git commit -m "feat(import-cartera): conciliación contra el Excel y CLI de comm
 
 - **Paso 5 del spec** (recuperación de meses vía texto de `recibo_detalles.concepto`) — ver Self-Review punto 2.
 - **Aplicar las ~44 recategorizaciones** — el usuario las hace a mano con `CarteraService.recategorizar` después de revisar el reporte que este plan genera (spec §11.1).
-- **Crear `S03321`** — pendiente de que el usuario decida si es un punto aparte o la co-propietaria de `S022` (spec §10.11).
 - **Actualización de datos maestros** (cédula, teléfono, coordenadas, `NOMBRE FINCA`) — entregable aparte, spec §12.
 - **Integración en la UI** (pantalla de pagos, IPC, estado de cuenta) — Plan 3, todavía sin escribir.
 

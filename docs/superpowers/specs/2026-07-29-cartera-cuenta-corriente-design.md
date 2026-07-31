@@ -416,7 +416,7 @@ Bloqueante: las 293 cuentas activas están en categoría `Sin clasificar` con ta
     |---|---|---|
     | **C021** "CASTRO DIEGO" | Falta de verdad. En los dos Excel, congelada en $5.000/$5.000, sin cédula ni teléfono, saldo 31/12/2025 = $0. | **Crear** como `Suspendido`, motivo *"no encontrado"*, categoría Finca. |
     | **R0081** "ARIAS MORENO MARTHA LUCIA" | **Es la misma cuenta que `S058`.** Mismo teléfono (`3227600287`) en las filas 44 y 299 de `Datos.xlsx`; el pago de $500.000 del 2026-01-31 ("PAGO DE PUNTO NUEVO", recibo 2400) ya está registrado bajo `S058`, y coincide con `PAGOS 2026` de R0081 en el Excel. | **NO crear.** Se mapea `R0081 → S058` en la tabla de equivalencias del importador. Crearla duplicaría la cuenta y contaría dos veces los $500.000. |
-    | **S03321** "MARIN HERRERA ORFILIA" | Ambiguo. En el Excel de cartera su nombre es *"OFILIA REVISAR S022"*; en la base, el propietario de `S022` es *"MACHADO MENDOZA CARMENZA Y/O OFILIA MARIN HERRERA"* — las dos personas quedaron en un solo nombre. Pero `Datos.xlsx` le da fila y teléfono propios (`3102227718`). | **Decisión del usuario**: ¿es un punto aparte, o es la co-propietaria de S022? Hasta que se defina, no se crea. |
+    | **S03321** "MARIN HERRERA ORFILIA" | En el Excel de cartera su nombre es *"OFILIA REVISAR S022"*; en la base, el propietario de `S022` es *"MACHADO MENDOZA CARMENZA Y/O OFILIA MARIN HERRERA"* — las dos personas quedaron en un solo nombre. Pero `Datos.xlsx` le da fila y teléfono propios (`3102227718`). **Decidido 2026-07-30**: es un punto aparte, no la co-propietaria de S022. | **Crear** como `Activo` (tiene teléfono propio, nada indica que no exista), categoría según su mensualidad. |
     | Los otros 11 (R002, R0211, R044, R0501, R080, R085, R091, R0971, S009, S0244, S025) | Sí existen en la base bajo el mismo código normalizado. | Ninguna: el desajuste era de formato (guiones y ceros), ya resuelto por la normalización. |
     | 8 códigos en la base y en ningún Excel | Incluye el código malformado `"S0332 - S0382"` (un rango metido en un solo campo). | Revisión manual, reportada por el importador. |
 
@@ -458,9 +458,7 @@ Bloqueante: las 293 cuentas activas están en categoría `Sin clasificar` con ta
 
 ### Sin puntos abiertos de diseño
 
-Queda un solo pendiente, y es del usuario:
-
-- **¿`S03321` (Orfilia Marín Herrera) es un punto aparte, o es la co-propietaria de `S022`?** Hasta que se defina no se crea la cuenta (§10.11). Los otros dos huérfanos ya están resueltos: C021 se crea suspendida, R0081 es duplicado de S058.
+No queda ningún pendiente de decisión del usuario. Los tres huérfanos están resueltos: C021 se crea suspendida, R0081 es duplicado de S058 (se mapea, no se crea), y S03321 se crea como punto aparte, activa (decidido 2026-07-30).
 
 Lo demás salió del camino crítico: las ~44 recategorizaciones son trabajo manual posterior a la carga, y R085 entra suspendida.
 
