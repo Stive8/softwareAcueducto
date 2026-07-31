@@ -195,12 +195,9 @@ test('el excedente de un abono FIFO se aplica contra el saldo histórico opaco, 
 
     const estado = new CarteraService(ctx.dbService).getEstadoCartera(cuentaId);
     assert.equal(estado.saldoOpaco, 250000, '300.000 - 50.000');
-    // Nota: el abono FIFO se registra por su monto completo en el bucket exigible, así que el
-    // excedente queda además como saldo a favor exigible (-50.000) al mismo tiempo que baja el
-    // opaco. totalReferencia (lo que se cobra) sigue siendo correcto porque el exigible negativo
-    // se clampea a 0, pero la cuenta muestra un "saldo a favor" que ya se aplicó al histórico.
-    // Punto abierto reportado en la revisión final; no se decide acá.
-    assert.equal(estado.totalReferencia, 250000, 'lo cobrable + histórico queda bien pese a lo anterior');
+    assert.equal(estado.deudaExigible, 0, 'el FIFO se registró solo por los 15.000 imputables, sin saldo a favor fantasma');
+    assert.equal(estado.saldoAFavor, 0, 'el sobrante se aplicó al histórico, no queda como crédito exigible');
+    assert.equal(estado.totalReferencia, 250000, 'lo cobrable + histórico');
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -221,6 +218,42 @@ test('un excedente que supera la deuda exigible Y el saldo opaco deja el opaco e
 
     const estado = new CarteraService(ctx.dbService).getEstadoCartera(cuentaId);
     assert.equal(estado.saldoOpaco, 0, 'el saldo opaco llega a cero, no queda negativo');
+    assert.equal(estado.deudaExigible, 0, 'el FIFO se registró solo por los 15.000 imputables');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('un abono sin ninguna deuda exigible pendiente va completo al saldo opaco, sin crear movimiento FIFO exigible', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const { cuentaId, propietarioId } = sembrarCuentaConCategoria(ctx.dbService, 'T013');
+    crearAperturaOpaca(ctx.dbService, cuentaId, 300000);
+    // Causado ene-mar 2022 = 15.000 exigible, cubierto entero por el primer recibo.
+    crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 1, fecha: '2022-01-15', valor: 15000, concepto: 'ABONO A LA DEUDA' });
+    // Segundo recibo: ya no queda deuda exigible pendiente, todo debe ir al opaco.
+    crearRecibo(ctx.dbService, { cuentaId, propietarioId, numero: 2, fecha: '2022-02-10', valor: 20000, concepto: 'ABONO A LA DEUDA' });
+
+    const r = causarYAbonar({ cuentaId, dbService: ctx.dbService, usuarioId: 1, hastaAnio: 2022, hastaMes: 3 });
+
+    assert.equal(r.aplicadoAOpaco, 20000, 'el segundo abono entero va al opaco, sin dejar rastro exigible');
+    assert.equal(r.sobranteFinal, 0);
+
+    const estado = new CarteraService(ctx.dbService).getEstadoCartera(cuentaId);
+    assert.equal(estado.deudaExigible, 0);
+    assert.equal(estado.saldoOpaco, 280000, '300.000 - 20.000');
+
+    const reciboDetalleId2 = db.prepare(`
+      SELECT rd.id FROM recibo_detalles rd
+      INNER JOIN recibos r ON r.id = rd.recibo_id
+      WHERE r.numero_recibo = 2
+    `).get().id;
+    const movimientosDelSegundoRecibo = db.prepare(`
+      SELECT tipo, exigible, monto FROM cartera_movimientos WHERE recibo_detalle_id = ?
+    `).all(reciboDetalleId2);
+    assert.equal(movimientosDelSegundoRecibo.length, 1, 'un único movimiento (el opaco), ningún FIFO exigible');
+    assert.equal(movimientosDelSegundoRecibo[0].exigible, 0, 'no se creó ningún movimiento con exigible = 1 para este recibo');
   } finally {
     cerrarDbTemporal(ctx);
   }

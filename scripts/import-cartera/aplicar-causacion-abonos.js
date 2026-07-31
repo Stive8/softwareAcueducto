@@ -4,6 +4,7 @@ const CuentaEstadoRepository = require('../../src/repositories/CuentaEstadoRepos
 const PagoRepository = require('../../src/repositories/PagoRepository');
 const CarteraService = require('../../src/services/CarteraService');
 const { codificarPeriodo, decodificarPeriodo, primerDiaDelMes } = require('../../src/services/cartera/periodos');
+const { redondear } = require('../../src/services/cartera/dinero');
 
 // El texto que distingue un recibo de conexión (punto nuevo de agua) de uno de sostenimiento
 // o abono a la deuda. Verificado contra los 2.429 recibos reales: 151 traen alguna de estas
@@ -91,18 +92,50 @@ function cargarAbonos({ cuentaId, dbService, usuarioId }) {
     if (yaExiste) continue;
 
     const fecha = String(d.fecha_recibo).split(' ')[0];
-    const { sobrante } = carteraService.registrarAbono({
-      cuentaId, fecha, monto: d.valor, modo: CarteraService.MODOS.ABONO_DEUDA_FIFO,
-      reciboDetalleId: d.recibo_detalle_id, observaciones: 'Carga inicial cartera 2026-07', usuarioId
-    });
     creados++;
     total += d.valor;
+
+    // Guarda de datos corruptos: SQLite no impone de verdad el tipo REAL de la columna, así que
+    // un valor no numérico (texto) pasa el filtro `rd.valor > 0` del SQL de arriba (SQLite
+    // ordena TEXT por encima de cualquier número). Sin esto, Math.min más abajo lo convertiría
+    // en NaN y el problema quedaría enmascarado en silencio (0 movimientos, sin error) en vez de
+    // fallar con un mensaje claro -- se deja que registrarAbono dispare su propia validación
+    // ('El monto del abono debe ser mayor a cero'), igual que hacía este código antes del fix.
+    if (!(Number(d.valor) > 0)) {
+      carteraService.registrarAbono({
+        cuentaId, fecha, monto: d.valor, modo: CarteraService.MODOS.ABONO_DEUDA_FIFO,
+        reciboDetalleId: d.recibo_detalle_id, observaciones: 'Carga inicial cartera 2026-07', usuarioId
+      });
+      continue;
+    }
+
+    // El abono FIFO nunca se registra por más de lo que hay pendiente exigible en este momento:
+    // así el mismo dinero nunca paga dos deudas (exigible Y opaca) a la vez. Lo que sobra se
+    // aplica aparte, directo contra el saldo opaco.
+    const pendienteExigible = redondear(
+      carteraRepo.getCargosPendientes(cuentaId, 1).reduce((s, c) => s + c.pendiente, 0)
+    );
+    const montoFifo = Math.min(d.valor, pendienteExigible);
+    let sobrante = redondear(d.valor - montoFifo);
+
+    if (montoFifo > 0) {
+      carteraService.registrarAbono({
+        cuentaId, fecha, monto: montoFifo, modo: CarteraService.MODOS.ABONO_DEUDA_FIFO,
+        reciboDetalleId: d.recibo_detalle_id, observaciones: 'Carga inicial cartera 2026-07', usuarioId
+      });
+    }
 
     // Lo que el FIFO no alcanzó a cubrir de la deuda exigible del momento (un pago más grande
     // que la deuda exigible que había cuando se hizo) se aplica contra el saldo histórico
     // opaco, hasta agotarlo -- es el mismo dinero real, un abono grande destinado a saldar
     // deuda vieja. Si sobra después de eso, es saldo a favor genuino: se reporta, no se inventa
     // un destino (eso es ANTICIPO, un modo operativo aparte, fuera de alcance de esta carga).
+    //
+    // Caso límite conocido y aceptado: si montoFifo es 0 y además no hay saldoOpaco disponible,
+    // este recibo_detalle no genera ningún movimiento (todo es sobranteFinal). Si el importador
+    // se vuelve a correr, ese recibo se re-detecta como pendiente (no hay movimiento con su id)
+    // y sobranteFinal se reporta de nuevo -- no duplica datos (no crea movimientos), solo se
+    // recuenta en el reporte de una segunda corrida.
     if (sobrante > 0) {
       const { saldoOpaco } = carteraRepo.getSaldos(cuentaId);
       if (saldoOpaco > 0) {
