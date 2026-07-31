@@ -14,13 +14,29 @@ test('EQUIVALENCIAS mapea R0081 a S058, la cuenta real (mismo teléfono, mismo p
   assert.equal(EQUIVALENCIAS.size, 1, 'solo esa equivalencia; C021 y S03321 se crean, no se mapean');
 });
 
-test('HUERFANOS_A_CREAR describe a C021 y S03321, las dos cuentas que de verdad faltan', () => {
-  assert.equal(HUERFANOS_A_CREAR.length, 2);
+test('HUERFANOS_A_CREAR describe las 13 cuentas que de verdad faltan (confirmado 2026-07-31 contra la base real)', () => {
+  assert.equal(HUERFANOS_A_CREAR.length, 13);
   assert.equal(HUERFANOS_A_CREAR[0].codigo, 'C021');
   assert.equal(HUERFANOS_A_CREAR[0].motivoSuspension, 'no encontrado');
   assert.equal(HUERFANOS_A_CREAR[1].codigo, 'S03321');
   assert.equal(HUERFANOS_A_CREAR[1].nombre, 'MARIN HERRERA ORFILIA');
   assert.equal(HUERFANOS_A_CREAR[1].motivoSuspension, null, 'tiene teléfono propio en Datos.xlsx, se crea Activa');
+
+  for (const h of HUERFANOS_A_CREAR) {
+    assert.ok(h.categoriaNombre, `${h.codigo} debe traer categoriaNombre`);
+  }
+
+  const r0211 = HUERFANOS_A_CREAR.find((h) => h.codigo === 'R0211');
+  assert.equal(r0211.categoriaNombre, 'Tienda', 'R0211 cobraba 12.000, tarifa de Tienda');
+
+  const r044 = HUERFANOS_A_CREAR.find((h) => h.codigo === 'R044');
+  assert.equal(r044.categoriaNombre, 'Tienda', 'R044 no tiene mensualidad, se usa el TIPO=COML de Datos.xlsx');
+
+  const s0244 = HUERFANOS_A_CREAR.find((h) => h.codigo === 'S0244');
+  assert.equal(s0244.motivoSuspension, null, 'tiene cédula, teléfono y correo reales en Datos.xlsx, se crea Activa');
+
+  const suspendidos = HUERFANOS_A_CREAR.filter((h) => h.motivoSuspension !== null);
+  assert.equal(suspendidos.length, 9, 'C021, R002, R0211, R044, R0501, R085, R0971, S009, S025');
 });
 
 test('CODIGOS_PENDIENTES queda vacío: ya no hay códigos sin resolver', () => {

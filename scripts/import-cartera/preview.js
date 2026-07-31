@@ -27,12 +27,13 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
 
     if (resolucion.esPendiente) { codigosPendientes.push(normalizarCodigo(c.codigo)); continue; }
     if (resolucion.esHuerfano) {
-      // Los únicos huérfanos reales son los de HUERFANOS_A_CREAR (C021 y S03321); cualquier otro
-      // huérfano no anticipado se reporta aparte, para que quien corra el importador lo vea y lo
-      // resuelva a mano. Todos los huérfanos conocidos son categoría 'Finca'.
+      // Los únicos huérfanos reales son los de HUERFANOS_A_CREAR; cualquier otro huérfano no
+      // anticipado se reporta aparte, para que quien corra el importador lo vea y lo resuelva a
+      // mano. Cada huérfano conocido ya trae su propia categoriaNombre (verificada a mano contra
+      // Datos.xlsx, ver codigos.js) -- no todos son 'Finca'.
       const huerfanoConocido = HUERFANOS_A_CREAR.find((h) => h.codigo === normalizarCodigo(c.codigo));
       if (huerfanoConocido) {
-        huerfanosACrear.push({ ...huerfanoConocido, categoriaNombre: 'Finca', aperturaOpaca: c.aperturaOpaca });
+        huerfanosACrear.push({ ...huerfanoConocido, aperturaOpaca: c.aperturaOpaca });
       } else {
         aperturasSinDato.push({ codigo: c.codigo, motivo: 'huérfano no reconocido: revisar manualmente' });
       }
