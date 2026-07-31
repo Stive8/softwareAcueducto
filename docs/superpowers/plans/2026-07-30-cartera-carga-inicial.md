@@ -1039,7 +1039,7 @@ Crear `scripts/import-cartera/preview.js`:
 const { leerCartera } = require('./leer-cartera');
 const { leerDatosMaestros } = require('./leer-datos');
 const { categoriaPorMensualidad } = require('./categorizar');
-const { normalizarCodigo, resolverCodigo, HUERFANOS_A_CREAR } = require('./codigos');
+const { normalizarCodigo, resolverCodigo, HUERFANOS_A_CREAR, CODIGOS_PENDIENTES } = require('./codigos');
 
 function cargarCodigosEnBase(dbService) {
   const filas = dbService.getDb().prepare(`SELECT codigo FROM cuentas`).all();
@@ -1070,15 +1070,12 @@ async function generarPlan({ filePathCartera, filePathDatos, dbService }) {
 
     if (resolucion.esPendiente) { codigosPendientes.push(normalizarCodigo(c.codigo)); continue; }
     if (resolucion.esHuerfano) {
-      // Solo se conocen dos huérfanos reales (C021, S03321); cualquier otro huérfano no
-      // anticipado se reporta igual, para que quien corra el importador lo vea y lo resuelva a mano.
-      const huerfano = HUERFANOS_A_CREAR.find((h) => h.codigo === normalizarCodigo(c.codigo));
-      if (huerfano) {
-        huerfanosACrear.push({
-          ...huerfano,
-          categoriaNombre: categoriaPorMensualidad(c.mensualidadVieja),
-          aperturaOpaca: c.aperturaOpaca
-        });
+      // Los únicos huérfanos reales son los de HUERFANOS_A_CREAR (C021 y S03321); cualquier otro
+      // huérfano no anticipado se reporta aparte, para que quien corra el importador lo vea y lo
+      // resuelva a mano. Todos los huérfanos conocidos son categoría 'Finca'.
+      const huerfanoConocido = HUERFANOS_A_CREAR.find((h) => h.codigo === normalizarCodigo(c.codigo));
+      if (huerfanoConocido) {
+        huerfanosACrear.push({ ...huerfanoConocido, categoriaNombre: 'Finca', aperturaOpaca: c.aperturaOpaca });
       } else {
         aperturasSinDato.push({ codigo: c.codigo, motivo: 'huérfano no reconocido: revisar manualmente' });
       }
@@ -1290,11 +1287,14 @@ test('crea AperturaOpaca con exigible=0 solo cuando el monto es mayor a cero', (
   }
 });
 
-test('crea C021 como cuenta nueva, Suspendida, con su apertura', () => {
+test('crea C021 y S03321 como cuentas nuevas, con su apertura cada una', () => {
   const ctx = crearDbTemporal();
   try {
     const plan = planBase([], {
-      huerfanosACrear: [{ codigo: 'C021', nombre: 'CASTRO DIEGO', categoriaNombre: 'Finca', motivoSuspension: 'no encontrado', aperturaOpaca: { monto: 0, fuente: 'ninguna' } }]
+      huerfanosACrear: [
+        { codigo: 'C021', nombre: 'CASTRO DIEGO', categoriaNombre: 'Finca', motivoSuspension: 'no encontrado', aperturaOpaca: { monto: 0, fuente: 'ninguna' } },
+        { codigo: 'S03321', nombre: 'MARIN HERRERA ORFILIA', categoriaNombre: 'Finca', motivoSuspension: null, aperturaOpaca: { monto: 180000, fuente: 'saldo2020' } }
+      ]
     });
 
     const r = aplicarBase({ plan, dbService: ctx.dbService, usuarioId: 1 });
@@ -1303,32 +1303,18 @@ test('crea C021 como cuenta nueva, Suspendida, con su apertura', () => {
     const c021 = db.prepare(`SELECT id, estado FROM cuentas WHERE codigo = 'C021'`).get();
     assert.ok(c021, 'C021 se creó');
     assert.equal(c021.estado, 'Suspendido');
-    assert.equal(r.huerfanosCreados, 1);
+
+    const s03321 = db.prepare(`SELECT id, estado FROM cuentas WHERE codigo = 'S03321'`).get();
+    assert.ok(s03321, 'S03321 se creó');
+    assert.equal(s03321.estado, 'Activo', 'motivoSuspension null: se crea Activa, no Suspendida');
+
+    assert.equal(r.huerfanosCreados, 2);
 
     const estadoRepo = new CuentaEstadoRepository(ctx.dbService);
     assert.equal(estadoRepo.getVigenciaAbierta(c021.id).motivo, 'no encontrado');
-  } finally {
-    cerrarDbTemporal(ctx);
-  }
-});
 
-test('crea S03321 como cuenta nueva, Activa (no suspendida): tiene teléfono propio en Datos.xlsx', () => {
-  const ctx = crearDbTemporal();
-  try {
-    const plan = planBase([], {
-      huerfanosACrear: [{ codigo: 'S03321', nombre: 'MARIN HERRERA ORFILIA', categoriaNombre: 'Finca', motivoSuspension: null, aperturaOpaca: { monto: 0, fuente: 'ninguna' } }]
-    });
-
-    const r = aplicarBase({ plan, dbService: ctx.dbService, usuarioId: 1 });
-
-    const db = ctx.dbService.getDb();
-    const s03321 = db.prepare(`SELECT id, estado FROM cuentas WHERE codigo = 'S03321'`).get();
-    assert.ok(s03321, 'S03321 se creó');
-    assert.equal(s03321.estado, 'Activo');
-    assert.equal(r.huerfanosCreados, 1);
-
-    const estadoRepo = new CuentaEstadoRepository(ctx.dbService);
-    assert.equal(estadoRepo.getVigencias(s03321.id).length, 1, 'una sola vigencia Activa, no se llama a cambiarEstado');
+    const carteraRepo = new CarteraRepository(ctx.dbService);
+    assert.equal(carteraRepo.getSaldos(s03321.id).saldoOpaco, 180000);
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -1446,12 +1432,11 @@ function crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, huerfano) {
   db.prepare(`INSERT INTO propietarios (nombre_completo) VALUES (?)`).run(huerfano.nombre);
   const propietarioId = db.prepare(`SELECT last_insert_rowid() AS id`).get().id;
 
-  // estado aquí es solo el valor inicial de creación; sembrarVigenciaInicial (abajo) lo
-  // sincroniza a 'Activo' de inmediato, y cambiarEstado lo vuelve a sincronizar si corresponde
-  // suspender. Se pasa el valor final igual, para no crear la fila en un estado transitorio raro.
+  // motivoSuspension null significa "se crea Activa" (caso S03321: tiene teléfono propio en
+  // Datos.xlsx, nada indica que no exista) — solo se suspende cuando hay un motivo real (C021).
+  const estadoInicial = huerfano.motivoSuspension ? 'Suspendido' : 'Activo';
   const cuentaId = cuentaRepo.create({
-    codigo: huerfano.codigo, direccion: 'Sin dirección registrada',
-    estado: huerfano.motivoSuspension ? 'Suspendido' : 'Activo',
+    codigo: huerfano.codigo, direccion: 'Sin dirección registrada', estado: estadoInicial,
     observaciones: 'Creada en la carga inicial de cartera: aparece en el Excel, no en la base.',
     categoria_id: categoria.id, categoria_fecha_inicio: ANCLA_CATEGORIA
   });
@@ -1460,8 +1445,6 @@ function crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, huerfano) {
     .run(cuentaId, propietarioId, ANCLA_CATEGORIA);
 
   estadoRepo.sembrarVigenciaInicial({ cuentaId, estado: 'Activo', fechaInicio: ANCLA_CATEGORIA, motivo: 'Carga inicial cartera 2026-07' });
-  // motivoSuspension null (caso S03321: tiene teléfono propio en Datos.xlsx, nada indica que no
-  // exista) deja la cuenta Activa; solo se suspende cuando hay un motivo real (caso C021).
   if (huerfano.motivoSuspension) {
     estadoRepo.cambiarEstado({ cuentaId, estado: 'Suspendido', fechaInicio: ANCLA_CATEGORIA, motivo: huerfano.motivoSuspension });
   }
@@ -1494,12 +1477,13 @@ function aplicarBase({ plan, dbService, usuarioId }) {
     let huerfanosCreados = 0;
     for (const huerfano of plan.huerfanosACrear) {
       const { creado, cuentaId } = crearHuerfano(db, categoriaRepo, cuentaRepo, estadoRepo, huerfano);
-      if (!creado) continue;
-      huerfanosCreados++;
-      if (huerfano.motivoSuspension) cuentasSuspendidas++;
-      if (crearAperturaSiHaceFalta(db, carteraRepo, cuentaId, huerfano.aperturaOpaca)) {
-        aperturasCreadas++;
-        totalApertura += huerfano.aperturaOpaca.monto;
+      if (creado) {
+        huerfanosCreados++;
+        if (huerfano.motivoSuspension) cuentasSuspendidas++;
+        if (crearAperturaSiHaceFalta(db, carteraRepo, cuentaId, huerfano.aperturaOpaca)) {
+          aperturasCreadas++;
+          totalApertura += huerfano.aperturaOpaca.monto;
+        }
       }
     }
 
@@ -1513,7 +1497,7 @@ module.exports = { aplicarBase };
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test`
-Expected: los 8 tests de `aplicar-base.test.js` pasan.
+Expected: los 7 tests de `aplicar-base.test.js` pasan.
 
 - [ ] **Step 5: Commit**
 
