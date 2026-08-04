@@ -20,6 +20,8 @@ function formatFecha(fechaString) {
 }
 
 const METODOS_PAGO_VALIDOS = ['Efectivo', 'Transferencia'];
+const CAMPOS_DE_RECIBO = ['numero_recibo', 'fecha_recibo'];
+const CAMPOS_DE_DETALLE = ['concepto', 'valor'];
 
 class ReciboService {
   constructor(dbService) {
@@ -124,6 +126,51 @@ class ReciboService {
       this.asientoContableService.revertirPorReferencia('Recibo', id, `Corrección método de pago: ${motivo}`, usuarioId);
       this.asientoContableService.generarDesdeRecibo(id, usuarioId);
     });
+  }
+
+  // Corrige numero_recibo/fecha_recibo (a nivel de recibo) o concepto/valor (a nivel de un
+  // recibo_detalle puntual) SIN sobrescribir la columna original: regla 3 de la carga inicial
+  // ("el recibo se guarda literal e inmutable"). Cada llamada agrega una fila a
+  // recibo_correcciones; el valor vigente es el de la corrección más reciente.
+  corregirCampo({ reciboId, reciboDetalleId = null, campo, valorNuevo, motivo, usuarioId = null }) {
+    const recibo = this.repository.findById(reciboId);
+    if (!recibo) throw new Error('Recibo no encontrado');
+    if (recibo.estado === 'Anulado') throw new Error('No se puede corregir un recibo anulado');
+    if (!motivo || !motivo.trim()) throw new Error('Debe indicar el motivo de la corrección');
+    if (valorNuevo === undefined || valorNuevo === null || String(valorNuevo).trim() === '') {
+      throw new Error('Debe indicar el valor nuevo');
+    }
+
+    let valorAnterior;
+    if (CAMPOS_DE_RECIBO.includes(campo)) {
+      if (reciboDetalleId) throw new Error(`El campo "${campo}" pertenece al recibo, no a un detalle`);
+      valorAnterior = this.repository.getValorVigente(reciboId, campo, null) ?? String(recibo[campo]);
+    } else if (CAMPOS_DE_DETALLE.includes(campo)) {
+      if (!reciboDetalleId) throw new Error(`El campo "${campo}" requiere indicar el recibo_detalle`);
+      const detalle = this.repository.getDetalles(reciboId).find(d => d.id === reciboDetalleId);
+      if (!detalle) throw new Error('recibo_detalle no encontrado en este recibo');
+      valorAnterior = this.repository.getValorVigente(reciboId, campo, reciboDetalleId) ?? String(detalle[campo]);
+    } else {
+      throw new Error(`Campo no editable: ${campo}`);
+    }
+
+    if (String(valorAnterior) === String(valorNuevo)) {
+      throw new Error('El valor nuevo es igual al valor vigente');
+    }
+
+    return this.repository.crearCorreccion({
+      reciboId, reciboDetalleId, campo,
+      valorAnterior: String(valorAnterior), valorNuevo: String(valorNuevo),
+      motivo, usuarioId
+    });
+  }
+
+  getValorVigente(reciboId, campo, reciboDetalleId = null) {
+    return this.repository.getValorVigente(reciboId, campo, reciboDetalleId);
+  }
+
+  getHistorialCorrecciones(reciboId) {
+    return this.repository.getCorrecciones(reciboId);
   }
 
   // Genera el documento HTML imprimible de un recibo (usado tanto para imprimir como para exportar a PDF)

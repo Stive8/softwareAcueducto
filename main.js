@@ -21,6 +21,7 @@ const DashboardService = require('./src/services/DashboardService');
 const PropietarioService = require('./src/services/PropietarioService');
 const CategoriaService = require('./src/services/CategoriaService');
 const PagoService = require('./src/services/PagoService');
+const CarteraService = require('./src/services/CarteraService');
 const ReciboService = require('./src/services/ReciboService');
 const GastoService = require('./src/services/GastoService');
 const CajaService = require('./src/services/CajaService');
@@ -57,6 +58,7 @@ let propietarioService;
 let categoriaService;
 let terceroService;
 let pagoService;
+let carteraService;
 let reciboService;
 let gastoService;
 let cajaService;
@@ -295,6 +297,9 @@ app.whenReady().then(async () => {
   categoriaService = new CategoriaService(dbService);
   terceroService = new TerceroService(dbService);
   pagoService = new PagoService(dbService);
+  // Solo lectura por ahora: pantalla de "Cartera (nuevo modelo)" colgada del modal de Pagos,
+  // ver PUNTOS-CONFLICTIVOS.md. Ningún canal de escritura registrado todavía a propósito.
+  carteraService = new CarteraService(dbService);
   reciboService = new ReciboService(dbService);
   gastoService = new GastoService(dbService);
   cajaService = new CajaService(dbService);
@@ -1124,6 +1129,33 @@ function setupIpcHandlers() {
   envolverHandle('pagos:getHistorialPagos', async (event, cuentaId) => {
     try {
       return { success: true, data: pagoService.getHistorialPagos(cuentaId) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Cartera (nuevo modelo) -- solo lectura. Ver PUNTOS-CONFLICTIVOS.md: el sistema activo de
+  // cobro sigue siendo pagos:*; estos canales solo muestran el modelo nuevo en paralelo para
+  // poder validarlo con datos reales antes de conectarle escritura.
+  envolverHandle('cartera:getEstadoCartera', async (event, cuentaId) => {
+    try {
+      return { success: true, data: carteraService.getEstadoCartera(cuentaId) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cartera:getDetalleCartera', async (event, cuentaId) => {
+    try {
+      return { success: true, data: carteraService.getDetalleCartera(cuentaId) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cartera:getMotivoDiferencia', async (event, cuentaId) => {
+    try {
+      return { success: true, data: carteraService.getMotivoDiferencia(cuentaId) };
     } catch (error) {
       return { success: false, error: error.message };
     }

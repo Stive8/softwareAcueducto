@@ -1,0 +1,365 @@
+// Paso 9b de la carga inicial: correcciones puntuales encontradas durante la revisión manual
+// del paso 11 (conciliación), que NO están en `carga_inicial_cartera.json` y por lo tanto no
+// las genera el paso 9. Se documentan aquí como código, no como script suelto, para que una
+// corrida limpia del loader las reproduzca exactamente igual.
+//
+// Corre después del paso 10 (imputación) y antes de calcular la conciliación del paso 11.
+// Las correcciones 1 y 2 (S03311, tarifa) no interactúan con lo que ya imputó el paso 10 --
+// ninguna de esas cuentas tiene un recibo o abono desde 2024 en el JSON. Las correcciones 4 a
+// 7 (recibos 2137, 2384, 1659, 1825) SÍ tocan abonos que el paso 10 ya imputó, así que
+// deshacen y rehacen esa imputación puntual con el mismo mecanismo (`distribuir` +
+// `mesesDelPeriodo`, reusados de paso10-imputacion.js, no reinventados).
+//
+// 1. S03311: la única de las "20 cuentas con celda vacía en 2024" donde el año faltante SÍ
+//    estaba causado en la realidad (verificado: sumar 12 meses a 10.000 cierra la conciliación
+//    exacto contra `saldo_cartera_excel_2026`). Las otras 19 celda-vacía NO llevan esta
+//    corrección -- para ellas la celda vacía es legítima (cuenta nueva sin deuda ese año) o no
+//    cierra ni sumando el año, y quedan tal cual.
+//
+// 2. C021, R080, R091, S0244: decisión de negocio -- la tarifa de 5.000 que trae
+//    `plan_causacion` para estas 4 cuentas es una tarifa derogada en 2024 que CARTERA nunca
+//    actualizó. Verificado en DatosPropietariosCuentas que las 4 son TIPO=CASA, activas
+//    (sin fecha_suspension), con coordenadas de campo -- y sin ningún recibo desde 2024. Se
+//    recausa el 2024-2026 completo a 10.000 (la tarifa vigente). Las 7 cuentas suspendidas que
+//    comparten la misma tarifa vieja (R002, R0501, R0971, S004, S009, S0141, S0441) NO se
+//    tocan: DatosPropietariosCuentas las marca "NO EXISTE" / "NO ENCONTRADO" / "CASA
+//    ABANDONADA", y subirles la tarifa solo infla cartera que la junta debe decidir si castiga.
+//
+// 3. S0244: nunca tuvo fila en `cuenta_propietarios` (la cuenta ya existía antes de esta carga,
+//    así que `leer-datos-propietarios.js` -- que solo alimenta cuentas nuevas -- nunca la tocó).
+//    DatosPropietariosCuentas.xlsx trae "ZAPATO MACHADO PEDRO NEL" con la misma cédula, teléfono
+//    y correo que ya estaban en `carga_inicial_cartera.json` para esta cuenta, y una columna de
+//    nombre anterior que coincide exacto con el nombre que CARTERA nunca actualizó ("MACHADO
+//    ZAPATA LUIS HERNANDO"). Confirma cambio de dueño no reflejado. Ver PUNTOS-CONFLICTIVOS.md
+//    sección 4.
+//
+// 4. Recibo 2137 -- reasignar de S0312 a S0393. El 22-mar-2025 la familia Ospina pagó sus
+//    cuatro puntos por transferencia en recibos consecutivos de 270.000 cada uno (2134→S0394,
+//    2135→S0391, 2136→S0392, 2137→quedó anotado S0312 en vez de S0393). Evidencia: el nombre en
+//    la colilla 2137 es "Ospina Machado Mariano y/o Azucena Salguero", pero S0312 ya había
+//    cambiado de dueño a Azucena Salguero antes de esa fecha; los demás recibos de S0312 forman
+//    una cadena sin huecos que el 2137 duplicaría; y CARTERA mostraba S0312 con saldo negativo
+//    (crédito que no existía). Solo se mueve el movimiento de cartera (bucket de dinero) -- el
+//    recibo en sí NUNCA se toca (ni su número, ni `recibos.cuenta_id`): por diseño, el
+//    "Historial de Aportes" del sistema viejo seguirá mostrando este recibo bajo S0312, mientras
+//    que la cartera nueva ya lo cuenta bien bajo S0393. Efecto: S0393 cierra contra CARTERA;
+//    S0312 se abre con +270.000 (ver `motivosDiferencia.js`).
+//
+// 5. Recibo 2384 (S048) -- corregir el período del recibo de 2026 a 2025. Solo cambia
+//    `recibo_detalles.periodo_desde/periodo_hasta` (lo que muestra "Historial de Aportes" del
+//    sistema viejo); el `concepto_original` ("...ENERO A DICIEMBRE 2026") se conserva intacto.
+//    Evidencia: la asociada paga una vez al año, a fin de año o comienzos del siguiente, sin
+//    fallar desde 2017 y sin adelantar nunca un año completo; CARTERA registra PAGOS EN 2025 =
+//    192.000, lo que confirma que este pago era de 2025, no de 2026. NO se re-imputa el abono
+//    contra otros cargos -- el saldo de una cuenta sale de la suma de los montos de sus
+//    movimientos, nunca de a qué cargo quedó imputado un abono, así que este cambio no mueve
+//    ningún número de la conciliación. S048 sigue con su diferencia de +192.000 documentada
+//    (CARTERA proyectó un tercer pago anual que nunca existió).
+//
+// 6 y 7. Recibos 1659 y 1825 (S010) -- 1659 deja de generar movimiento de abono: su efecto ya
+//    está incorporado en el saldo de apertura al 31/12/2023 según CARTERA (que usó este recibo
+//    para cerrar 2023 en 0 sin anotarlo como pago; contarlo también como abono en 2024 sería
+//    contarlo dos veces). 1825 pasa a abono libre (sin período, FIFO puro) -- su concepto
+//    ("julio 2022 a diciembre 2023") es una transcripción errada, confirmada contra el recibo
+//    pareja del mismo día en S015. Estas dos correcciones cambian qué hay que re-imputar para
+//    LOS TRES abonos de S010 desde 2024 (938, 621, 482), así que se recalculan los tres juntos,
+//    en orden cronológico, igual que haría el paso 10. Efecto verificado (no el que se esperaba
+//    a primera vista): S010 NO cierra -- queda debiendo 50.000 y la diferencia final es -90.000,
+//    exactamente el monto del recibo 1825 que CARTERA nunca registró (mismo patrón que S034).
+//
+// Idempotente: antes de insertar, borra los CargoMensual existentes de la cuenta en los años
+// que va a recrear (2024-2026 completos para las 4 de tarifa; solo 2024 para S03311), así que
+// re-ejecutar da el mismo resultado sin duplicar ni acumular montos viejos. La asignación de
+// propietario de S0244 solo inserta si la cuenta sigue sin propietario activo. Las correcciones
+// 4 a 7 se detectan por si el movimiento/campo que tocan ya quedó en el estado corregido (ver
+// cada bloque), así que repetir la corrida no duplica imputaciones ni revierte nada.
+const { normalizarCodigo } = require('./normalizar');
+const { primerDiaDelMes } = require('../../src/services/cartera/periodos');
+const { distribuir, MODOS } = require('../../src/services/cartera/imputacion');
+const { redondear, esMayor } = require('../../src/services/cartera/dinero');
+const { mesesDelPeriodo, TIPOS_CARGO_COMBINADOS } = require('./paso10-imputacion');
+
+const OBSERVACION_S03311 =
+  'Causacion inferida: celda vacia en CARTERA, confirmada por continuidad del saldo';
+const OBSERVACION_TARIFA =
+  'Tarifa corregida a la vigente 2024: CARTERA mantenia 5.000 (tarifa derogada) por falta de actualizacion';
+
+const CUENTAS_TARIFA_CORREGIDA = ['C021', 'R080', 'R091', 'S0244'];
+
+const PROPIETARIO_S0244 = {
+  codigoCuenta: 'S0244',
+  nombre_completo: 'ZAPATO MACHADO PEDRO NEL',
+  numero_identificacion: '93369009',
+  telefono: '3505240204',
+  email: 'pedronelza55@gmail.com',
+  fechaInicio: '2023-12-31',
+  observacionesPropietario: 'Carga inicial de cartera 2026-07: propietario tomado de ' +
+    'DatosPropietariosCuentas.xlsx (coincide en cedula/telefono/correo con la fila de S0244 en ' +
+    'el Excel de CARTERA, que lo tenia registrado bajo el nombre anterior "MACHADO ZAPATA LUIS ' +
+    'HERNANDO"). Ver PUNTOS-CONFLICTIVOS.md seccion 4.',
+  observacionesAsignacion: 'Cambio de propietario detectado en la carga inicial de cartera; ' +
+    'no habia registro previo en cuenta_propietarios.'
+};
+
+const REASIGNACION_RECIBO_2137 = {
+  numeroRecibo: 2137,
+  codigoCuentaOrigen: 'S0312',
+  codigoCuentaDestino: 'S0393',
+  periodoDesde: '2025-03',
+  periodoHasta: '2025-03'
+};
+
+const CORRECCION_PERIODO_RECIBO_2384 = {
+  numeroRecibo: 2384,
+  periodoDesdeNuevo: 'Enero 2025',
+  periodoHastaNuevo: 'Diciembre 2025'
+};
+
+// S010: 1659 se elimina (correccion 6); 1825 pasa a abono libre (correccion 7); los tres
+// abonos desde 2024 se recalculan juntos, en el orden cronologico real (fecha_pago_real).
+const RECALCULO_S010 = {
+  cuentaCodigo: 'S010',
+  numeroReciboEliminado: 1659,
+  numeroReciboLibre: 1825,
+  abonosOrdenCronologico: [
+    { numeroRecibo: 1825, periodoDesde: null, periodoHasta: null },
+    { numeroRecibo: 2151, periodoDesde: '2024-01', periodoHasta: '2024-12' },
+    { numeroRecibo: 2302, periodoDesde: '2025-01', periodoHasta: '2025-12' }
+  ]
+};
+
+function borrarCargoMensualDelAnio(db, cuentaId, anio) {
+  return db.prepare("DELETE FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=?")
+    .run(cuentaId, anio).changes;
+}
+
+function getReciboDetalle(db, numeroRecibo) {
+  const recibo = db.prepare('SELECT id FROM recibos WHERE numero_recibo=?').get(numeroRecibo);
+  if (!recibo) throw new Error(`Recibo ${numeroRecibo}: no existe en la base -- ¿corrió el paso 7?`);
+  const detalle = db.prepare('SELECT id FROM recibo_detalles WHERE recibo_id=?').get(recibo.id);
+  if (!detalle) throw new Error(`Recibo ${numeroRecibo}: no tiene recibo_detalle -- ¿corrió el paso 7?`);
+  return { reciboId: recibo.id, detalleId: detalle.id };
+}
+
+function getAbonoPorDetalle(db, detalleId) {
+  return db.prepare(`SELECT id, cuenta_id, monto FROM cartera_movimientos WHERE recibo_detalle_id=? AND tipo='Abono'`).get(detalleId);
+}
+
+function cargosPendientesCombinados(db, cuentaId) {
+  const tiposSQL = TIPOS_CARGO_COMBINADOS.map(t => `'${t}'`).join(', ');
+  const filas = db.prepare(`
+    SELECT m.id, m.anio, m.mes, m.monto,
+      COALESCE((SELECT SUM(i.monto) FROM cartera_imputaciones i WHERE i.cargo_id = m.id), 0) AS cubierto
+    FROM cartera_movimientos m
+    WHERE m.cuenta_id = ? AND m.tipo IN (${tiposSQL}) AND m.monto > 0
+    ORDER BY m.fecha ASC, m.id ASC
+  `).all(cuentaId);
+  return filas.map(f => ({ ...f, pendiente: redondear(f.monto - f.cubierto) })).filter(f => esMayor(f.pendiente, 0));
+}
+
+// Reimputa un abono contra los cargos pendientes de su cuenta: primero por período declarado
+// (si trae), y el sobrante a FIFO. Mismo mecanismo que paso10-imputacion.js -- se asume que
+// las imputaciones viejas de este abono ya se borraron antes de llamar esta función.
+function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, periodoHasta }) {
+  let restante = monto;
+  let periodoImputados = 0;
+  const meses = mesesDelPeriodo(periodoDesde, periodoHasta);
+  if (meses.length > 0) {
+    const cargos = cargosPendientesCombinados(db, cuentaId);
+    const idsElegidos = cargos.filter(c => meses.some(m => m.anio === c.anio && m.mes === c.mes)).map(c => c.id);
+    const { imputaciones, sobrante } = distribuir({ modo: MODOS.MESES_ESPECIFICOS, cargos, monto: restante, cargosElegidos: idsElegidos });
+    for (const imp of imputaciones) repo.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
+    periodoImputados = imputaciones.length;
+    restante = sobrante;
+  }
+  let fifoImputados = 0;
+  if (esMayor(restante, 0)) {
+    const cargos = cargosPendientesCombinados(db, cuentaId);
+    const { imputaciones, sobrante } = distribuir({ modo: MODOS.ABONO_DEUDA_FIFO, cargos, monto: restante });
+    for (const imp of imputaciones) repo.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
+    fifoImputados = imputaciones.length;
+    restante = sobrante;
+  }
+  return { periodoImputados, fifoImputados, sobrante: restante };
+}
+
+function ejecutarPaso9b({ dbService }) {
+  const CarteraRepository = require('../../src/repositories/CarteraRepository');
+  const db = dbService.getDb();
+  const repo = new CarteraRepository(dbService);
+
+  const idPorCodigo = new Map(
+    db.prepare('SELECT id, codigo FROM cuentas').all().map(c => [normalizarCodigo(c.codigo), c.id])
+  );
+
+  const s03311Creados = [];
+  const tarifaCorregida = [];
+  let propietarioS0244 = null;
+  let reasignacion2137 = null;
+  let correccion2384 = null;
+  let recalculoS010 = null;
+
+  const transaccion = db.transaction(() => {
+    // 1. S03311: causar 2024 completo a 10.000
+    const cuentaS03311 = idPorCodigo.get(normalizarCodigo('S03311'));
+    if (cuentaS03311 === undefined) throw new Error('S03311: no existe en la base -- ¿corrieron los pasos 1-2?');
+    borrarCargoMensualDelAnio(db, cuentaS03311, 2024);
+    for (let mes = 1; mes <= 12; mes++) {
+      const movId = repo.crearMovimiento({
+        cuentaId: cuentaS03311, fecha: primerDiaDelMes(2024, mes),
+        tipo: 'CargoMensual', exigible: 1, monto: 10000,
+        anio: 2024, mes, observaciones: OBSERVACION_S03311
+      });
+      s03311Creados.push({ mes, movId });
+    }
+
+    // 2. C021, R080, R091, S0244: recausar 2024-2026 a 10.000 (tarifa derogada)
+    for (const codigo of CUENTAS_TARIFA_CORREGIDA) {
+      const cuentaId = idPorCodigo.get(normalizarCodigo(codigo));
+      if (cuentaId === undefined) throw new Error(`${codigo}: no existe en la base -- ¿corrieron los pasos 1-2?`);
+
+      let borrados = 0;
+      for (const anio of [2024, 2025, 2026]) borrados += borrarCargoMensualDelAnio(db, cuentaId, anio);
+
+      const creados = [];
+      for (const [anio, mesInicio, mesFin] of [[2024, 1, 12], [2025, 1, 12], [2026, 1, 7]]) {
+        for (let mes = mesInicio; mes <= mesFin; mes++) {
+          const movId = repo.crearMovimiento({
+            cuentaId, fecha: primerDiaDelMes(anio, mes),
+            tipo: 'CargoMensual', exigible: 1, monto: 10000,
+            anio, mes, observaciones: OBSERVACION_TARIFA
+          });
+          creados.push({ anio, mes, movId });
+        }
+      }
+
+      tarifaCorregida.push({ codigo, cuentaId, borrados, creados: creados.length });
+    }
+
+    // 3. S0244: asignar propietario solo si sigue sin ninguno activo (ver comentario arriba).
+    const cuentaS0244 = idPorCodigo.get(normalizarCodigo(PROPIETARIO_S0244.codigoCuenta));
+    if (cuentaS0244 === undefined) throw new Error('S0244: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+    const activoExistente = db.prepare(
+      'SELECT id FROM cuenta_propietarios WHERE cuenta_id=? AND fecha_fin IS NULL'
+    ).get(cuentaS0244);
+
+    if (!activoExistente) {
+      let propietarioId = db.prepare(
+        'SELECT id FROM propietarios WHERE numero_identificacion=?'
+      ).get(PROPIETARIO_S0244.numero_identificacion)?.id;
+
+      if (propietarioId === undefined) {
+        propietarioId = db.prepare(`
+          INSERT INTO propietarios (nombre_completo, numero_identificacion, telefono, email, observaciones)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(
+          PROPIETARIO_S0244.nombre_completo, PROPIETARIO_S0244.numero_identificacion,
+          PROPIETARIO_S0244.telefono, PROPIETARIO_S0244.email, PROPIETARIO_S0244.observacionesPropietario
+        ).lastInsertRowid;
+      }
+
+      const asignacionId = db.prepare(`
+        INSERT INTO cuenta_propietarios (cuenta_id, propietario_id, fecha_inicio, observaciones)
+        VALUES (?, ?, ?, ?)
+      `).run(cuentaS0244, propietarioId, PROPIETARIO_S0244.fechaInicio, PROPIETARIO_S0244.observacionesAsignacion)
+        .lastInsertRowid;
+
+      propietarioS0244 = { propietarioId, asignacionId, creado: true };
+    } else {
+      propietarioS0244 = { asignacionId: activoExistente.id, creado: false };
+    }
+
+    // 4. Recibo 2137: reasignar el movimiento de cartera de S0312 a S0393.
+    const cuentaOrigen2137 = idPorCodigo.get(normalizarCodigo(REASIGNACION_RECIBO_2137.codigoCuentaOrigen));
+    const cuentaDestino2137 = idPorCodigo.get(normalizarCodigo(REASIGNACION_RECIBO_2137.codigoCuentaDestino));
+    if (cuentaOrigen2137 === undefined || cuentaDestino2137 === undefined) {
+      throw new Error('S0312/S0393: no existen en la base -- ¿corrieron los pasos 1-2?');
+    }
+    const { detalleId: detalle2137 } = getReciboDetalle(db, REASIGNACION_RECIBO_2137.numeroRecibo);
+    const abono2137 = getAbonoPorDetalle(db, detalle2137);
+    if (!abono2137) throw new Error(`Recibo ${REASIGNACION_RECIBO_2137.numeroRecibo}: no tiene movimiento de Abono -- ¿corrió el paso 8?`);
+
+    if (abono2137.cuenta_id === cuentaDestino2137) {
+      reasignacion2137 = { abonoId: abono2137.id, reasignado: false };
+    } else {
+      if (abono2137.cuenta_id !== cuentaOrigen2137) {
+        throw new Error(
+          `Recibo ${REASIGNACION_RECIBO_2137.numeroRecibo}: se esperaba su abono en ` +
+          `${REASIGNACION_RECIBO_2137.codigoCuentaOrigen}, está en cuenta_id=${abono2137.cuenta_id}`
+        );
+      }
+      db.prepare('DELETE FROM cartera_imputaciones WHERE abono_id=?').run(abono2137.id);
+      db.prepare('UPDATE cartera_movimientos SET cuenta_id=? WHERE id=?').run(cuentaDestino2137, abono2137.id);
+      const r = reimputarAbono(db, repo, {
+        abonoId: abono2137.id, cuentaId: cuentaDestino2137, monto: redondear(-abono2137.monto),
+        periodoDesde: REASIGNACION_RECIBO_2137.periodoDesde, periodoHasta: REASIGNACION_RECIBO_2137.periodoHasta
+      });
+      reasignacion2137 = { abonoId: abono2137.id, reasignado: true, ...r };
+    }
+
+    // 5. Recibo 2384 (S048): corregir el período de 2026 a 2025. Solo texto de recibo_detalles
+    // -- no cambia ningún cargo ni imputación (el saldo sale del monto, no de a qué cargo quedó
+    // imputado un abono), así que la diferencia de S048 sigue siendo +192.000.
+    const { detalleId: detalle2384 } = getReciboDetalle(db, CORRECCION_PERIODO_RECIBO_2384.numeroRecibo);
+    const actual2384 = db.prepare('SELECT periodo_desde, periodo_hasta FROM recibo_detalles WHERE id=?').get(detalle2384);
+    if (actual2384.periodo_desde === CORRECCION_PERIODO_RECIBO_2384.periodoDesdeNuevo &&
+        actual2384.periodo_hasta === CORRECCION_PERIODO_RECIBO_2384.periodoHastaNuevo) {
+      correccion2384 = { detalleId: detalle2384, corregido: false };
+    } else {
+      db.prepare('UPDATE recibo_detalles SET periodo_desde=?, periodo_hasta=? WHERE id=?').run(
+        CORRECCION_PERIODO_RECIBO_2384.periodoDesdeNuevo, CORRECCION_PERIODO_RECIBO_2384.periodoHastaNuevo, detalle2384
+      );
+      correccion2384 = { detalleId: detalle2384, corregido: true };
+    }
+
+    // 6 y 7. S010: recibo 1659 sin abono (su efecto ya está en la apertura), recibo 1825 como
+    // abono libre. Se detecta por si el abono de 1659 sigue existiendo -- si ya no está, esta
+    // corrección (y el recálculo de los tres abonos) ya corrió antes.
+    const cuentaS010 = idPorCodigo.get(normalizarCodigo(RECALCULO_S010.cuentaCodigo));
+    if (cuentaS010 === undefined) throw new Error('S010: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+    const { detalleId: detalle1659 } = getReciboDetalle(db, RECALCULO_S010.numeroReciboEliminado);
+    const abono1659 = getAbonoPorDetalle(db, detalle1659);
+
+    if (!abono1659) {
+      recalculoS010 = { yaCorregido: true };
+    } else {
+      db.prepare('DELETE FROM cartera_imputaciones WHERE abono_id=?').run(abono1659.id);
+      db.prepare('DELETE FROM cartera_movimientos WHERE id=?').run(abono1659.id);
+
+      const { detalleId: detalle1825 } = getReciboDetalle(db, RECALCULO_S010.numeroReciboLibre);
+      db.prepare('UPDATE recibo_detalles SET periodo_desde=NULL, periodo_hasta=NULL WHERE id=?').run(detalle1825);
+
+      const recalculados = [];
+      for (const item of RECALCULO_S010.abonosOrdenCronologico) {
+        const { detalleId } = getReciboDetalle(db, item.numeroRecibo);
+        const abono = getAbonoPorDetalle(db, detalleId);
+        if (!abono) throw new Error(`Recibo ${item.numeroRecibo}: no tiene movimiento de Abono -- ¿corrió el paso 8?`);
+        db.prepare('DELETE FROM cartera_imputaciones WHERE abono_id=?').run(abono.id);
+        recalculados.push({ numeroRecibo: item.numeroRecibo, abonoId: abono.id, periodoDesde: item.periodoDesde, periodoHasta: item.periodoHasta });
+      }
+      const resultados = [];
+      for (const r of recalculados) {
+        const res = reimputarAbono(db, repo, {
+          abonoId: r.abonoId, cuentaId: cuentaS010, monto: redondear(-db.prepare('SELECT monto FROM cartera_movimientos WHERE id=?').get(r.abonoId).monto),
+          periodoDesde: r.periodoDesde, periodoHasta: r.periodoHasta
+        });
+        resultados.push({ ...r, ...res });
+      }
+
+      recalculoS010 = { yaCorregido: false, eliminado1659: abono1659.id, abonos: resultados };
+    }
+  });
+  transaccion();
+
+  return {
+    s03311Creados, tarifaCorregida, propietarioS0244,
+    reasignacion2137, correccion2384, recalculoS010
+  };
+}
+
+module.exports = {
+  ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, OBSERVACION_S03311, OBSERVACION_TARIFA, PROPIETARIO_S0244,
+  REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010
+};

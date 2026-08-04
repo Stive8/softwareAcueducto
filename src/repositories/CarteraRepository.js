@@ -119,6 +119,20 @@ class CarteraRepository {
     `).all(cuentaId);
     return new Set(filas.map(f => codificarPeriodo(f.anio, f.mes)));
   }
+
+  getAbonoPorReciboDetalle(reciboDetalleId) {
+    return this.db.prepare(`
+      SELECT * FROM cartera_movimientos WHERE recibo_detalle_id = ? AND tipo = 'Abono'
+    `).get(reciboDetalleId);
+  }
+
+  // Libera las imputaciones de un abono sin tocar el movimiento en sí. Se usa al reclasificar
+  // un abono hacia otro destino (ver CarteraService.reclasificarAbono): los cargos que ese
+  // abono cubría vuelven a quedar pendientes, y el abono original se cancela con un movimiento
+  // de contrapartida en vez de reescribirse.
+  eliminarImputacionesDeAbono(abonoId) {
+    this.db.prepare(`DELETE FROM cartera_imputaciones WHERE abono_id = ?`).run(abonoId);
+  }
 }
 
 module.exports = CarteraRepository;

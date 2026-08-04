@@ -119,6 +119,24 @@ class ReciboRepository {
       this.db.prepare(`DELETE FROM pago_periodos WHERE recibo_detalle_id IN (${placeholders})`).run(...detalleIds);
       this.db.prepare(`DELETE FROM cuenta_creditos WHERE recibo_detalle_id IN (${placeholders})`).run(...detalleIds);
 
+      // Motor de cartera (cartera_movimientos/cartera_imputaciones): el abono nunca se borra ni
+      // se muta, se cancela con una contrapartida -- mismo patrón que
+      // CarteraService.reclasificarAbono -- y se liberan sus imputaciones para que los cargos
+      // que cubría vuelvan a quedar pendientes. Sin esto, anular el recibo no tenía ningún
+      // efecto sobre la deuda de cartera: el abono seguía contando como pagado.
+      const abonosCartera = this.db.prepare(
+        `SELECT id, cuenta_id, fecha, exigible, monto, recibo_detalle_id FROM cartera_movimientos
+         WHERE recibo_detalle_id IN (${placeholders}) AND tipo = 'Abono'`
+      ).all(...detalleIds);
+      for (const abono of abonosCartera) {
+        this.db.prepare(`DELETE FROM cartera_imputaciones WHERE abono_id = ?`).run(abono.id);
+        this.db.prepare(`
+          INSERT INTO cartera_movimientos (cuenta_id, fecha, tipo, exigible, monto, recibo_detalle_id, observaciones)
+          VALUES (?, ?, 'Abono', ?, ?, ?, ?)
+        `).run(abono.cuenta_id, abono.fecha, abono.exigible, -abono.monto, abono.recibo_detalle_id,
+          `Reversión por anulación de recibo: ${motivo}`);
+      }
+
       const puntosAfectados = this.db.prepare(
         `SELECT DISTINCT nuevo_punto_id FROM nuevo_punto_abonos WHERE recibo_detalle_id IN (${placeholders})`
       ).all(...detalleIds);
@@ -183,6 +201,33 @@ class ReciboRepository {
     return this.db.prepare(`
       SELECT * FROM recibos_anulados_fisicos ORDER BY numero_recibo DESC
     `).all();
+  }
+
+  // recibo_correcciones: log de ediciones con el original siempre preservado (ver 040 y la
+  // regla 3 de la carga inicial). "Valor vigente" de un campo = el de su última corrección, o
+  // el de la columna original en recibos/recibo_detalles si nunca se corrigió.
+  crearCorreccion({ reciboId, reciboDetalleId = null, campo, valorAnterior, valorNuevo, motivo, usuarioId = null }) {
+    const r = this.db.prepare(`
+      INSERT INTO recibo_correcciones (recibo_id, recibo_detalle_id, campo, valor_anterior, valor_nuevo, motivo, usuario_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(reciboId, reciboDetalleId, campo, valorAnterior, valorNuevo, motivo, usuarioId);
+    return r.lastInsertRowid;
+  }
+
+  getCorrecciones(reciboId) {
+    return this.db.prepare(`
+      SELECT * FROM recibo_correcciones WHERE recibo_id = ? ORDER BY fecha_creacion ASC, id ASC
+    `).all(reciboId);
+  }
+
+  // null = no hay corrección todavía, usar el valor original de la columna.
+  getValorVigente(reciboId, campo, reciboDetalleId = null) {
+    const fila = this.db.prepare(`
+      SELECT valor_nuevo FROM recibo_correcciones
+      WHERE recibo_id = ? AND campo = ? AND recibo_detalle_id IS ?
+      ORDER BY fecha_creacion DESC, id DESC LIMIT 1
+    `).get(reciboId, campo, reciboDetalleId);
+    return fila ? fila.valor_nuevo : null;
   }
 
   getConfiguracionAsociacion() {

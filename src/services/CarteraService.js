@@ -2,10 +2,12 @@ const CarteraRepository = require('../repositories/CarteraRepository');
 const CuentaEstadoRepository = require('../repositories/CuentaEstadoRepository');
 const PeriodoContableRepository = require('../repositories/PeriodoContableRepository');
 const PagoRepository = require('../repositories/PagoRepository');
+const NuevoPuntoRepository = require('../repositories/NuevoPuntoRepository');
 const { codificarPeriodo, decodificarPeriodo, anioMesDeFecha, primerDiaDelMes, diaAnterior } =
   require('./cartera/periodos');
 const { MODOS, distribuir, calcularCubiertoHasta } = require('./cartera/imputacion');
 const { redondear, esMayor } = require('./cartera/dinero');
+const { getMotivoDiferencia } = require('./cartera/motivosDiferencia');
 
 // La cartera de un asociado como cuenta corriente en dinero.
 //
@@ -22,6 +24,7 @@ class CarteraService {
     this.estadoRepository = new CuentaEstadoRepository(dbService);
     this.periodoContableRepository = new PeriodoContableRepository(dbService);
     this.pagoRepository = new PagoRepository(dbService);
+    this.nuevoPuntoRepository = new NuevoPuntoRepository(dbService);
   }
 
   // Ancla de facturación: el mes del primer recibo de la cuenta (no el primer mes de
@@ -146,20 +149,60 @@ class CarteraService {
     });
   }
 
-  // Estado de la cartera de una cuenta. El saldo opaco va SIEMPRE separado y nunca entra al
-  // total a cobrar: es informativo, no exigible.
+  // Estado de la cartera de una cuenta, en los 4 buckets del modelo (ver
+  // REGLAS_CARGA_INICIAL.md sección 2): deuda de antes del corte, deuda del punto de conexión,
+  // deuda de los meses causados desde el corte, y el total. El saldo opaco (= deuda_antes_corte)
+  // va SIEMPRE separado del exigible y nunca se cobra por sí solo; el punto de conexión vive en
+  // nuevos_puntos/nuevo_punto_abonos (fuera de cartera_movimientos) y se suma aparte.
   getEstadoCartera(cuentaId) {
     const { deudaExigible, saldoOpaco } = this.repository.getSaldos(cuentaId);
     const cubiertoHasta = calcularCubiertoHasta(this.repository.getCargosConCobertura(cuentaId, 1));
+    const totalCobrarHoy = deudaExigible > 0 ? deudaExigible : 0;
+
+    const deudaPuntoConexion = redondear(
+      this.nuevoPuntoRepository.findByCuentaId(cuentaId)
+        .filter(p => p.estado !== 'Cancelado')
+        .reduce((s, p) => s + p.saldo_pendiente, 0)
+    );
 
     return {
+      // Los 4 buckets de primera clase.
+      deudaAntes2024: saldoOpaco,
+      deudaMesesDesde2024: deudaExigible,
+      deudaPuntoConexion,
+      deudaTotal: redondear(totalCobrarHoy + saldoOpaco + deudaPuntoConexion),
+
+      // Se conservan los nombres previos para no romper a quien ya consume este método.
       deudaExigible,
       saldoOpaco,
       saldoAFavor: deudaExigible < 0 ? redondear(-deudaExigible) : 0,
       cubiertoHasta,
-      totalCobrarHoy: deudaExigible > 0 ? deudaExigible : 0,
-      totalReferencia: redondear((deudaExigible > 0 ? deudaExigible : 0) + saldoOpaco)
+      totalCobrarHoy,
+      totalReferencia: redondear(totalCobrarHoy + saldoOpaco)
     };
+  }
+
+  // Detalle de solo lectura para mostrar en pantalla: los movimientos de cartera_movimientos
+  // (con su observación, que es donde queda la trazabilidad de cada corrección: "Causación
+  // inferida...", "Tarifa corregida...") y, aparte, los puntos de conexión de la cuenta con sus
+  // abonos (nuevos_puntos/nuevo_punto_abonos, fuera de cartera_movimientos). No escribe nada.
+  getDetalleCartera(cuentaId) {
+    const movimientos = this.repository.getMovimientos(cuentaId);
+
+    const puntosConexion = this.nuevoPuntoRepository.findByCuentaId(cuentaId).map(punto => ({
+      ...punto,
+      abonos: this.nuevoPuntoRepository.getAbonos(punto.id)
+    }));
+
+    return { movimientos, puntosConexion };
+  }
+
+  // Motivo documentado (texto fijo) cuando el saldo de esta cuenta en el nuevo modelo no
+  // coincide con el Excel de CARTERA. Ver src/services/cartera/motivosDiferencia.js. Recibe
+  // cuentaId (no código) para que quien llama no tenga que cargar el código aparte.
+  getMotivoDiferencia(cuentaId) {
+    const cuenta = this.db.prepare('SELECT codigo FROM cuentas WHERE id = ?').get(cuentaId);
+    return cuenta ? getMotivoDiferencia(cuenta.codigo) : null;
   }
 
   // Cambia la categoría de una cuenta con una fecha de vigencia que puede ser pasada, y
@@ -333,6 +376,125 @@ class CarteraService {
       cuentaId, estado: 'Activo', fechaInicio: fechaDesde, motivo, usuarioId
     });
     return { vigenciaId };
+  }
+
+  // Ajuste manual de deuda con rastro obligatorio (motivo + usuario). Dos usos:
+  //  - AjusteAsamblea: corrección o condonación decidida por la junta después de la carga.
+  //  - AjusteCargaInicial: el residuo de conciliación contra CARTERA.xlsx (ver sección 7 del
+  //    MD de la carga inicial) para las ~15 cuentas donde la aritmética del propio Excel no
+  //    cierra al centavo.
+  // No pasa por causación ni por imputación: es un movimiento directo, igual que AjusteCategoria.
+  ajustarDeuda({ cuentaId, tipo, monto, fecha, exigible = 1, documento = null,
+    observaciones, usuarioId = null }) {
+    if (!cuentaId) throw new Error('La cuenta es obligatoria');
+    if (!['AjusteAsamblea', 'AjusteCargaInicial'].includes(tipo)) {
+      throw new Error(`Tipo de ajuste inválido: ${tipo}`);
+    }
+    if (!fecha) throw new Error('La fecha del ajuste es obligatoria');
+    if (monto === undefined || monto === null || Number(monto) === 0) {
+      throw new Error('El monto del ajuste no puede ser cero');
+    }
+    if (!observaciones || !String(observaciones).trim()) {
+      throw new Error('Debe documentar el motivo del ajuste');
+    }
+
+    const movimientoId = this.repository.crearMovimiento({
+      cuentaId, fecha, tipo, exigible, monto: Number(monto), documento, observaciones, usuarioId
+    });
+    return { movimientoId };
+  }
+
+  // Mueve el destino de un abono ya cargado entre sostenimiento y punto de conexión, SIN
+  // rehacer el recibo (regla 3 de la carga inicial: el recibo es literal e inmutable). Caso
+  // real: el recibo 1347 de S0365 decía "TERMINA DE PAGAR EL PUNTO DE AGUA" pero el punto ya
+  // estaba saldado desde 2019, así que en realidad era sostenimiento.
+  //
+  // El lado de origen NUNCA se borra ni se muta: se cancela con un movimiento de contrapartida
+  // (mismo patrón que AjusteCategoria/suspender), y solo entonces se registra el lado nuevo.
+  // Si el origen era sostenimiento, además hay que liberar las imputaciones de ese abono: sin
+  // eso, los cargos que cubría seguirían viéndose "cubiertos" pese a que la plata que los cubrió
+  // ya no cuenta ahí.
+  reclasificarAbono({ reciboDetalleId, destino, motivo, usuarioId = null,
+    fecha = null, nuevoPuntoId = null, modo = MODOS.ABONO_DEUDA_FIFO, cargosElegidos = [] }) {
+    if (!reciboDetalleId) throw new Error('El recibo_detalle es obligatorio');
+    if (!['sostenimiento', 'punto'].includes(destino)) {
+      throw new Error(`Destino de reclasificación inválido: ${destino}`);
+    }
+    if (!motivo || !String(motivo).trim()) throw new Error('Debe indicar el motivo de la reclasificación');
+
+    const detalle = this.db.prepare(`
+      SELECT rd.id, rd.valor, r.cuenta_id, r.fecha_recibo, r.fecha_pago_real
+      FROM recibo_detalles rd JOIN recibos r ON r.id = rd.recibo_id
+      WHERE rd.id = ?
+    `).get(reciboDetalleId);
+    if (!detalle) throw new Error(`recibo_detalle no encontrado: ${reciboDetalleId}`);
+
+    const abonoSostenimiento = this.repository.getAbonoPorReciboDetalle(reciboDetalleId);
+    const abonoPunto = this.db.prepare(`
+      SELECT * FROM nuevo_punto_abonos WHERE recibo_detalle_id = ?
+    `).get(reciboDetalleId);
+
+    if (abonoSostenimiento && abonoPunto) {
+      throw new Error(`El recibo_detalle ${reciboDetalleId} tiene abono en ambos lados; no se puede reclasificar automáticamente`);
+    }
+    if (!abonoSostenimiento && !abonoPunto) {
+      throw new Error(`El recibo_detalle ${reciboDetalleId} no tiene ningún abono cargado todavía`);
+    }
+
+    const origen = abonoSostenimiento ? 'sostenimiento' : 'punto';
+    if (origen === destino) throw new Error(`El abono ya está clasificado como ${destino}`);
+
+    const fechaMovimiento = fecha || detalle.fecha_pago_real || detalle.fecha_recibo;
+
+    return this.repository.transaccion(() => {
+      // 1) Cancelar el lado de origen con una contrapartida, sin borrar nada.
+      if (origen === 'sostenimiento') {
+        this.repository.eliminarImputacionesDeAbono(abonoSostenimiento.id);
+        this.repository.crearMovimiento({
+          cuentaId: detalle.cuenta_id,
+          fecha: fechaMovimiento,
+          tipo: 'Abono',
+          exigible: abonoSostenimiento.exigible,
+          monto: -abonoSostenimiento.monto,
+          reciboDetalleId,
+          observaciones: `Reversión por reclasificación a punto: ${motivo}`,
+          usuarioId
+        });
+      } else {
+        this.nuevoPuntoRepository.crearAbono({
+          nuevoPuntoId: abonoPunto.nuevo_punto_id,
+          monto: -abonoPunto.monto,
+          fechaAbono: fechaMovimiento,
+          reciboDetalleId,
+          observaciones: `Reversión por reclasificación a sostenimiento: ${motivo}`
+        });
+        this.nuevoPuntoRepository.actualizarSaldoYEstado(abonoPunto.nuevo_punto_id);
+      }
+
+      // 2) Registrar el lado nuevo.
+      if (destino === 'sostenimiento') {
+        const r = this.registrarAbono({
+          cuentaId: detalle.cuenta_id, fecha: fechaMovimiento, monto: detalle.valor,
+          modo, cargosElegidos, reciboDetalleId,
+          observaciones: `Reclasificado desde punto: ${motivo}`, usuarioId
+        });
+        return { origen, destino, ...r };
+      }
+
+      const punto = nuevoPuntoId
+        ? this.nuevoPuntoRepository.findById(nuevoPuntoId)
+        : this.nuevoPuntoRepository.findByCuentaId(detalle.cuenta_id).find(p => p.estado === 'Pendiente');
+      if (!punto) {
+        throw new Error(`La cuenta ${detalle.cuenta_id} no tiene un cargo de punto pendiente al que reclasificar; créelo primero`);
+      }
+
+      this.nuevoPuntoRepository.crearAbono({
+        nuevoPuntoId: punto.id, monto: detalle.valor, fechaAbono: fechaMovimiento,
+        reciboDetalleId, observaciones: `Reclasificado desde sostenimiento: ${motivo}`
+      });
+      const estado = this.nuevoPuntoRepository.actualizarSaldoYEstado(punto.id);
+      return { origen, destino, nuevoPuntoId: punto.id, ...estado };
+    });
   }
 }
 

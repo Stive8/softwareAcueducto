@@ -56,6 +56,11 @@ contextBridge.exposeInMainWorld('api', {
     imprimirEstadoCuenta: (cuentaId) => ipcRenderer.invoke('pagos:imprimirEstadoCuenta', cuentaId),
     exportarEstadoCuentaPDF: (cuentaId) => ipcRenderer.invoke('pagos:exportarEstadoCuentaPDF', cuentaId)
   },
+  cartera: {
+    getEstadoCartera: (cuentaId) => ipcRenderer.invoke('cartera:getEstadoCartera', cuentaId),
+    getDetalleCartera: (cuentaId) => ipcRenderer.invoke('cartera:getDetalleCartera', cuentaId),
+    getMotivoDiferencia: (cuentaId) => ipcRenderer.invoke('cartera:getMotivoDiferencia', cuentaId)
+  },
   recibos: {
     getAll: (params) => ipcRenderer.invoke('recibos:getAll', params),
     getById: (id) => ipcRenderer.invoke('recibos:getById', id),

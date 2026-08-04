@@ -140,10 +140,14 @@ const Pagos = {
 
   async showDetalleModal(cuentaId) {
     try {
-      const [estadoResponse, historialResponse, conexionesResponse] = await Promise.all([
+      const [estadoResponse, historialResponse, conexionesResponse,
+        carteraEstadoResponse, carteraDetalleResponse, motivoResponse] = await Promise.all([
         window.api.pagos.getEstadoCuenta(cuentaId),
         window.api.pagos.getHistorialPagos(cuentaId),
-        window.api.nuevosPuntos.getByCuentaId(cuentaId)
+        window.api.nuevosPuntos.getByCuentaId(cuentaId),
+        window.api.cartera.getEstadoCartera(cuentaId),
+        window.api.cartera.getDetalleCartera(cuentaId),
+        window.api.cartera.getMotivoDiferencia(cuentaId)
       ]);
 
       if (!estadoResponse.success) {
@@ -155,6 +159,9 @@ const Pagos = {
       const historial = historialResponse.success ? historialResponse.data : [];
       const conexiones = conexionesResponse.success ? conexionesResponse.data : [];
       const conexionActiva = conexiones.find(p => p.estado === 'Pendiente') || conexiones[0] || null;
+      const carteraEstado = carteraEstadoResponse.success ? carteraEstadoResponse.data : null;
+      const carteraDetalle = carteraDetalleResponse.success ? carteraDetalleResponse.data : null;
+      const motivoDiferencia = motivoResponse.success ? motivoResponse.data : null;
 
       const content = `
         <div class="modal-header">
@@ -221,6 +228,8 @@ const Pagos = {
           ${this.renderConexionDetalle(conexionActiva, cuentaId)}
         </div>
 
+        ${this.renderCarteraDetalle(estado, carteraEstado, carteraDetalle, motivoDiferencia)}
+
         <div class="form-actions">
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
           <button class="btn btn-secondary" onclick="Pagos.imprimirEstadoCuenta(${cuentaId})">Imprimir Estado de Cuenta</button>
@@ -267,6 +276,116 @@ const Pagos = {
           <button class="btn btn-warning btn-icon" onclick="App.closeModal(); Pagos.showCancelarConexionModal(${punto.id}, ${cuentaId})">Cancelar Conexión</button>
         </div>
       ` : ''}
+    `;
+  },
+
+  // Cartera (nuevo modelo) -- SOLO LECTURA. Muestra en paralelo el saldo que ya calcula el
+  // sistema activo (pagos:*, columna "Sistema actual") y el del modelo nuevo de 4 buckets
+  // (cartera:*, columna "Cartera nueva (detallada)"), para poder validar el modelo con datos
+  // reales sin que el operador piense que algo está roto al ver dos números distintos para la
+  // misma cuenta. Ningún botón de esta sección escribe en la base.
+  renderCarteraDetalle(estadoViejo, carteraEstado, carteraDetalle, motivoDiferencia) {
+    if (!carteraEstado) {
+      return `
+        <div class="detail-section">
+          <h3>Cartera (nuevo modelo) — vista de solo lectura</h3>
+          <p style="color: #64748b; margin-top: 12px;">No se pudo cargar el detalle del nuevo modelo de cartera.</p>
+        </div>
+      `;
+    }
+
+    const movimientos = carteraDetalle ? carteraDetalle.movimientos : [];
+    const puntosConexion = carteraDetalle ? carteraDetalle.puntosConexion : [];
+
+    const TIPO_LABEL = {
+      CargoMensual: 'Cargo mensual',
+      Abono: 'Abono',
+      AjusteCategoria: 'Ajuste de categoría',
+      AjusteAsamblea: 'Ajuste de asamblea',
+      AjusteCargaInicial: 'Ajuste de carga inicial',
+      AperturaOpaca: 'Apertura (antes de 2024)'
+    };
+
+    return `
+      <div class="detail-section">
+        <h3>Cartera (nuevo modelo) — vista de solo lectura</h3>
+        <p style="color: #64748b; font-size: 0.8125rem; margin: -4px 0 12px 0;">
+          El sistema sigue cobrando con el cálculo de arriba ("Sistema actual"). Esto es el
+          modelo nuevo de cartera, en paralelo, para validarlo contra datos reales — nada de
+          esta sección se puede editar todavía.
+        </p>
+
+        ${motivoDiferencia ? `
+          <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 12px; margin-bottom: 16px;">
+            <strong>⚠ Esta cuenta tiene una diferencia documentada frente al Excel de CARTERA:</strong>
+            <p style="margin: 6px 0 0 0;">${motivoDiferencia}</p>
+          </div>
+        ` : ''}
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
+          <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px;">
+            <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 6px;">Sistema actual</div>
+            <div style="font-size: 1.25rem; font-weight: bold;">$${this.formatNumber(estadoViejo.saldoPendienteEstimado)}</div>
+            <div style="font-size: 0.8125rem; color: #64748b;">${estadoViejo.mesesMora} ${estadoViejo.mesesMora === 1 ? 'mes' : 'meses'} en mora, estimado a tarifa actual</div>
+          </div>
+          <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px;">
+            <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 6px;">Cartera nueva (detallada)</div>
+            <div style="font-size: 1.25rem; font-weight: bold;">$${this.formatNumber(carteraEstado.deudaTotal)}</div>
+            <div style="font-size: 0.8125rem; color: #64748b;">Antes de 2024 + meses desde 2024 + punto de conexión</div>
+          </div>
+        </div>
+
+        <table style="width: 100%; margin-bottom: 16px;">
+          <thead>
+            <tr><th>Antes de 2024</th><th>Meses desde 2024</th><th>Punto de conexión</th><th>Total</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td>$${this.formatNumber(carteraEstado.deudaAntes2024)}</td>
+              <td>$${this.formatNumber(carteraEstado.deudaMesesDesde2024)}</td>
+              <td>$${this.formatNumber(carteraEstado.deudaPuntoConexion)}</td>
+              <td><strong>$${this.formatNumber(carteraEstado.deudaTotal)}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+
+        <h4 style="margin: 16px 0 8px 0;">Detalle de movimientos</h4>
+        ${movimientos.length > 0 ? `
+          <table style="width: 100%; margin-bottom: 16px;">
+            <thead>
+              <tr><th>Fecha</th><th>Tipo</th><th>Período</th><th>Monto</th><th>Observación</th></tr>
+            </thead>
+            <tbody>
+              ${movimientos.map(m => `
+                <tr>
+                  <td>${this.formatDate(m.fecha)}</td>
+                  <td>${TIPO_LABEL[m.tipo] || m.tipo}</td>
+                  <td>${m.anio ? `${m.anio}-${String(m.mes).padStart(2, '0')}` : '-'}</td>
+                  <td style="${m.monto < 0 ? 'color: #059669;' : ''}">$${this.formatNumber(m.monto)}</td>
+                  <td style="color: #475569; font-size: 0.8125rem;">${m.observaciones || ''}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        ` : '<p style="color: #64748b; margin-bottom: 16px;">Sin movimientos registrados.</p>'}
+
+        ${puntosConexion.length > 0 ? `
+          <h4 style="margin: 16px 0 8px 0;">Punto de conexión — detalle</h4>
+          ${puntosConexion.map(p => `
+            <table style="width: 100%; margin-bottom: 12px;">
+              <thead>
+                <tr><th colspan="2">Punto de ${this.formatDate(p.fecha_registro)} — valor $${this.formatNumber(p.valor_total)}, saldo $${this.formatNumber(p.saldo_pendiente)}, estado ${p.estado}</th></tr>
+                <tr><th>Fecha abono</th><th>Monto</th></tr>
+              </thead>
+              <tbody>
+                ${p.abonos.length > 0 ? p.abonos.map(a => `
+                  <tr><td>${this.formatDate(a.fecha_abono)}</td><td>$${this.formatNumber(a.monto)}</td></tr>
+                `).join('') : '<tr><td colspan="2" style="color: #64748b;">Sin abonos registrados</td></tr>'}
+              </tbody>
+            </table>
+          `).join('')}
+        ` : ''}
+      </div>
     `;
   },
 
