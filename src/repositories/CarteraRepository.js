@@ -27,6 +27,13 @@ class CarteraRepository {
     return r.lastInsertRowid;
   }
 
+  // Recorta el monto de un movimiento ya creado a lo que realmente terminó imputado (ver
+  // paso10-imputacion.js y CarteraService.registrarAbono): el sobrante no se queda ahí como
+  // saldo a favor implícito, se mueve a cuenta_creditos aparte.
+  actualizarMontoMovimiento(id, monto) {
+    this.db.prepare(`UPDATE cartera_movimientos SET monto = ? WHERE id = ?`).run(redondear(monto), id);
+  }
+
   crearImputacion({ abonoId, cargoId, monto }) {
     const r = this.db.prepare(`
       INSERT INTO cartera_imputaciones (abono_id, cargo_id, monto) VALUES (?, ?, ?)
@@ -132,6 +139,32 @@ class CarteraRepository {
   // de contrapartida en vez de reescribirse.
   eliminarImputacionesDeAbono(abonoId) {
     this.db.prepare(`DELETE FROM cartera_imputaciones WHERE abono_id = ?`).run(abonoId);
+  }
+
+  // Saldo a favor de una cuenta: no es un bucket de cartera_movimientos, es su propio libro
+  // (cuenta_creditos) para que tener plata a favor y aplicarla sean dos hechos separados en el
+  // tiempo -- 'Abono' es lo que entra, 'Aplicado' lo que ya se redimió contra deuda real.
+  crearCredito({ cuentaId, tipo, monto, fecha, reciboDetalleId = null, abonoMovimientoId = null,
+    observaciones = null }) {
+    const r = this.db.prepare(`
+      INSERT INTO cuenta_creditos (cuenta_id, tipo, monto, fecha, recibo_detalle_id, abono_movimiento_id, observaciones)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(cuentaId, tipo, redondear(monto), fecha, reciboDetalleId, abonoMovimientoId, observaciones);
+    return r.lastInsertRowid;
+  }
+
+  getSaldoCreditoDisponible(cuentaId) {
+    const fila = this.db.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN tipo = 'Abono' THEN monto ELSE -monto END), 0) AS saldo
+      FROM cuenta_creditos WHERE cuenta_id = ?
+    `).get(cuentaId);
+    return redondear(fila.saldo);
+  }
+
+  getCreditos(cuentaId) {
+    return this.db.prepare(`
+      SELECT * FROM cuenta_creditos WHERE cuenta_id = ? ORDER BY fecha ASC, id ASC
+    `).all(cuentaId);
   }
 }
 

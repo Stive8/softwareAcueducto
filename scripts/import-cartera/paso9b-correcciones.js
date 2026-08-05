@@ -160,9 +160,19 @@ function cargosPendientesCombinados(db, cuentaId) {
 // Reimputa un abono contra los cargos pendientes de su cuenta: primero por período declarado
 // (si trae), y el sobrante a FIFO. Mismo mecanismo que paso10-imputacion.js -- se asume que
 // las imputaciones viejas de este abono ya se borraron antes de llamar esta función.
+// Mismo cambio de diseño que paso10-imputacion.js (2026-08-04): lo que no se imputa no queda
+// como saldo a favor implícito en el Abono. Se recorta su monto a lo realmente imputado y el
+// sobrante pasa a cuenta_creditos como 'Abono' sin aplicar.
+//
+// Sin período declarado, el FIFO NUNCA corre (mismo cambio 2026-08-04 que paso10-imputacion.js):
+// el monto entero pasa a crédito. Es el caso exacto del recibo 1825 de S010 ($90.000, "abono
+// libre" por decisión de esta misma corrección): al no tener período, antes caía igual al FIFO
+// general y la plata se aplicaba sola contra los meses de 2026 -- restaurando en la práctica el
+// comportamiento que este cambio de diseño existe para evitar.
 function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, periodoHasta }) {
   let restante = monto;
   let periodoImputados = 0;
+  let fifoImputados = 0;
   const meses = mesesDelPeriodo(periodoDesde, periodoHasta);
   if (meses.length > 0) {
     const cargos = cargosPendientesCombinados(db, cuentaId);
@@ -171,16 +181,28 @@ function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, peri
     for (const imp of imputaciones) repo.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
     periodoImputados = imputaciones.length;
     restante = sobrante;
+
+    if (esMayor(restante, 0)) {
+      const cargosFifo = cargosPendientesCombinados(db, cuentaId);
+      const { imputaciones: impFifo, sobrante: sobranteFifo } = distribuir({ modo: MODOS.ABONO_DEUDA_FIFO, cargos: cargosFifo, monto: restante });
+      for (const imp of impFifo) repo.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
+      fifoImputados = impFifo.length;
+      restante = sobranteFifo;
+    }
   }
-  let fifoImputados = 0;
+
+  let creditoId = null;
   if (esMayor(restante, 0)) {
-    const cargos = cargosPendientesCombinados(db, cuentaId);
-    const { imputaciones, sobrante } = distribuir({ modo: MODOS.ABONO_DEUDA_FIFO, cargos, monto: restante });
-    for (const imp of imputaciones) repo.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
-    fifoImputados = imputaciones.length;
-    restante = sobrante;
+    const movimiento = db.prepare('SELECT fecha, recibo_detalle_id FROM cartera_movimientos WHERE id=?').get(abonoId);
+    repo.actualizarMontoMovimiento(abonoId, -redondear(monto - restante));
+    creditoId = repo.crearCredito({
+      cuentaId, tipo: 'Abono', monto: restante, fecha: movimiento.fecha,
+      reciboDetalleId: movimiento.recibo_detalle_id,
+      observaciones: 'Sobrante de reimputación (paso9b): crédito no aplicado'
+    });
   }
-  return { periodoImputados, fifoImputados, sobrante: restante };
+
+  return { periodoImputados, fifoImputados, sobrante: restante, creditoId };
 }
 
 function ejecutarPaso9b({ dbService }) {
@@ -361,5 +383,5 @@ function ejecutarPaso9b({ dbService }) {
 
 module.exports = {
   ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, OBSERVACION_S03311, OBSERVACION_TARIFA, PROPIETARIO_S0244,
-  REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010
+  REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010, reimputarAbono
 };

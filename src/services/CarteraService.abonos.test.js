@@ -51,11 +51,12 @@ test('AbonoDeudaFIFO nunca toca el bucket no exigible, ni cuando sobra plata', (
     });
 
     assert.equal(r.imputado, 30000);
-    assert.equal(r.sobrante, 20000, 'el excedente queda a favor, no baja el opaco');
+    assert.equal(r.sobrante, 20000, 'el excedente va a cuenta_creditos, no baja el opaco ni la deuda');
     const e = service.getEstadoCartera(cuentaId);
     assert.equal(e.saldoOpaco, 180000);
-    assert.equal(e.deudaExigible, -20000);
-    assert.equal(e.saldoAFavor, 20000);
+    assert.equal(e.deudaExigible, 0, 'el Abono se recorta a lo imputado: no queda negativo');
+    assert.equal(e.saldoAFavor, 20000, 'el sobrante vive en cuenta_creditos, no como exigible negativo');
+    assert.equal(e.saldoCreditoDisponible, 20000);
     assert.equal(e.totalCobrarHoy, 0, 'con saldo a favor no hay nada que cobrar');
   } finally {
     cerrarDbTemporal(ctx);
@@ -111,7 +112,7 @@ test('AbonoSaldoOpaco no puede exceder el saldo opaco', () => {
   }
 });
 
-test('Anticipo deja todo como saldo a favor sin imputar nada', () => {
+test('Anticipo no crea ningún movimiento: todo el monto queda como crédito sin aplicar', () => {
   const ctx = crearDbTemporal();
   try {
     const { cuentaId, service } = sembrarCartera(ctx.dbService);
@@ -121,8 +122,13 @@ test('Anticipo deja todo como saldo a favor sin imputar nada', () => {
 
     assert.equal(r.imputado, 0);
     assert.equal(r.sobrante, 15000);
+    assert.equal(r.abonoId, null, 'nada que imputar: no se crea Abono en cartera_movimientos');
+    assert.ok(r.creditoId, 'el monto entero queda registrado en cuenta_creditos');
+
     const e = service.getEstadoCartera(cuentaId);
-    assert.equal(e.deudaExigible, 15000, '30.000 de cargos menos 15.000 de abono');
+    assert.equal(e.deudaExigible, 30000, 'los 30.000 de cargos no se tocan: el crédito no se aplicó solo');
+    assert.equal(e.saldoCreditoDisponible, 15000);
+    assert.equal(e.saldoAFavor, 15000);
     assert.equal(e.cubiertoHasta, null, 'no imputó, así que no cubrió ningún mes');
   } finally {
     cerrarDbTemporal(ctx);

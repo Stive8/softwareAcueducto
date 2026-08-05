@@ -31,6 +31,16 @@
 // 3. Recibos "pendientes de carga" (existen en el talonario pero no en historial-aportes, por
 //    lo que CARTERA tampoco los contó en PAGOS): se restan del objetivo, agrupados por cuenta.
 //
+// 4. Saldo a favor disponible (cambio de diseño 2026-08-04): desde que un abono con sobrante
+//    ya no resta la deuda por su cuenta -- se recorta a lo imputado y el resto va a
+//    cuenta_creditos, sin aplicarse solo (ver CarteraService.registrarAbono/redimirCredito) --
+//    saldoSistema quedó más alto que antes en cualquier cuenta con crédito, exactamente por el
+//    monto del crédito. El Excel de CARTERA sí lo tenía descontado. Se suma al target por el
+//    mismo motivo que el término de punto: es una diferencia de MODELO entre los dos sistemas,
+//    no una diferencia de datos que haya que documentar cuenta por cuenta. Verificado: sin este
+//    término, 68 cuentas sin ninguna otra diferencia real aparecían con diferencia == su propio
+//    saldoCreditoDisponible, al peso, las 68.
+//
 // diferencia = saldoSistema − target. Un valor de 0 (con tolerancia < 1000) significa que la
 // diferencia está completamente explicada por lo de arriba.
 const { normalizarCodigo } = require('./normalizar');
@@ -95,13 +105,14 @@ function calcularConciliacion({ dbService, cuentasJson, recibosJson }) {
       terminoPunto = -saldoPendientePunto;
     }
 
-    const target = redondear(saldoCarteraExcel2026 - 5 * tarifa2026 + terminoPunto - pendienteDeCarga);
+    const target = redondear(saldoCarteraExcel2026 - 5 * tarifa2026 + terminoPunto - pendienteDeCarga + estado.saldoCreditoDisponible);
     const diferencia = redondear(saldoSistema - target);
 
     filas.push({
       codigo: cuenta.codigo, cuentaId, saldoSistema,
       saldoCarteraExcel2026, tarifa2026, cuadraExacto, tieneAperturaOpaca,
       abonosPuntoDesde2024, saldoPendientePunto, pendienteDeCarga,
+      saldoCreditoDisponible: estado.saldoCreditoDisponible,
       target, diferencia
     });
   }

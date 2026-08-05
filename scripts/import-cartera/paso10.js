@@ -17,7 +17,8 @@ function main() {
   console.log(`Abonos procesados: ${r.procesados} (ya estaban imputados: ${r.saltados.length})`);
   console.log(`Imputados por período declarado: ${r.conPeriodo.length}`);
   console.log(`Imputados por FIFO: ${r.conFifo.length}`);
-  console.log(`Con sobrante (saldo a favor implícito): ${r.conSobrante.length} (suma $${r.totalSobrante.toLocaleString('es-CO')})`);
+  console.log(`Con sobrante: ${r.conSobrante.length} (suma $${r.totalSobrante.toLocaleString('es-CO')})`);
+  console.log(`  -> movido a cuenta_creditos como 'Abono' sin aplicar: ${r.conCredito.length} (suma $${r.totalCredito.toLocaleString('es-CO')})`);
   console.log(`Imputado hacia AperturaOpaca (deuda antes de 2024): $${r.porPozo.apertura.toLocaleString('es-CO')}`);
   console.log(`Imputado hacia CargoMensual/AjusteCategoria/AjusteAsamblea (deuda desde 2024): $${r.porPozo.cargosDesde2024.toLocaleString('es-CO')}`);
 

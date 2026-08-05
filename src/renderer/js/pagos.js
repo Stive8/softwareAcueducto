@@ -53,16 +53,19 @@ const Pagos = {
 
   async loadCuentas() {
     try {
-      const response = await window.api.pagos.getCuentasConEstado({
-        page: this.currentPage,
-        limit: this.limit,
-        search: this.search,
-        estado: 'Activo',
-        filtroPago: this.filtroPago
-      });
+      const [response, indicadoresResponse] = await Promise.all([
+        window.api.pagos.getCuentasConEstado({
+          page: this.currentPage,
+          limit: this.limit,
+          search: this.search,
+          estado: 'Activo',
+          filtroPago: this.filtroPago
+        }),
+        window.api.cartera.getIndicadoresBulk()
+      ]);
 
       if (response.success) {
-        this.renderTable(response.data);
+        this.renderTable(response.data, indicadoresResponse.success ? indicadoresResponse.data : {});
       } else {
         console.error('Error al cargar cuentas:', response.error);
       }
@@ -71,7 +74,7 @@ const Pagos = {
     }
   },
 
-  renderTable(data) {
+  renderTable(data, indicadoresCartera = {}) {
     const tableContent = document.getElementById('tableContent');
 
     if (data.data.length === 0) {
@@ -90,11 +93,14 @@ const Pagos = {
             <th>Estado</th>
             <th>Saldo a Favor</th>
             <th>Conexión</th>
+            <th title="Avisos del modelo nuevo de cartera (en validación, ver detalle de la cuenta)">Cartera nueva</th>
             <th>Acciones</th>
           </tr>
         </thead>
         <tbody>
-          ${data.data.map(c => `
+          ${data.data.map(c => {
+            const ind = indicadoresCartera[c.id];
+            return `
             <tr>
               <td><strong>${c.codigo}</strong></td>
               <td>${c.direccion}</td>
@@ -107,6 +113,11 @@ const Pagos = {
               </td>
               <td>${c.saldo_favor > 0 ? `<span class="badge badge-favor">$${this.formatNumber(c.saldo_favor)}</span>` : '-'}</td>
               <td>${c.conexion_pendiente > 0 ? `<span class="badge badge-mora">🔧 $${this.formatNumber(c.conexion_pendiente)}</span>` : '-'}</td>
+              <td>${ind ? [
+                ind.deudaAntes2024 ? '<span title="Deuda anterior al corte (2024)">⏳</span>' : '',
+                ind.puntoConexion ? '<span title="Punto de conexión pendiente">🔧</span>' : '',
+                ind.saldoCreditoDisponible ? '<span title="Saldo a favor disponible">💰</span>' : ''
+              ].join(' ') : '-'}</td>
               <td>
                 <div class="table-actions">
                   <button class="btn btn-primary btn-icon" onclick="Pagos.showDetalleModal(${c.id})">Ver</button>
@@ -114,7 +125,8 @@ const Pagos = {
                 </div>
               </td>
             </tr>
-          `).join('')}
+          `;
+          }).join('')}
         </tbody>
       </table>
 
@@ -279,11 +291,29 @@ const Pagos = {
     `;
   },
 
-  // Cartera (nuevo modelo) -- SOLO LECTURA. Muestra en paralelo el saldo que ya calcula el
-  // sistema activo (pagos:*, columna "Sistema actual") y el del modelo nuevo de 4 buckets
-  // (cartera:*, columna "Cartera nueva (detallada)"), para poder validar el modelo con datos
-  // reales sin que el operador piense que algo está roto al ver dos números distintos para la
-  // misma cuenta. Ningún botón de esta sección escribe en la base.
+  // Meses en español abreviados, para el rango "ene - jul 2026" de la cifra principal.
+  MESES_ABREV: ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'],
+
+  formatMes(anio, mes) {
+    return `${this.MESES_ABREV[mes - 1]} ${anio}`;
+  },
+
+  // Etiqueta del rango de mesesAPagar (ver CarteraService.calcularAPagar): vacío si está al día,
+  // un solo mes, o "desde - hasta, N meses" (con año en ambos extremos si cruza de año).
+  formatRangoAPagar(meses) {
+    if (!meses || meses.length === 0) return '';
+    const primero = meses[0];
+    const ultimo = meses[meses.length - 1];
+    if (meses.length === 1) return `${this.formatMes(primero.anio, primero.mes)}`;
+    const desde = primero.anio === ultimo.anio ? this.MESES_ABREV[primero.mes - 1] : this.formatMes(primero.anio, primero.mes);
+    return `${desde} - ${this.formatMes(ultimo.anio, ultimo.mes)}, ${meses.length} meses`;
+  },
+
+  // Cartera (nuevo modelo) -- SOLO LECTURA. La cifra principal ("a pagar") responde solo
+  // "¿cuánto paga hoy por su cuota corriente?"; deuda anterior al corte, punto de conexión y
+  // saldo a favor son avisos aparte que NUNCA se suman ni restan de esa cifra (cambio de diseño
+  // 2026-08-04, ver CarteraService.getEstadoCartera). Los botones de cada aviso todavía no
+  // escriben nada -- se conectan en la siguiente etapa (registrar pagos contra el modelo nuevo).
   renderCarteraDetalle(estadoViejo, carteraEstado, carteraDetalle, motivoDiferencia) {
     if (!carteraEstado) {
       return `
@@ -306,13 +336,20 @@ const Pagos = {
       AperturaOpaca: 'Apertura (antes de 2024)'
     };
 
+    const rangoAPagar = this.formatRangoAPagar(carteraEstado.mesesAPagar);
+    const avisos = [
+      { label: 'Deuda anterior al corte (2024)', valor: carteraEstado.deudaAntes2024, accion: 'Abonar' },
+      { label: 'Punto de conexión pendiente', valor: carteraEstado.deudaPuntoConexion, accion: 'Abonar' },
+      { label: 'Saldo a favor disponible', valor: carteraEstado.saldoCreditoDisponible, accion: 'Usar' }
+    ].filter(a => a.valor > 0);
+
     return `
       <div class="detail-section">
         <h3>Cartera (nuevo modelo) — vista de solo lectura</h3>
         <p style="color: #64748b; font-size: 0.8125rem; margin: -4px 0 12px 0;">
           El sistema sigue cobrando con el cálculo de arriba ("Sistema actual"). Esto es el
-          modelo nuevo de cartera, en paralelo, para validarlo contra datos reales — nada de
-          esta sección se puede editar todavía.
+          modelo nuevo de cartera, en paralelo, para validarlo contra datos reales — todavía
+          sin botones de registro conectados.
         </p>
 
         ${motivoDiferencia ? `
@@ -322,32 +359,46 @@ const Pagos = {
           </div>
         ` : ''}
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 16px;">
-          <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px;">
-            <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 6px;">Sistema actual</div>
-            <div style="font-size: 1.25rem; font-weight: bold;">$${this.formatNumber(estadoViejo.saldoPendienteEstimado)}</div>
-            <div style="font-size: 0.8125rem; color: #64748b;">${estadoViejo.mesesMora} ${estadoViejo.mesesMora === 1 ? 'mes' : 'meses'} en mora, estimado a tarifa actual</div>
+        <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
+          <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">Último mes cubierto</div>
+          <div style="font-size: 1rem; margin-bottom: 14px;">
+            ${carteraEstado.ultimoMesCubierto ? this.formatMes(carteraEstado.ultimoMesCubierto.anio, carteraEstado.ultimoMesCubierto.mes) : 'ninguno'}
           </div>
-          <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 12px;">
-            <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 6px;">Cartera nueva (detallada)</div>
-            <div style="font-size: 1.25rem; font-weight: bold;">$${this.formatNumber(carteraEstado.deudaTotal)}</div>
-            <div style="font-size: 0.8125rem; color: #64748b;">Antes de 2024 + meses desde 2024 + punto de conexión</div>
+          <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">
+            A pagar${rangoAPagar ? ` (${rangoAPagar})` : ''}
           </div>
+          <div style="font-size: 1.5rem; font-weight: bold;">$${this.formatNumber(carteraEstado.aPagar)}</div>
         </div>
 
-        <table style="width: 100%; margin-bottom: 16px;">
-          <thead>
-            <tr><th>Antes de 2024</th><th>Meses desde 2024</th><th>Punto de conexión</th><th>Total</th></tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>$${this.formatNumber(carteraEstado.deudaAntes2024)}</td>
-              <td>$${this.formatNumber(carteraEstado.deudaMesesDesde2024)}</td>
-              <td>$${this.formatNumber(carteraEstado.deudaPuntoConexion)}</td>
-              <td><strong>$${this.formatNumber(carteraEstado.deudaTotal)}</strong></td>
-            </tr>
-          </tbody>
-        </table>
+        ${avisos.length > 0 ? `
+          <div style="margin-bottom: 16px;">
+            ${avisos.map(a => `
+              <div style="display: flex; align-items: center; justify-content: space-between;
+                background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px;
+                padding: 10px 12px; margin-bottom: 8px;">
+                <span>⚠ ${a.label}: <strong>$${this.formatNumber(a.valor)}</strong></span>
+                <button class="btn btn-secondary" disabled title="Se conecta en la siguiente etapa">${a.accion}</button>
+              </div>
+            `).join('')}
+          </div>
+        ` : ''}
+
+        <details style="margin-bottom: 16px;">
+          <summary style="cursor: pointer; color: #64748b; font-size: 0.8125rem;">Ver los 4 buckets internos (comparación con el sistema actual)</summary>
+          <table style="width: 100%; margin-top: 8px;">
+            <thead>
+              <tr><th>Antes de 2024</th><th>Meses desde 2024</th><th>Punto de conexión</th><th>Total (referencia)</th></tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>$${this.formatNumber(carteraEstado.deudaAntes2024)}</td>
+                <td>$${this.formatNumber(carteraEstado.deudaMesesDesde2024)}</td>
+                <td>$${this.formatNumber(carteraEstado.deudaPuntoConexion)}</td>
+                <td><strong>$${this.formatNumber(carteraEstado.deudaTotal)}</strong></td>
+              </tr>
+            </tbody>
+          </table>
+        </details>
 
         <h4 style="margin: 16px 0 8px 0;">Detalle de movimientos</h4>
         ${movimientos.length > 0 ? `

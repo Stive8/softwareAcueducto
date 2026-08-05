@@ -1,7 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { crearDbTemporal, cerrarDbTemporal } = require('../../src/testUtils/dbTemporal');
-const CarteraRepository = require('../../src/repositories/CarteraRepository');
 const CarteraService = require('../../src/services/CarteraService');
 const { ejecutarPaso5, FECHA_APERTURA } = require('./paso5-apertura');
 
@@ -60,7 +59,7 @@ test('paso5: la apertura positiva alimenta deudaAntes2024 (saldoOpaco) vía exig
   }
 });
 
-test('paso5: la apertura negativa (saldo a favor) queda como AperturaOpaca negativa, no en cuenta_creditos', () => {
+test('paso5: la apertura negativa (saldo a favor) va a cuenta_creditos, no queda como AperturaOpaca negativa', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -70,30 +69,40 @@ test('paso5: la apertura negativa (saldo a favor) queda como AperturaOpaca negat
     const service = new CarteraService(ctx.dbService);
     const cuentaId = db.prepare(`SELECT id FROM cuentas WHERE codigo='R002'`).get().id;
     const estado = service.getEstadoCartera(cuentaId);
-    assert.equal(estado.deudaAntes2024, -50000, 'el crédito se ve como opaco negativo');
-
-    assert.equal(db.prepare('SELECT COUNT(*) n FROM cuenta_creditos WHERE cuenta_id=?').get(cuentaId).n, 0);
+    assert.equal(estado.deudaAntes2024, 0, 'ya no hay deuda opaca: era saldo a favor, no deuda');
+    assert.equal(estado.saldoCreditoDisponible, 50000, 'el crédito vive aparte, sin aplicarse solo');
 
     const movimiento = db.prepare(`SELECT tipo, exigible, monto, fecha FROM cartera_movimientos WHERE cuenta_id=?`).get(cuentaId);
     assert.equal(movimiento.tipo, 'AperturaOpaca');
     assert.equal(movimiento.exigible, 0);
-    assert.equal(movimiento.monto, -50000);
+    assert.equal(movimiento.monto, 0, 'verificado en 0: no es "sin dato"');
     assert.equal(movimiento.fecha, FECHA_APERTURA);
+
+    const [credito] = db.prepare(`SELECT tipo, monto, fecha FROM cuenta_creditos WHERE cuenta_id=?`).all(cuentaId);
+    assert.equal(credito.tipo, 'Abono');
+    assert.equal(credito.monto, 50000);
+    assert.equal(credito.fecha, FECHA_APERTURA);
   } finally {
     cerrarDbTemporal(ctx);
   }
 });
 
-test('paso5: el FIFO del motor nunca ve la apertura negativa como un cargo pendiente que imputar', () => {
+test('paso5: el crédito de una apertura negativa se puede redimir contra deuda de 2024+', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
     sembrarCuenta(db, 'R002');
     ejecutarPaso5({ dbService: ctx.dbService, cuentasJson: [{ codigo: 'R002', apertura_opaca_2023_12_31: -50000 }] });
 
-    const repo = new CarteraRepository(ctx.dbService);
+    const service = new CarteraService(ctx.dbService);
     const cuentaId = db.prepare(`SELECT id FROM cuentas WHERE codigo='R002'`).get().id;
-    assert.deepEqual(repo.getCargosPendientes(cuentaId, 0), [], 'la apertura negativa no es un cargo pendiente');
+    service.repository.crearMovimiento({
+      cuentaId, fecha: '2026-01-01', tipo: 'CargoMensual', exigible: 1, monto: 20000, anio: 2026, mes: 1
+    });
+
+    const r = service.redimirCredito({ cuentaId, fecha: '2026-06-01', monto: 20000 });
+    assert.equal(r.aplicado, 20000);
+    assert.equal(service.repository.getSaldoCreditoDisponible(cuentaId), 30000);
   } finally {
     cerrarDbTemporal(ctx);
   }

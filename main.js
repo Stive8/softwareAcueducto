@@ -1161,6 +1161,14 @@ function setupIpcHandlers() {
     }
   });
 
+  envolverHandle('cartera:getIndicadoresBulk', async () => {
+    try {
+      return { success: true, data: carteraService.getIndicadoresBulk() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Recibos
   envolverHandle('recibos:getAll', async (event, params) => {
     try {

@@ -1,6 +1,16 @@
 // Paso 10 de la carga inicial (sección 14 del MD): imputar los abonos de sostenimiento --
-// primero por período declarado, luego FIFO -- reutilizando `distribuir()` (la función pura ya
-// existente y testeada en src/services/cartera/imputacion.js), no reinventándola.
+// primero por período declarado, luego FIFO solo si ese período estaba declarado -- reutilizando
+// `distribuir()` (la función pura ya existente y testeada en src/services/cartera/imputacion.js),
+// no reinventándola.
+//
+// ABONO SIN PERÍODO DECLARADO ("abono libre"): cambio de diseño 2026-08-04. No entra al FIFO en
+// absoluto -- el monto completo pasa a cuenta_creditos, sin ninguna imputación. Antes (y hasta el
+// 2026-08-04 mismo, ver caso de referencia S010/recibo 1825 en paso9b-correcciones.js) un abono
+// sin período caía igual al FIFO general que uno con período insuficiente, así que la plata se
+// aplicaba sola contra lo que hubiera pendiente -- exactamente lo que el saldo a favor separado
+// quiere evitar. Solo si HAY período declarado (aunque esos meses concretos no tengan cargo
+// causado) el sobrante cae al FIFO: ahí sí hay una intención declarada que se puede honrar contra
+// deuda real existente.
 //
 // SEPARACIÓN DE POZOS (punto vs sostenimiento): este paso NUNCA toca `nuevos_puntos` ni
 // `nuevo_punto_abonos`. El "cargo" de punto vive solo en `nuevos_puntos.valor_total`, sin fila en
@@ -16,9 +26,11 @@
 // `monto > 0` excluye las 14 aperturas negativas (saldo a favor): nunca son cargo imputable.
 //
 // PERÍODO QUE EXCEDE LO CAUSADO: se intenta cubrir los meses declarados (modo MesesEspecificos);
-// lo que sobra cae al FIFO general de la cuenta; lo que sobra de eso queda sin imputar -- saldo a
-// favor implícito vía el monto crudo del Abono en getSaldos(), sin tabla aparte (cuenta_creditos
-// está confirmada como muerta, nada la lee).
+// lo que sobra cae al FIFO general de la cuenta; lo que sobra de eso YA NO queda como saldo a
+// favor implícito (cambio de diseño 2026-08-04, mismo motivo que paso5-apertura.js): el Abono en
+// cartera_movimientos se recorta a lo realmente imputado y el sobrante se registra aparte en
+// cuenta_creditos como 'Abono' sin aplicar -- se ve, pero no baja la deuda hasta que alguien lo
+// redima (ver CarteraService.redimirCredito).
 //
 // ORDEN: los abonos de una cuenta se procesan en orden cronológico (fecha_pago_real ascendente),
 // nunca por número de recibo ni por orden del JSON -- quien pagó primero cubre primero.
@@ -57,6 +69,7 @@ function construirCandidatos(recibosJson, idPorCodigo, getDetalle, getAbono) {
 
     candidatos.push({
       abonoId: abono.id, cuentaId, fecha: abono.fecha, monto: redondear(-abono.monto),
+      reciboDetalleId: abono.recibo_detalle_id,
       periodoDesde: r.periodo_desde, periodoHasta: r.periodo_hasta,
       codigo: r.codigo_cuenta, numeroRecibo: r.numero_recibo
     });
@@ -79,9 +92,13 @@ function ejecutarPaso10({ dbService, recibosJson }) {
     SELECT rd.id FROM recibo_detalles rd JOIN recibos r ON r.id = rd.recibo_id WHERE r.numero_recibo = ?
   `);
   const getAbono = db.prepare(`
-    SELECT id, fecha, monto FROM cartera_movimientos WHERE recibo_detalle_id = ? AND cuenta_id = ? AND tipo = 'Abono'
+    SELECT id, fecha, monto, recibo_detalle_id FROM cartera_movimientos WHERE recibo_detalle_id = ? AND cuenta_id = ? AND tipo = 'Abono'
   `);
   const yaImputado = db.prepare(`SELECT 1 FROM cartera_imputaciones WHERE abono_id = ? LIMIT 1`);
+  // Un candidato cuyo sobrante fue el monto entero no deja ninguna fila en cartera_imputaciones
+  // (no hubo nada que cubrir), así que yaImputado no basta para saber que ya se procesó: sin
+  // este chequeo, volver a correr el paso crearía un crédito duplicado en cada corrida.
+  const yaTieneCredito = db.prepare(`SELECT 1 FROM cuenta_creditos WHERE recibo_detalle_id = ? LIMIT 1`);
 
   const tiposSQL = TIPOS_CARGO_COMBINADOS.map(t => `'${t}'`).join(', ');
   const getCargosCombinados = db.prepare(`
@@ -103,17 +120,30 @@ function ejecutarPaso10({ dbService, recibosJson }) {
   const conFifo = [];
   const conSobrante = [];
   const saltados = [];
+  const conCredito = [];
 
   const transaccion = db.transaction(() => {
     for (const c of candidatos) {
-      if (yaImputado.get(c.abonoId)) { saltados.push(c); continue; }
+      const yaProcesado = yaImputado.get(c.abonoId)
+        || (c.reciboDetalleId && yaTieneCredito.get(c.reciboDetalleId));
+      if (yaProcesado) { saltados.push(c); continue; }
 
       let restante = c.monto;
       let usoPeriodo = false;
       let usoFifo = false;
 
+      // Cambio de diseño 2026-08-04: el FIFO de respaldo SOLO corre si el recibo declaró un
+      // período (aunque ese período no tenga cargos causados -- ver el caso de "meses no
+      // causados" más abajo, que sí es un período declarado). Un abono SIN período declarado
+      // ("abono libre") no se imputa nunca de forma automática: el monto completo pasa a
+      // cuenta_creditos. Antes se trataban igual -- ambos caían al mismo FIFO -- y eso hacía
+      // indistinguible "pagó Aporte-Dic 2026 mas esos meses no existen todavía" de "pagó sin
+      // decir para qué", que son casos distintos: el primero tiene una intención declarada que
+      // el FIFO puede razonablemente honrar contra deuda real existente; el segundo es dinero
+      // sin destino y quien decide a qué se aplica es el operador, no el importador.
       const meses = mesesDelPeriodo(c.periodoDesde, c.periodoHasta);
-      if (meses.length > 0) {
+      const teniaPeriodo = meses.length > 0;
+      if (teniaPeriodo) {
         const cargos = cargosPendientesCombinados(c.cuentaId);
         const idsElegidos = cargos
           .filter(cg => meses.some(m => m.anio === cg.anio && m.mes === cg.mes))
@@ -125,19 +155,32 @@ function ejecutarPaso10({ dbService, recibosJson }) {
         for (const imp of imputaciones) repo.crearImputacion({ abonoId: c.abonoId, cargoId: imp.cargoId, monto: imp.monto });
         if (imputaciones.length > 0) usoPeriodo = true;
         restante = sobrante;
-      }
 
-      if (esMayor(restante, 0)) {
-        const cargos = cargosPendientesCombinados(c.cuentaId); // recomputa: la pasada de período pudo cubrir algo
-        const { imputaciones, sobrante } = distribuir({ modo: MODOS.ABONO_DEUDA_FIFO, cargos, monto: restante });
-        for (const imp of imputaciones) repo.crearImputacion({ abonoId: c.abonoId, cargoId: imp.cargoId, monto: imp.monto });
-        if (imputaciones.length > 0) usoFifo = true;
-        restante = sobrante;
+        if (esMayor(restante, 0)) {
+          const cargosFifo = cargosPendientesCombinados(c.cuentaId); // recomputa: la pasada de período pudo cubrir algo
+          const { imputaciones: impFifo, sobrante: sobranteFifo } = distribuir({ modo: MODOS.ABONO_DEUDA_FIFO, cargos: cargosFifo, monto: restante });
+          for (const imp of impFifo) repo.crearImputacion({ abonoId: c.abonoId, cargoId: imp.cargoId, monto: imp.monto });
+          if (impFifo.length > 0) usoFifo = true;
+          restante = sobranteFifo;
+        }
       }
 
       if (usoPeriodo) conPeriodo.push(c);
       if (usoFifo) conFifo.push(c);
-      if (esMayor(restante, 0)) conSobrante.push({ ...c, sobrante: restante });
+      if (esMayor(restante, 0)) {
+        conSobrante.push({ ...c, sobrante: restante });
+
+        // El sobrante no se queda como saldo a favor implícito: se recorta el Abono a lo
+        // realmente imputado y el resto pasa a cuenta_creditos, sin aplicarse solo.
+        const imputadoTotal = redondear(c.monto - restante);
+        repo.actualizarMontoMovimiento(c.abonoId, -imputadoTotal);
+        const creditoId = repo.crearCredito({
+          cuentaId: c.cuentaId, tipo: 'Abono', monto: restante, fecha: c.fecha,
+          reciboDetalleId: c.reciboDetalleId,
+          observaciones: `Sobrante de imputación del recibo ${c.numeroRecibo}: crédito no aplicado`
+        });
+        conCredito.push({ ...c, credito: restante, creditoId });
+      }
     }
   });
   transaccion();
@@ -163,9 +206,10 @@ function ejecutarPaso10({ dbService, recibosJson }) {
 
   return {
     procesados: candidatos.length - saltados.length,
-    conPeriodo, conFifo, conSobrante, saltados, porPozo,
+    conPeriodo, conFifo, conSobrante, conCredito, saltados, porPozo,
     totalImputadoPeriodo: redondear(conPeriodo.reduce((s, c) => s + c.monto, 0)),
-    totalSobrante: redondear(conSobrante.reduce((s, c) => s + c.sobrante, 0))
+    totalSobrante: redondear(conSobrante.reduce((s, c) => s + c.sobrante, 0)),
+    totalCredito: redondear(conCredito.reduce((s, c) => s + c.credito, 0))
   };
 }
 

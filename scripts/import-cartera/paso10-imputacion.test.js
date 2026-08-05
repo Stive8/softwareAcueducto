@@ -65,31 +65,36 @@ test('paso10: abono con período declarado cubre exactamente esos meses (Priorid
   }
 });
 
-test('paso10: sin período declarado usa FIFO puro sobre el pool combinado', () => {
+test('paso10: sin período declarado NUNCA entra al FIFO -- el monto completo pasa a crédito', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
     const cuentaId = sembrarCuenta(db, 'R001');
     const carteraRepo = new CarteraRepository(ctx.dbService);
     const cargoEne = carteraRepo.crearMovimiento({ cuentaId, fecha: '2024-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 1 });
-    const cargoFeb = carteraRepo.crearMovimiento({ cuentaId, fecha: '2024-02-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 2 });
     const { detalleId } = sembrarReciboConDetalle(db, { numeroRecibo: 100, cuentaId, valor: 10000 });
-    sembrarAbono(db, { cuentaId, detalleId, valor: 10000, fecha: '2024-03-01' });
+    const abonoId = sembrarAbono(db, { cuentaId, detalleId, valor: 10000, fecha: '2024-03-01' });
 
     const r = ejecutarPaso10({ dbService: ctx.dbService, recibosJson: [registro()] });
 
-    assert.equal(r.conFifo.length, 1);
+    assert.equal(r.conFifo.length, 0, 'sin período, el FIFO ni siquiera se intenta');
     assert.equal(r.conPeriodo.length, 0);
+    assert.equal(r.conCredito.length, 1);
+    assert.equal(r.conCredito[0].credito, 10000, 'el monto completo, no un sobrante parcial');
+
     const cubiertoEne = db.prepare('SELECT COALESCE(SUM(monto),0) c FROM cartera_imputaciones WHERE cargo_id=?').get(cargoEne).c;
-    assert.equal(cubiertoEne, 10000, 'FIFO cubre el más antiguo primero');
-    const cubiertoFeb = db.prepare('SELECT COALESCE(SUM(monto),0) c FROM cartera_imputaciones WHERE cargo_id=?').get(cargoFeb).c;
-    assert.equal(cubiertoFeb, 0);
+    assert.equal(cubiertoEne, 0, 'el cargo pendiente real se queda sin tocar: nadie decidió aplicarle este pago');
+    const movimiento = db.prepare('SELECT monto FROM cartera_movimientos WHERE id=?').get(abonoId);
+    assert.equal(movimiento.monto, 0, 'el Abono se recorta a 0: nada se imputó');
   } finally {
     cerrarDbTemporal(ctx);
   }
 });
 
 // --- Punto 2 del usuario: orden de la apertura opaca ---
+// (con período declarado que no calza con ningún cargo real, para forzar el sobrante al FIFO
+// de respaldo sin cambiar el fondo de lo que cada test verifica -- ver nota de diseño arriba:
+// el FIFO solo corre si hubo período, aunque ese período específico no tenga cargo causado)
 
 test('paso10: el FIFO consume AperturaOpaca antes que un CargoMensual de 2024 (quien paga salda primero lo viejo)', () => {
   const ctx = crearDbTemporal();
@@ -102,7 +107,7 @@ test('paso10: el FIFO consume AperturaOpaca antes que un CargoMensual de 2024 (q
     const { detalleId } = sembrarReciboConDetalle(db, { numeroRecibo: 100, cuentaId, valor: 10000 });
     sembrarAbono(db, { cuentaId, detalleId, valor: 10000, fecha: '2024-01-15' });
 
-    ejecutarPaso10({ dbService: ctx.dbService, recibosJson: [registro()] });
+    ejecutarPaso10({ dbService: ctx.dbService, recibosJson: [registro({ periodo_desde: '2099-01', periodo_hasta: '2099-01' })] });
 
     const cubiertoApertura = db.prepare('SELECT COALESCE(SUM(monto),0) c FROM cartera_imputaciones WHERE cargo_id=?').get(apertura).c;
     const cubiertoEne = db.prepare('SELECT COALESCE(SUM(monto),0) c FROM cartera_imputaciones WHERE cargo_id=?').get(cargoEne).c;
@@ -124,7 +129,7 @@ test('paso10: una apertura opaca NEGATIVA (saldo a favor) nunca aparece como car
     const { detalleId } = sembrarReciboConDetalle(db, { numeroRecibo: 100, cuentaId, valor: 10000 });
     sembrarAbono(db, { cuentaId, detalleId, valor: 10000, fecha: '2024-01-15' });
 
-    ejecutarPaso10({ dbService: ctx.dbService, recibosJson: [registro()] });
+    ejecutarPaso10({ dbService: ctx.dbService, recibosJson: [registro({ periodo_desde: '2099-01', periodo_hasta: '2099-01' })] });
 
     const impsSobreNegativa = db.prepare('SELECT COUNT(*) n FROM cartera_imputaciones WHERE cargo_id=?').get(aperturaNegativa).n;
     assert.equal(impsSobreNegativa, 0, 'una apertura negativa jamás recibe imputaciones');
@@ -189,14 +194,19 @@ test('paso10: período con meses no causados (ej. ago-dic 2026, tope de julio) c
     assert.equal(r.conFifo.length, 1);
 
     // Los 50.000 restantes (60.000 - 10.000 de julio) no tienen ningún cargo real que cubrir:
-    // quedan sin imputar -- saldo a favor implícito, no se inventa un cargo para ago-dic.
+    // no se inventa un cargo para ago-dic, y ya no quedan como saldo a favor implícito -- se
+    // recorta el Abono a lo imputado y el resto pasa a cuenta_creditos.
     assert.equal(r.conSobrante.length, 1);
     assert.equal(r.conSobrante[0].sobrante, 50000);
+    assert.equal(r.conCredito.length, 1);
+    assert.equal(r.conCredito[0].credito, 50000);
+    assert.equal(r.totalCredito, 50000);
     assert.equal(db.prepare('SELECT COUNT(*) n FROM cartera_movimientos WHERE anio=2026 AND mes > 7').get().n, 0, 'no se inventó ningún cargo para ago-dic');
 
     const service = new CarteraService(ctx.dbService);
     const estado = service.getEstadoCartera(cuentaId);
-    assert.equal(estado.deudaMesesDesde2024, -50000, 'el sobrante se ve como saldo a favor en el balance general, sin tabla aparte');
+    assert.equal(estado.deudaMesesDesde2024, 0, 'el Abono se recorta a lo imputado: julio quedó saldado, nada queda negativo');
+    assert.equal(estado.saldoCreditoDisponible, 50000, 'el sobrante vive en cuenta_creditos, sin aplicarse solo');
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -246,8 +256,8 @@ test('paso10: procesa los abonos de una cuenta en orden cronológico -- el prime
     ejecutarPaso10({
       dbService: ctx.dbService,
       recibosJson: [
-        registro({ numero_recibo: 200 }), // aparece primero en el JSON, pero es el pago más nuevo
-        registro({ numero_recibo: 100 })
+        registro({ numero_recibo: 200, periodo_desde: '2099-01', periodo_hasta: '2099-01' }), // aparece primero en el JSON, pero es el pago más nuevo
+        registro({ numero_recibo: 100, periodo_desde: '2099-01', periodo_hasta: '2099-01' })
       ]
     });
 
@@ -268,13 +278,41 @@ test('paso10: es idempotente -- correrlo dos veces no duplica imputaciones', () 
     const { detalleId } = sembrarReciboConDetalle(db, { numeroRecibo: 100, cuentaId, valor: 10000 });
     sembrarAbono(db, { cuentaId, detalleId, valor: 10000, fecha: '2024-01-15' });
 
-    const recibosJson = [registro()];
+    const recibosJson = [registro({ periodo_desde: '2099-01', periodo_hasta: '2099-01' })];
     ejecutarPaso10({ dbService: ctx.dbService, recibosJson });
     const r2 = ejecutarPaso10({ dbService: ctx.dbService, recibosJson });
 
     assert.equal(r2.procesados, 0);
     assert.equal(r2.saltados.length, 1);
     assert.equal(db.prepare('SELECT COUNT(*) n FROM cartera_imputaciones').get().n, 1);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso10: es idempotente incluso cuando el 100% del abono fue sobrante (cero imputaciones)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuenta(db, 'R001');
+    // Sin ningún cargo pendiente: todo el abono cae a sobrante -- no se crea ninguna
+    // fila en cartera_imputaciones, así que yaImputado por sí solo no detectaría el reprocesamiento.
+    const { detalleId } = sembrarReciboConDetalle(db, { numeroRecibo: 100, cuentaId, valor: 10000 });
+    const abonoId = sembrarAbono(db, { cuentaId, detalleId, valor: 10000, fecha: '2024-01-15' });
+
+    const recibosJson = [registro()];
+    const r1 = ejecutarPaso10({ dbService: ctx.dbService, recibosJson });
+    assert.equal(r1.conCredito.length, 1);
+    assert.equal(r1.conCredito[0].credito, 10000);
+
+    const r2 = ejecutarPaso10({ dbService: ctx.dbService, recibosJson });
+    assert.equal(r2.procesados, 0);
+    assert.equal(r2.saltados.length, 1, 'ya tiene un crédito por este recibo_detalle: no se reprocesa');
+    assert.equal(db.prepare('SELECT COUNT(*) n FROM cuenta_creditos WHERE recibo_detalle_id = ?').get(detalleId).n, 1,
+      'sin el chequeo por recibo_detalle_id, la segunda corrida duplicaría el crédito');
+
+    const movimiento = db.prepare('SELECT monto FROM cartera_movimientos WHERE id = ?').get(abonoId);
+    assert.equal(movimiento.monto, 0, 'el Abono se recorta a 0: nada se imputó');
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -291,7 +329,7 @@ test('paso10: reporta el desglose por pozo (AperturaOpaca vs cargos desde 2024)'
     const { detalleId } = sembrarReciboConDetalle(db, { numeroRecibo: 100, cuentaId, valor: 20000 });
     sembrarAbono(db, { cuentaId, detalleId, valor: 20000, fecha: '2024-01-15' });
 
-    const r = ejecutarPaso10({ dbService: ctx.dbService, recibosJson: [registro()] });
+    const r = ejecutarPaso10({ dbService: ctx.dbService, recibosJson: [registro({ periodo_desde: '2099-01', periodo_hasta: '2099-01' })] });
 
     assert.equal(r.porPozo.apertura, 15000);
     assert.equal(r.porPozo.cargosDesde2024, 5000);

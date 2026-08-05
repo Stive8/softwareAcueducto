@@ -360,14 +360,32 @@ test('paso9b: S010 -- recalcula los 3 abonos restantes en orden cronológico (18
     const db = ctx.dbService.getDb();
     const ids = sembrarTodas(db);
 
-    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
 
-    // 24 meses x 10.000 = 240.000 causados; abonos restantes: 30.000 + 120.000 + 120.000 = 270.000
-    const { deudaExigible } = new CarteraRepository(ctx.dbService).getSaldos(ids.S010);
-    assert.equal(deudaExigible, -30000, '240.000 causados - 270.000 abonados = 30.000 a favor');
+    // 24 meses x 10.000 = 240.000 causados. 1825 no tiene período declarado ("abono libre"):
+    // desde el cambio de diseño 2026-08-04 NUNCA entra al FIFO, sus 30.000 van completos a
+    // cuenta_creditos. 2151 (2024 completo) y 2302 (2025 completo) sí declaran período, cubren
+    // sus propios 12 meses cada uno exacto (120.000 = 12x10.000), sin que 1825 les robe ningún
+    // mes por delante -- por eso los 24 cargos quedan cubiertos con cero sobrante real.
+    const repoCartera = new CarteraRepository(ctx.dbService);
+    const { deudaExigible } = repoCartera.getSaldos(ids.S010);
+    assert.equal(deudaExigible, 0, '240.000 causados quedan en 0: los 30.000 de más no bajan la deuda por su cuenta');
+    assert.equal(repoCartera.getSaldoCreditoDisponible(ids.S010), 30000, 'los 30.000 del recibo 1825 quedan disponibles como crédito');
 
-    // Todos los cargos de 2024 y 2025 deben quedar cubiertos (1825 libre cubre ene-mar 2024,
-    // 2151 cubre abr-dic 2024 + su sobrante cae en ene-mar 2025, 2302 cubre abr-dic 2025)
+    const abono1825 = r.recalculoS010.abonos.find(a => a.numeroRecibo === RECALCULO_S010.numeroReciboLibre);
+    assert.equal(abono1825.periodoImputados, 0, '1825 no tiene período: la pasada de MesesEspecificos ni corre');
+    assert.equal(abono1825.fifoImputados, 0, '1825 sin período nunca entra al FIFO');
+    assert.ok(abono1825.creditoId, 'el monto completo de 1825 generó un crédito');
+    const movimiento1825 = db.prepare('SELECT monto FROM cartera_movimientos WHERE id=?').get(abono1825.abonoId);
+    assert.equal(movimiento1825.monto, 0, 'el Abono de 1825 queda en 0: nada se le imputó');
+
+    // Los otros dos SÍ generaron su crédito o cobertura vía período declarado, sin FIFO de por medio.
+    for (const numeroRecibo of [2151, 2302]) {
+      const abono = r.recalculoS010.abonos.find(a => a.numeroRecibo === numeroRecibo);
+      assert.ok(abono.periodoImputados > 0, `${numeroRecibo} se cubre por período declarado`);
+      assert.equal(abono.fifoImputados, 0, `${numeroRecibo} no necesitó FIFO: su período alcanzó exacto`);
+    }
+
     const cargos = db.prepare(`
       SELECT m.id, m.anio, m.mes, m.monto, COALESCE((SELECT SUM(i.monto) FROM cartera_imputaciones i WHERE i.cargo_id=m.id),0) AS cubierto
       FROM cartera_movimientos m WHERE m.cuenta_id=? AND m.tipo='CargoMensual'
@@ -389,8 +407,9 @@ test('paso9b: S010 -- idempotente, correr dos veces no reintroduce el abono de 1
     const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
 
     assert.equal(r2.recalculoS010.yaCorregido, true);
-    const { deudaExigible } = new CarteraRepository(ctx.dbService).getSaldos(ids.S010);
-    assert.equal(deudaExigible, -30000);
+    const repoCartera = new CarteraRepository(ctx.dbService);
+    assert.equal(repoCartera.getSaldos(ids.S010).deudaExigible, 0);
+    assert.equal(repoCartera.getSaldoCreditoDisponible(ids.S010), 30000, 'correr dos veces no duplica el crédito');
   } finally {
     cerrarDbTemporal(ctx);
   }

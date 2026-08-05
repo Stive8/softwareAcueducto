@@ -3,11 +3,21 @@
 // Verificado antes de escribir esto (ver CarteraRepository.getSaldos / getCargosPendientes):
 //  - saldoOpaco (bucket 1, "antes de 2024") = SUM(monto) de movimientos exigible=0.
 //    AperturaOpaca ya se inserta con exigible=0, así que el bucket 1 sale gratis del motor.
-//  - cuenta_creditos NO participa en ningún cálculo de saldo (CarteraService.js:108 lo confirma
-//    en un comentario: "queda sin uso"). Los 14 saldos a favor se cargan como AperturaOpaca con
-//    monto NEGATIVO, no en esa tabla.
 //  - getCargosPendientes filtra `monto > 0`, así que un AperturaOpaca negativo nunca aparece como
 //    "cargo pendiente": el FIFO del paso 10 no puede imputarle nada por error.
+//
+// Cambio de diseño 2026-08-04: los 14 saldos a favor anteriores al corte YA NO se cargan como
+// AperturaOpaca negativo. Antes bajaban "deuda anterior al corte" por su cuenta y de forma
+// invisible -- exactamente el problema que motivó separar "tener crédito" de "aplicarlo" (ver
+// docs/superpowers/specs/... y CarteraService.registrarAbono/redimirCredito). Ahora van a
+// cuenta_creditos como 'Abono' sin aplicar, y la cuenta queda con AperturaOpaca en 0 (verificado,
+// no "sin dato": si algún día alguien pregunta si esta cuenta tuvo apertura, la fila con monto 0
+// ya lo distingue de una cuenta que nunca se investigó).
+//
+// Es una decisión deliberada: estas 14 aperturas negativas ahora son redimibles contra meses de
+// 2024 en adelante, igual que cualquier otro saldo a favor (ver redimirCredito). Antes del corte
+// eran saldo opaco -- no cobrable por definición -- pero como crédito SÍ tiene sentido que se
+// pueda aplicar a la deuda corriente si el operador decide hacerlo; solo que ya no pasa solo.
 //
 // Solo se inserta movimiento cuando `apertura_opaca_2023_12_31` es un número (incluido 0): si es
 // null ("sin dato"), no se inserta nada -- ni se inventa un cero, ni se distingue de él en el
@@ -43,9 +53,19 @@ function ejecutarPaso5({ dbService, cuentasJson }) {
       continue;
     }
 
-    if (apertura !== 0) {
+    if (apertura > 0) {
       repo.crearMovimiento({
         cuentaId, fecha: FECHA_APERTURA, tipo: 'AperturaOpaca', exigible: 0, monto: apertura
+      });
+    } else if (apertura < 0) {
+      // La apertura opaca queda en 0 (verificado): esta cuenta no tiene deuda anterior al
+      // corte -- lo que tenía era, en realidad, un saldo a favor.
+      repo.crearMovimiento({
+        cuentaId, fecha: FECHA_APERTURA, tipo: 'AperturaOpaca', exigible: 0, monto: 0
+      });
+      repo.crearCredito({
+        cuentaId, tipo: 'Abono', monto: -apertura, fecha: FECHA_APERTURA,
+        observaciones: 'Apertura opaca negativa al 31/12/2023: saldo a favor anterior al corte, redimible contra deuda de 2024+'
       });
     } else {
       // 0 verificado: se deja constancia igual, a diferencia de "sin dato".

@@ -10,7 +10,8 @@ config/google-credentials.json
 
 # Salidas de las herramientas de import: contienen datos reales (nombres, cédulas, montos, códigos de cuenta, deuda)
 scripts/import-gastos/output/
-scripts/import-cartera/output/
+scripts/import-cartera/output/*
+!scripts/import-cartera/output/*.md
 
 # Respaldo automático de la base antes de una carga irreversible (ya cubierto por *.db, se deja explícito)
 backups_automaticos/

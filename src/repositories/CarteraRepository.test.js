@@ -164,3 +164,87 @@ test('getCargoMensual encuentra el cargo de un mes concreto', () => {
     cerrarDbTemporal(ctx);
   }
 });
+
+test('actualizarMontoMovimiento recorta el monto de un movimiento ya creado', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2026-01-01', tipo: 'Abono', exigible: 1, monto: -60000 });
+
+    repo.actualizarMontoMovimiento(abonoId, -10000);
+
+    const fila = ctx.dbService.getDb().prepare('SELECT monto FROM cartera_movimientos WHERE id = ?').get(abonoId);
+    assert.equal(fila.monto, -10000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getSaldoCreditoDisponible: un Abono sin Aplicado queda disponible entero', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+    repo.crearCredito({ cuentaId, tipo: 'Abono', monto: 90000, fecha: '2024-05-04' });
+    assert.equal(repo.getSaldoCreditoDisponible(cuentaId), 90000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getSaldoCreditoDisponible descuenta lo ya Aplicado, aunque sea parcial', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+    repo.crearCredito({ cuentaId, tipo: 'Abono', monto: 90000, fecha: '2024-05-04' });
+    repo.crearCredito({ cuentaId, tipo: 'Aplicado', monto: 30000, fecha: '2026-01-01' });
+    assert.equal(repo.getSaldoCreditoDisponible(cuentaId), 60000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getSaldoCreditoDisponible de una cuenta sin créditos es 0', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+    assert.equal(repo.getSaldoCreditoDisponible(cuentaId), 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('crearCredito guarda abono_movimiento_id para trazar a qué Abono se aplicó', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2026-01-01', tipo: 'Abono', exigible: 1, monto: -30000 });
+    repo.crearCredito({ cuentaId, tipo: 'Aplicado', monto: 30000, fecha: '2026-01-01', abonoMovimientoId: abonoId });
+
+    const [fila] = repo.getCreditos(cuentaId);
+    assert.equal(fila.abono_movimiento_id, abonoId);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getCreditos devuelve el historial ordenado por fecha', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+    repo.crearCredito({ cuentaId, tipo: 'Abono', monto: 50000, fecha: '2026-02-01' });
+    repo.crearCredito({ cuentaId, tipo: 'Abono', monto: 90000, fecha: '2024-05-04' });
+
+    const historial = repo.getCreditos(cuentaId);
+    assert.equal(historial.length, 2);
+    assert.equal(historial[0].monto, 90000, 'la más vieja primero');
+    assert.equal(historial[1].monto, 50000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

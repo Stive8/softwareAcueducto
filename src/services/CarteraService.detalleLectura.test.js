@@ -56,6 +56,53 @@ test('getDetalleCartera: trae los puntos de conexión con sus abonos', () => {
   }
 });
 
+test('getIndicadoresBulk: marca solo las cuentas con algún aviso pendiente, con 3 consultas fijas', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const idOpaca = sembrarCuenta(db, 'T910');
+    const idCredito = sembrarCuenta(db, 'T911');
+    const idPunto = sembrarCuenta(db, 'T912');
+    const idSinAvisos = sembrarCuenta(db, 'T913');
+
+    const repo = new CarteraRepository(ctx.dbService);
+    repo.crearMovimiento({ cuentaId: idOpaca, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 100000 });
+    repo.crearCredito({ cuentaId: idCredito, tipo: 'Abono', monto: 50000, fecha: '2024-05-04' });
+    const puntoRepo = new NuevoPuntoRepository(ctx.dbService);
+    puntoRepo.create({ cuentaId: idPunto, valorTotal: 200000, fechaRegistro: '2023-01-01' });
+
+    const service = new CarteraService(ctx.dbService);
+    const indicadores = service.getIndicadoresBulk();
+
+    assert.equal(indicadores[idOpaca].deudaAntes2024, true);
+    assert.equal(indicadores[idOpaca].saldoCreditoDisponible, false, 'no tiene aviso de crédito');
+    assert.equal(indicadores[idCredito].saldoCreditoDisponible, true);
+    assert.equal(indicadores[idPunto].puntoConexion, true);
+    assert.equal(indicadores[idSinAvisos], undefined, 'sin avisos, ni siquiera aparece');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getIndicadoresBulk: una apertura opaca ya redimida a crédito (negativa) no marca deuda anterior', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuenta(db, 'T914');
+    const repo = new CarteraRepository(ctx.dbService);
+    repo.crearMovimiento({ cuentaId, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 0 });
+    repo.crearCredito({ cuentaId, tipo: 'Abono', monto: 50000, fecha: '2023-12-31' });
+
+    const service = new CarteraService(ctx.dbService);
+    const indicadores = service.getIndicadoresBulk();
+
+    assert.equal(indicadores[cuentaId].deudaAntes2024, false);
+    assert.equal(indicadores[cuentaId].saldoCreditoDisponible, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('getMotivoDiferencia: devuelve el texto fijo para una cuenta documentada, null para las demás', () => {
   const ctx = crearDbTemporal();
   try {

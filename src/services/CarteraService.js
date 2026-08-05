@@ -104,9 +104,15 @@ class CarteraService {
   }
 
   // Registra plata recibida y la imputa contra los cargos según el modo. Los cuatro modos
-  // crean UN solo Abono; lo único que cambia es contra qué cargos se computa la cobertura.
-  // Lo que no alcanza a imputarse queda como saldo a favor (un exigible negativo), sin tabla
-  // aparte: por eso cuenta_creditos queda sin uso.
+  // llenan cargos con la misma mecánica; lo único que cambia es contra cuáles.
+  //
+  // Lo que no alcanza a imputarse NO queda como saldo a favor implícito (un exigible
+  // negativo): el Abono en cartera_movimientos se recorta a lo realmente imputado, y el
+  // sobrante se registra aparte en cuenta_creditos como 'Abono' sin aplicar. Esto es a
+  // propósito: la cifra principal de la cuenta no puede bajar sola porque alguien pagó de
+  // más sin decir para qué -- alguien tiene que decidir redimirlo (ver redimirCredito).
+  // Si el modo es ANTICIPO (o cualquier otro deja todo sin imputar), no se crea ningún
+  // movimiento: el monto entero es crédito.
   registrarAbono({ cuentaId, fecha, monto, modo, cargosElegidos = [],
     reciboDetalleId = null, observaciones = null, usuarioId = null }) {
     if (!cuentaId) throw new Error('La cuenta es obligatoria');
@@ -133,31 +139,114 @@ class CarteraService {
     return this.repository.transaccion(() => {
       const cargos = this.repository.getCargosPendientes(cuentaId, exigible);
       const { imputaciones, sobrante } = distribuir({ modo, cargos, monto, cargosElegidos });
+      const imputado = redondear(imputaciones.reduce((s, i) => s + i.monto, 0));
+
+      let abonoId = null;
+      if (esMayor(imputado, 0)) {
+        abonoId = this.repository.crearMovimiento({
+          cuentaId, fecha, tipo: 'Abono', exigible,
+          monto: -imputado,
+          reciboDetalleId, observaciones, usuarioId
+        });
+        for (const imp of imputaciones) {
+          this.repository.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
+        }
+      }
+
+      let creditoId = null;
+      if (esMayor(sobrante, 0)) {
+        creditoId = this.repository.crearCredito({
+          cuentaId, tipo: 'Abono', monto: sobrante, fecha, reciboDetalleId, observaciones
+        });
+      }
+
+      return { abonoId, imputado, sobrante, creditoId };
+    });
+  }
+
+  // Convierte crédito disponible en un Abono real: FIFO contra los cargos exigibles
+  // pendientes por defecto (nunca contra el bucket opaco -- el crédito solo redime deuda de
+  // 2024 en adelante), o contra meses específicos si se los indican. Si el crédito alcanza
+  // para más de lo que hay pendiente, el resto sigue disponible -- no se pierde ni se fuerza.
+  redimirCredito({ cuentaId, fecha, monto, modo = MODOS.ABONO_DEUDA_FIFO, cargosElegidos = [],
+    observaciones = null, usuarioId = null }) {
+    if (!cuentaId) throw new Error('La cuenta es obligatoria');
+    if (!fecha) throw new Error('La fecha es obligatoria');
+    if (!(Number(monto) > 0)) throw new Error('El monto a redimir debe ser mayor a cero');
+    if (modo === MODOS.ABONO_SALDO_OPACO || modo === MODOS.ANTICIPO) {
+      throw new Error('El crédito solo se redime contra deuda exigible: use AbonoDeudaFIFO o MesesEspecificos');
+    }
+
+    const disponible = this.repository.getSaldoCreditoDisponible(cuentaId);
+    if (esMayor(monto, disponible)) {
+      throw new Error(`No hay $${redondear(monto)} de crédito disponible (disponible: $${disponible})`);
+    }
+
+    return this.repository.transaccion(() => {
+      const cargos = this.repository.getCargosPendientes(cuentaId, 1);
+      const { imputaciones } = distribuir({ modo, cargos, monto, cargosElegidos });
+      const imputado = redondear(imputaciones.reduce((s, i) => s + i.monto, 0));
+
+      if (!esMayor(imputado, 0)) {
+        throw new Error('No hay deuda exigible pendiente contra la cual redimir este crédito');
+      }
 
       const abonoId = this.repository.crearMovimiento({
-        cuentaId, fecha, tipo: 'Abono', exigible,
-        monto: -redondear(monto),
-        reciboDetalleId, observaciones, usuarioId
+        cuentaId, fecha, tipo: 'Abono', exigible: 1,
+        monto: -imputado, observaciones, usuarioId
       });
-
       for (const imp of imputaciones) {
         this.repository.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
       }
 
-      const imputado = redondear(imputaciones.reduce((s, i) => s + i.monto, 0));
-      return { abonoId, imputado, sobrante };
+      const creditoId = this.repository.crearCredito({
+        cuentaId, tipo: 'Aplicado', monto: imputado, fecha, abonoMovimientoId: abonoId, observaciones
+      });
+
+      return { abonoId, creditoId, aplicado: imputado, saldoRestante: redondear(disponible - imputado) };
     });
   }
 
-  // Estado de la cartera de una cuenta, en los 4 buckets del modelo (ver
-  // REGLAS_CARGA_INICIAL.md sección 2): deuda de antes del corte, deuda del punto de conexión,
-  // deuda de los meses causados desde el corte, y el total. El saldo opaco (= deuda_antes_corte)
-  // va SIEMPRE separado del exigible y nunca se cobra por sí solo; el punto de conexión vive en
-  // nuevos_puntos/nuevo_punto_abonos (fuera de cartera_movimientos) y se suma aparte.
+  // La cifra principal: SOLO responde "¿cuánto paga esta persona hoy por su cuota corriente?".
+  // Meses transcurridos entre el último mes cubierto (exclusive) y el actual (inclusive), a la
+  // tarifa vigente de cada mes -- calculado en vivo, sin depender de que asegurarCausacion ya
+  // haya corrido para esos meses. Salta los meses en que la cuenta no estaba Activa, igual que
+  // asegurarCausacion. Nunca incluye deuda anterior al corte, punto de conexión ni saldo a favor.
+  calcularAPagar(cuentaId, cubiertoHasta) {
+    const ahora = new Date();
+    const periodoActualCod = codificarPeriodo(ahora.getFullYear(), ahora.getMonth() + 1);
+
+    let desdeCod;
+    if (cubiertoHasta) {
+      desdeCod = codificarPeriodo(cubiertoHasta.anio, cubiertoHasta.mes) + 1;
+    } else {
+      const ancla = this.getFechaInicioFacturacion(cuentaId);
+      if (!ancla) return { meses: [], total: 0 };
+      const inicio = anioMesDeFecha(ancla);
+      desdeCod = codificarPeriodo(inicio.anio, inicio.mes);
+    }
+
+    const meses = [];
+    for (let cod = desdeCod; cod <= periodoActualCod; cod++) {
+      const { anio, mes } = decodificarPeriodo(cod);
+      if (this.estadoRepository.estadoEnMes(cuentaId, anio, mes) !== 'Activo') continue;
+      const tarifa = this.pagoRepository.getCategoriaTarifaParaMes(cuentaId, anio, mes);
+      if (!tarifa) continue;
+      meses.push({ anio, mes, valor: tarifa.tarifa_sostenimiento });
+    }
+
+    return { meses, total: redondear(meses.reduce((s, m) => s + m.valor, 0)) };
+  }
+
+  // Estado de la cartera de una cuenta. La cifra principal (aPagar) es la única que se destaca:
+  // responde solo "¿cuánto paga hoy por su cuota corriente?". Todo lo demás -- deuda anterior al
+  // corte, punto de conexión, saldo a favor -- son avisos independientes que NINGUNO suma ni
+  // resta de esa cifra; cada uno tiene su propia acción (abonar, redimir) en vez de mezclarse.
   getEstadoCartera(cuentaId) {
     const { deudaExigible, saldoOpaco } = this.repository.getSaldos(cuentaId);
     const cubiertoHasta = calcularCubiertoHasta(this.repository.getCargosConCobertura(cuentaId, 1));
     const totalCobrarHoy = deudaExigible > 0 ? deudaExigible : 0;
+    const { meses: mesesAPagar, total: aPagar } = this.calcularAPagar(cuentaId, cubiertoHasta);
 
     const deudaPuntoConexion = redondear(
       this.nuevoPuntoRepository.findByCuentaId(cuentaId)
@@ -165,17 +254,32 @@ class CarteraService {
         .reduce((s, p) => s + p.saldo_pendiente, 0)
     );
 
+    // El crédito vive en cuenta_creditos (ver registrarAbono/redimirCredito) y ya no baja la
+    // deuda exigible por sí solo. deuda_exigible puede seguir yendo negativa por otra vía
+    // (recategorizar hacia abajo sobre un mes ya pagado, sección "recategorizar" más arriba):
+    // ese caso no está en cuenta_creditos todavía, así que se suma aparte para no esconderlo.
+    const saldoCreditoDisponible = this.repository.getSaldoCreditoDisponible(cuentaId);
+    const saldoAFavor = redondear(saldoCreditoDisponible + (deudaExigible < 0 ? -deudaExigible : 0));
+
     return {
-      // Los 4 buckets de primera clase.
+      // Cifra principal: la única que se presenta como "el número" de la cuenta.
+      ultimoMesCubierto: cubiertoHasta,
+      aPagar,
+      mesesAPagar,
+
+      // Avisos independientes: cada uno con su propia acción, ninguno entra en aPagar.
       deudaAntes2024: saldoOpaco,
-      deudaMesesDesde2024: deudaExigible,
       deudaPuntoConexion,
+      saldoCreditoDisponible,
+
+      // Los 4 buckets de primera clase (se conservan para quien ya los consume).
+      deudaMesesDesde2024: deudaExigible,
       deudaTotal: redondear(totalCobrarHoy + saldoOpaco + deudaPuntoConexion),
 
       // Se conservan los nombres previos para no romper a quien ya consume este método.
       deudaExigible,
       saldoOpaco,
-      saldoAFavor: deudaExigible < 0 ? redondear(-deudaExigible) : 0,
+      saldoAFavor,
       cubiertoHasta,
       totalCobrarHoy,
       totalReferencia: redondear(totalCobrarHoy + saldoOpaco)
@@ -195,6 +299,35 @@ class CarteraService {
     }));
 
     return { movimientos, puntosConexion };
+  }
+
+  // Para la lista de cuentas: qué cuentas tienen algún aviso pendiente (deuda anterior al
+  // corte, punto de conexión, saldo a favor), en 3 consultas agregadas -- no una por cuenta --
+  // para que listar 300 cuentas no dispare 300 lecturas de cartera_movimientos.
+  getIndicadoresBulk() {
+    const opacas = this.db.prepare(`
+      SELECT cuenta_id FROM cartera_movimientos WHERE exigible = 0
+      GROUP BY cuenta_id HAVING SUM(monto) > 0
+    `).all().map(f => f.cuenta_id);
+    const conCredito = this.db.prepare(`
+      SELECT cuenta_id FROM cuenta_creditos
+      GROUP BY cuenta_id HAVING SUM(CASE WHEN tipo = 'Abono' THEN monto ELSE -monto END) > 0
+    `).all().map(f => f.cuenta_id);
+    const conPunto = this.db.prepare(`
+      SELECT DISTINCT cuenta_id FROM nuevos_puntos WHERE estado = 'Pendiente'
+    `).all().map(f => f.cuenta_id);
+
+    const resultado = {};
+    const marcar = (cuentaId, campo) => {
+      if (!resultado[cuentaId]) {
+        resultado[cuentaId] = { deudaAntes2024: false, saldoCreditoDisponible: false, puntoConexion: false };
+      }
+      resultado[cuentaId][campo] = true;
+    };
+    opacas.forEach(id => marcar(id, 'deudaAntes2024'));
+    conCredito.forEach(id => marcar(id, 'saldoCreditoDisponible'));
+    conPunto.forEach(id => marcar(id, 'puntoConexion'));
+    return resultado;
   }
 
   // Motivo documentado (texto fijo) cuando el saldo de esta cuenta en el nuevo modelo no

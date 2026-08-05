@@ -80,6 +80,28 @@ test('calcularConciliacion: cuadra_exacto:false CON apertura opaca -> se suma ab
   }
 });
 
+test('calcularConciliacion: el saldo a favor disponible se suma al target, igual que el término de punto', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuenta(db, 'R001');
+    const repo = new CarteraRepository(ctx.dbService);
+    // saldo_objetivo bruto = 100000 - 5*10000 = 50000. Si el sistema muestra 90000 de deuda
+    // (por haber recortado un abono con 40000 de sobrante a crédito), sin el término de crédito
+    // la diferencia sería 40000 -- exactamente el crédito, sin ninguna causa real.
+    repo.crearMovimiento({ cuentaId, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 90000 });
+    repo.crearCredito({ cuentaId, tipo: 'Abono', monto: 40000, fecha: '2026-01-01' });
+
+    const r = calcularConciliacion({ dbService: ctx.dbService, cuentasJson: [cuenta()], recibosJson: [] });
+
+    assert.equal(r.filas[0].saldoCreditoDisponible, 40000);
+    assert.equal(r.filas[0].target, 90000, '50000 del objetivo bruto + 40000 del crédito disponible');
+    assert.equal(r.filas[0].diferencia, 0, 'el crédito no aplicado no debe aparecer como diferencia sin explicar');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('calcularConciliacion: cuadra_exacto:false SIN apertura opaca -> se resta el saldo pendiente del punto, no el abono', () => {
   const ctx = crearDbTemporal();
   try {

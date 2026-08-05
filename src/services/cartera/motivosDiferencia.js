@@ -4,11 +4,20 @@
 // (paso 11) y no se deriva de ningún dato en la base -- por eso vive como constante aquí, para
 // que la pantalla de cartera lo muestre sin que el operador tenga que ir a buscar el .md.
 //
-// Revisión 2026-08-04: S0393 salió de esta lista (cierra exacto tras reasignar el recibo 2137 a
-// su cuenta correcta); S0312 entró (recibió ese mismo pago mal anotado). S010 y S048 mantienen
-// diferencia pero con motivo actualizado tras revisar recibo por recibo contra CARTERA y el
-// talonario físico. S0162, C021, S034, R079, R068 y S03351 tienen motivo reclasificado con más
-// detalle (mismos montos que antes).
+// Revisión 2026-08-04 (mañana): S0393 salió de esta lista (cierra exacto tras reasignar el
+// recibo 2137 a su cuenta correcta); S0312 entró (recibió ese mismo pago mal anotado). S010 y
+// S048 mantienen diferencia pero con motivo actualizado tras revisar recibo por recibo contra
+// CARTERA y el talonario físico. S0162, C021, S034, R079, R068 y S03351 tienen motivo
+// reclasificado con más detalle (mismos montos que antes).
+//
+// Revisión 2026-08-04 (tarde): cambio de diseño -- el saldo a favor deja de restar la deuda por
+// su cuenta sola (ver CarteraService.registrarAbono/redimirCredito); paso11-conciliacion.js ahora
+// suma saldoCreditoDisponible al target, igual que ya hacía con el punto de conexión, así que el
+// crédito no aplicado no aparece como "diferencia sin explicar". Sin ese ajuste, 68 cuentas más
+// (sin ninguna otra causa real) mostraban diferencia == su propio crédito disponible, al peso.
+// R079 (-15.000, antes se veía -5.000) y S03351 (2.000, antes se veía 52.000) recuperaron su
+// valor real al excluir el crédito. C021 se corrige de "$310.000" a "$275.000" en el texto: era
+// un error aritmético de esta sesión (155.000 + 120.000 = 275.000), no del sistema.
 const MOTIVOS_DIFERENCIA = {
   S0312: 'El recibo 2137 ($270.000, 22 de marzo de 2025) estaba anotado a nombre de esta cuenta ' +
     'en CARTERA, pero pertenece al cuarto punto de la familia Ospina, cuenta S0393: este predio ' +
@@ -42,7 +51,7 @@ const MOTIVOS_DIFERENCIA = {
     '($10.000) desde enero de 2024 -- a propósito, no es un descuadre.',
   C021: '$155.000 por corrección de tarifa derogada (la misma que R080/R091/S0244), más ' +
     '$120.000 por error aritmético en CARTERA (saldo 2025 escrito en $0 cuando debía ser ' +
-    '$120.000). Nunca ha registrado ningún pago: debe $310.000. Es la mayor diferencia de todo ' +
+    '$120.000). Nunca ha registrado ningún pago: debe $275.000. Es la mayor diferencia de todo ' +
     'el proyecto.',
   S0162: 'Error aritmético en CARTERA: en 2024 el saldo debía ser $240.000 ($120.000 previos + ' +
     '$120.000 causados, sin pagos) y se escribió $30.000. El error se arrastra a los años ' +
