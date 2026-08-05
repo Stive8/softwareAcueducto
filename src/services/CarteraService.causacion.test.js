@@ -89,16 +89,33 @@ test('asegurarCausacion no causa meses anteriores al primer recibo', () => {
   }
 });
 
-test('asegurarCausacion no causa nada si la cuenta no tiene ningún recibo', () => {
+test('asegurarCausacion, sin recibos ni cargos previos, usa fecha_creacion de la cuenta como ancla', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const cuentaId = sembrarCuenta(ctx.dbService, { desde: '2020-01-01', fechaPrimerRecibo: null });
+    const db = ctx.dbService.getDb();
+    const fechaCreacion = db.prepare(`SELECT fecha_creacion FROM cuentas WHERE id = ?`).get(cuentaId).fecha_creacion;
+    const { anio, mes } = { anio: Number(fechaCreacion.slice(0, 4)), mes: Number(fechaCreacion.slice(5, 7)) };
+    const service = new CarteraService(ctx.dbService);
+
+    const r = service.asegurarCausacion(cuentaId, anio, mes);
+
+    assert.equal(r.creados, 1, 'solo el mes de fecha_creacion, no hay recibo ni cargo anteriores que la anclen antes');
+    assert.ok(service.repository.getCargoMensual(cuentaId, anio, mes));
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getFechaInicioFacturacion cae a fecha_creacion si la cuenta no tiene ni cargos ni recibos', () => {
   const ctx = crearDbTemporal();
   try {
     const cuentaId = sembrarCuenta(ctx.dbService, { fechaPrimerRecibo: null });
+    const db = ctx.dbService.getDb();
+    const fechaCreacion = db.prepare(`SELECT fecha_creacion FROM cuentas WHERE id = ?`).get(cuentaId).fecha_creacion;
     const service = new CarteraService(ctx.dbService);
 
-    const r = service.asegurarCausacion(cuentaId, 2026, 7);
-
-    assert.equal(r.creados, 0);
-    assert.ok(r.omitidos.some(o => /sin ancla de facturación/.test(o.motivo)));
+    assert.equal(service.getFechaInicioFacturacion(cuentaId), fechaCreacion.split(' ')[0]);
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -218,6 +235,22 @@ test('getFechaInicioFacturacion devuelve la fecha del primer recibo e ignora los
 
     const service = new CarteraService(ctx.dbService);
     assert.equal(service.getFechaInicioFacturacion(cuentaId), '2023-05-10');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getFechaInicioFacturacion prefiere el primer CargoMensual sobre el primer recibo: la causación es la causa, el pago es la consecuencia', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const cuentaId = sembrarCuenta(ctx.dbService, { desde: '2022-01-01', fechaPrimerRecibo: '2024-03-10' });
+    const service = new CarteraService(ctx.dbService);
+    service.repository.crearMovimiento({
+      cuentaId, fecha: '2022-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2022, mes: 1
+    });
+
+    assert.equal(service.getFechaInicioFacturacion(cuentaId), '2022-01-01',
+      'el cargo causado en 2022 ancla antes que el recibo de 2024, aunque el recibo sea anterior en la tabla de recibos');
   } finally {
     cerrarDbTemporal(ctx);
   }

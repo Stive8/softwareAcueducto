@@ -27,16 +27,32 @@ class CarteraService {
     this.nuevoPuntoRepository = new NuevoPuntoRepository(dbService);
   }
 
-  // Ancla de facturación: el mes del primer recibo de la cuenta (no el primer mes de
-  // pago_periodos). Hay cuentas reales con recibos -- abonos a la deuda, pagos de conexión --
-  // que nunca se atribuyeron a un mes concreto, así que pago_periodos no sirve como ancla.
-  // Excluye los recibos anulados: un recibo anulado nunca representó un cobro real.
+  // Ancla de facturación: cuándo EMPEZÓ A FACTURARSE la cuenta, no cuándo pagó por primera vez
+  // (el pago es consecuencia, no causa). Prioridad:
+  //   1. Primer CargoMensual en cartera_movimientos -- es la fuente de verdad de cuándo se
+  //      empezó a causar sostenimiento, exista o no un pago encima.
+  //   2. Si no hay cargos causados todavía: primer recibo (aproximación -- casi toda cuenta
+  //      con historial real ha pagado alguna vez, pero conceptualmente es un sustituto).
+  //      Excluye los recibos anulados: un recibo anulado nunca representó un cobro real.
+  //   3. Si no hay ni cargos ni recibos (cuenta recién dada de alta, sin nada facturado aún):
+  //      fecha_creacion de la cuenta. Nota: en cuentas migradas desde el talonario físico esto
+  //      es la fecha del lote de importación, no una fecha de alta real -- solo es correcto
+  //      para cuentas nuevas creadas una por una desde la app.
   getFechaInicioFacturacion(cuentaId) {
-    const fila = this.db.prepare(`
+    const cargo = this.db.prepare(`
+      SELECT MIN(fecha) AS f FROM cartera_movimientos
+      WHERE cuenta_id = ? AND tipo = 'CargoMensual'
+    `).get(cuentaId);
+    if (cargo && cargo.f) return String(cargo.f).split(' ')[0];
+
+    const recibo = this.db.prepare(`
       SELECT MIN(fecha_recibo) AS f FROM recibos
       WHERE cuenta_id = ? AND estado != 'Anulado'
     `).get(cuentaId);
-    return fila && fila.f ? String(fila.f).split(' ')[0] : null;
+    if (recibo && recibo.f) return String(recibo.f).split(' ')[0];
+
+    const cuenta = this.db.prepare(`SELECT fecha_creacion AS f FROM cuentas WHERE id = ?`).get(cuentaId);
+    return cuenta && cuenta.f ? String(cuenta.f).split(' ')[0] : null;
   }
 
   // Estado del período contable de un mes, o null si el período todavía no existe (en ese
@@ -208,10 +224,19 @@ class CarteraService {
   }
 
   // La cifra principal: SOLO responde "¿cuánto paga esta persona hoy por su cuota corriente?".
-  // Meses transcurridos entre el último mes cubierto (exclusive) y el actual (inclusive), a la
-  // tarifa vigente de cada mes -- calculado en vivo, sin depender de que asegurarCausacion ya
-  // haya corrido para esos meses. Salta los meses en que la cuenta no estaba Activa, igual que
-  // asegurarCausacion. Nunca incluye deuda anterior al corte, punto de conexión ni saldo a favor.
+  // Meses transcurridos entre el último mes cubierto (exclusive) y el actual (inclusive).
+  // Nunca incluye deuda anterior al corte, punto de conexión ni saldo a favor.
+  //
+  // Si el mes YA tiene un CargoMensual causado, ese monto es la verdad y se usa tal cual --
+  // nunca se recalcula contra categoria_tarifas. Hay causaciones deliberadas que ninguna tarifa
+  // vigente reproduce: tarifa derogada corregida (C021/R080/R091/S0244), cuentas suspendidas
+  // causadas a una tarifa reducida a propósito, o meses con un monto fraccionario que no sale de
+  // ninguna tarifa. Recalcular en vivo perdería esas decisiones.
+  //
+  // Solo se recalcula en vivo (vía categoria_tarifas) el mes que todavía NO se ha causado -- y
+  // solo si la cuenta estaba Activa en ese mes, igual que asegurarCausacion. Si no hay tarifa
+  // vigente para un mes que lo necesita, el mes se salta pero queda registrado en
+  // mesesSinTarifa y se deja un console.warn: no puede pasar desapercibido.
   calcularAPagar(cuentaId, cubiertoHasta) {
     const ahora = new Date();
     const periodoActualCod = codificarPeriodo(ahora.getFullYear(), ahora.getMonth() + 1);
@@ -221,21 +246,44 @@ class CarteraService {
       desdeCod = codificarPeriodo(cubiertoHasta.anio, cubiertoHasta.mes) + 1;
     } else {
       const ancla = this.getFechaInicioFacturacion(cuentaId);
-      if (!ancla) return { meses: [], total: 0 };
+      if (!ancla) return { meses: [], total: 0, mesesSinTarifa: [] };
       const inicio = anioMesDeFecha(ancla);
       desdeCod = codificarPeriodo(inicio.anio, inicio.mes);
     }
 
     const meses = [];
+    const mesesSinTarifa = [];
     for (let cod = desdeCod; cod <= periodoActualCod; cod++) {
       const { anio, mes } = decodificarPeriodo(cod);
+
+      const cargo = this.repository.getCargoMensual(cuentaId, anio, mes);
+      if (cargo) {
+        meses.push({ anio, mes, valor: cargo.monto });
+        continue;
+      }
+
       if (this.estadoRepository.estadoEnMes(cuentaId, anio, mes) !== 'Activo') continue;
+
       const tarifa = this.pagoRepository.getCategoriaTarifaParaMes(cuentaId, anio, mes);
-      if (!tarifa) continue;
+      // 'Sin clasificar' tiene una fila en categoria_tarifas (monto $1) que es un marcador de
+      // importación histórica, no una tarifa real (ver migración 038). Tratarla como tarifa
+      // válida generaría meses "a pagar" fantasma de $1 para toda cuenta que siga sin
+      // reclasificar -- se trata igual que no tener tarifa: se salta y se alerta.
+      if (!tarifa || tarifa.categoria_nombre === 'Sin clasificar') {
+        mesesSinTarifa.push({ anio, mes });
+        console.warn(
+          `[CarteraService.calcularAPagar] cuenta ${cuentaId}: ${!tarifa
+            ? 'no hay tarifa vigente ni CargoMensual causado'
+            : 'la cuenta sigue en la categoría placeholder "Sin clasificar" (sin CargoMensual causado)'
+          } para ${anio}-${String(mes).padStart(2, '0')} -- ese mes no entra en "a pagar". ` +
+          `Revisar categoria_tarifas / reclasificar la cuenta.`
+        );
+        continue;
+      }
       meses.push({ anio, mes, valor: tarifa.tarifa_sostenimiento });
     }
 
-    return { meses, total: redondear(meses.reduce((s, m) => s + m.valor, 0)) };
+    return { meses, total: redondear(meses.reduce((s, m) => s + m.valor, 0)), mesesSinTarifa };
   }
 
   // Estado de la cartera de una cuenta. La cifra principal (aPagar) es la única que se destaca:
@@ -246,7 +294,7 @@ class CarteraService {
     const { deudaExigible, saldoOpaco } = this.repository.getSaldos(cuentaId);
     const cubiertoHasta = calcularCubiertoHasta(this.repository.getCargosConCobertura(cuentaId, 1));
     const totalCobrarHoy = deudaExigible > 0 ? deudaExigible : 0;
-    const { meses: mesesAPagar, total: aPagar } = this.calcularAPagar(cuentaId, cubiertoHasta);
+    const { meses: mesesAPagar, total: aPagar, mesesSinTarifa } = this.calcularAPagar(cuentaId, cubiertoHasta);
 
     const deudaPuntoConexion = redondear(
       this.nuevoPuntoRepository.findByCuentaId(cuentaId)
@@ -266,6 +314,10 @@ class CarteraService {
       ultimoMesCubierto: cubiertoHasta,
       aPagar,
       mesesAPagar,
+      // Meses que se saltaron de aPagar por no tener ni CargoMensual causado ni tarifa vigente
+      // (ver console.warn de calcularAPagar). Vacío en el caso normal; si no está vacío, aPagar
+      // está subestimado y hay que completar categoria_tarifas para esa categoría/fecha.
+      mesesSinTarifa,
 
       // Avisos independientes: cada uno con su propia acción, ninguno entra en aPagar.
       deudaAntes2024: saldoOpaco,
