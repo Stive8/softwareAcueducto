@@ -13,14 +13,15 @@ Base: `carga_inicial_cartera.json` revisión 5. Ejecutado sobre la copia de trab
 | Puntos con saldo pendiente | 17 — 3.334.000 | 17 — 3.334.000 | ✅ |
 | Apertura opaca sostenimiento: deuda | 26.346.000 | 26.346.000 | ✅ |
 | Apertura opaca sostenimiento: saldos a favor | −697.000 | −697.000 | ✅ |
-| Cuentas que cuadran exacto | 286 de 306 | **283 de 295 evaluadas** (+10 sin target, +1 excluida S0332S0382) | ver nota |
+| Cuentas que cuadran exacto | 286 de 306 | **282 de 295 evaluadas** (+10 sin target, +1 excluida S0332S0382) | ver nota |
 | Cuentas con alertas | 41 | **54** | ❌ ver hallazgo 6.5 |
 
-Nota sobre "283 de 295": el MD cuenta 306 - 10 sin fila en CARTERA = 296, pero excluyendo
+Nota sobre "282 de 295": el MD cuenta 306 - 10 sin fila en CARTERA = 296, pero excluyendo
 también `S0332S0382` (cuenta corrupta desactivada, nunca se evalúa) da 295 evaluadas. El
 MD anticipaba 286 cerrando exacto; después de la corrección de tarifa derogada (sección
-3.3) quedan 283 cerrando exacto y 12 con diferencia, las 12 completamente explicadas (13
-entradas en las tablas de la sección 3 — C021 acumula dos) — ver sección 3.
+3.3) y la corrección de la apertura opaca de S044 (sección 3.6, 2026-08-06) quedan 282
+cerrando exacto y 13 con diferencia, las 13 completamente explicadas (14 entradas en las
+tablas de la sección 3 — C021 acumula dos) — ver sección 3.
 
 ## 2. Fórmula final de conciliación
 
@@ -45,13 +46,14 @@ Término de punto (0 si la cuenta no tiene punto):
 - `cuadra_exacto:false` y la cuenta **no** tiene apertura opaca → restar `saldo_pendiente`
   del punto.
 
-## 3. Las 12 cuentas con diferencia (de 295 evaluadas), 13 entradas
+## 3. Las 13 cuentas con diferencia (de 295 evaluadas), 14 entradas
 
-Ninguna lleva `AjusteCargaInicial`. Las 12 están completamente explicadas: 1 (cuenta
+Ninguna lleva `AjusteCargaInicial`. Las 13 están completamente explicadas: 1 (cuenta
 equivocada) + 1 (pago real no registrado) + 1 (pago proyectado que nunca existió) + 4
-(desfase de período) + 2 (error aritmético) + 4 (tarifa) = 13 entradas sobre 12 cuentas
-únicas, porque C021 aparece dos veces (una en error aritmético, otra en tarifa — es la
-única cuenta con dos causas distintas sumadas).
+(desfase de período) + 2 (error aritmético) + 4 (tarifa) + 1 (apertura opaca que
+duplicaba el pendiente del punto) = 14 entradas sobre 13 cuentas únicas, porque C021
+aparece dos veces (una en error aritmético, otra en tarifa — es la única cuenta con dos
+causas distintas sumadas).
 
 **Revisión 2026-08-04:** se revisaron uno por uno, contra CARTERA.xlsx y el talonario
 físico, los 4 recibos detrás de S0393, S048 y S010 (los tres con la categoría más débil
@@ -134,7 +136,7 @@ trae la propia hoja, el resultado no coincide con el `saldo_final` que CARTERA e
 | Cuenta | Diferencia | Verificación |
 |---|---|---|
 | S0162 | +210.000 | 2024: apertura(120.000) + causación(120.000) − pagos(0, sin recibos) = 240.000. CARTERA escribió 30.000. |
-| C021 (parte) | +120.000 | 2025: saldo previo(60.000, sin error) + causación(60.000) − pagos(0) = 120.000. CARTERA escribió 0. Ver 3.6. |
+| C021 (parte) | +120.000 | 2025: saldo previo(60.000, sin error) + causación(60.000) − pagos(0) = 120.000. CARTERA escribió 0. Ver 3.7. |
 
 ### 3.5 Explicadas — corrección de tarifa derogada, decisión de negocio (diferencia
 DELIBERADA, no descuadre)
@@ -149,7 +151,7 @@ una), con observación *"Tarifa corregida a la vigente 2024: CARTERA mantenia 5.
 
 | Cuenta | Diferencia | Detalle |
 |---|---|---|
-| **C021** | **+275.000** | 155.000 por la corrección de tarifa + 120.000 del error aritmético ya reportado en la fila de CARTERA (ver 3.6). **La mayor divergencia justificada del proyecto.** |
+| **C021** | **+275.000** | 155.000 por la corrección de tarifa + 120.000 del error aritmético ya reportado en la fila de CARTERA (ver 3.7). **La mayor divergencia justificada del proyecto.** |
 | R080 | +155.000 | Puro efecto de la corrección de tarifa. |
 | R091 | +155.000 | Puro efecto de la corrección de tarifa. |
 | S0244 | +155.000 | Puro efecto de la corrección de tarifa. |
@@ -160,7 +162,39 @@ EXISTE" / "NO ENCONTRADO" / "CASA ABANDONADA", casi todas sin tipo, sin coordena
 teléfono. Cuadran con el Excel y subirles la tarifa solo infla una cartera que la junta
 decidirá si castiga.
 
-### 3.6 C021 — la parte que no es tarifa, resuelta
+### 3.6 S044 — apertura opaca que en realidad era el pendiente del punto de conexión
+
+**Agregada 2026-08-06.** CARTERA arrastraba en el saldo de apertura al 31/12/2023 los
+$156.000 que en realidad eran el pendiente del punto de conexión, no deuda de
+sostenimiento. Verificado con la aritmética de CARTERA: saldo 31/12/2022 ($156.000) +
+causación 2023 ($240.000) − pagos 2023 ($240.000) = $156.000 sin moverse — el
+sostenimiento de 2023 estaba al día, ese arrastre no le pertenecía. El propio recibo 1296
+(dic-2022) lo dice textualmente: "PAGA ENERO A DICIEMBRE 2022 - PENDIENTE $156.000 DEL
+PUNTO". Encaja además con el precio del punto de S044 ($306.000 = $150.000 del recibo
+177/2018 + estos mismos $156.000), saldado por los tres abonos de $52.000 de 2024
+(recibos 1751, 1815, 1816).
+
+Se corrigió la apertura opaca a $0 (`paso9b-correcciones.js`, con nota explicando el
+motivo). Además, el recibo 2229 (jun-2025, $300.000) tenía el período mal cargado —
+"Junio 2025" a "Junio 2025" en vez de "Enero 2025" a "Junio 2025", pese a que su propio
+concepto dice "ENERIO A JUNIO 2025" — lo que hacía que el sobrante de ese abono se
+desviara hacia la apertura opaca (entonces todavía errónea) en vez de cubrir enero y
+febrero de 2025. Se corrigió el período y se reimputó el abono: con la apertura ya en 0,
+los $300.000 cubren exacto enero-junio 2025, sin sobrante.
+
+**Antes cuadraba con el Excel por casualidad**, porque ambos (el sistema y CARTERA)
+arrastraban el mismo error de origen. Corregido el nuestro, la diferencia se hace
+visible.
+
+| Cuenta | Diferencia |
+|---|---|
+| S044 | −156.000 |
+
+*Nota: S0339 tiene el mismo patrón textual en un recibo ("pendiente $100.000 del punto"),
+pero su aritmética de sostenimiento no cierra igual (ver sección 5) — no se tocó, para no
+borrar deuda real.*
+
+### 3.7 C021 — la parte que no es tarifa, resuelta
 
 Antes de la corrección de tarifa, C021 ya mostraba +120.000. Se descartó bug del paso 9
 (causaba correctamente a la tarifa vigente en el plan en ese momento) y se descartó punto
@@ -185,6 +219,11 @@ explicación.**
 - **Recibos 1659 y 1825 (S010)**: 1659 eliminado de cartera_movimientos (su efecto ya
   estaba en la apertura); 1825 pasó a abono libre. Los 3 abonos de S010 desde 2024 se
   recalcularon juntos, en orden cronológico (ver 3.2).
+- **Apertura opaca (S044)**: corregida de 156.000 a 0 -- duplicaba el pendiente del
+  punto de conexión, ver 3.6.
+- **Recibo 2229 (S044)**: período corregido de "Junio 2025 - Junio 2025" a "Enero 2025 -
+  Junio 2025" en `recibo_detalles`; el abono se reimputó contra el período correcto (ver
+  3.6).
 
 ## 4. Alertas del JSON: 54 cuentas (no 41)
 
@@ -261,6 +300,18 @@ una.)
    aplicación (modelar 4 tipos de deuda, permitir anular/editar recibos, reclasificar
    abonos entre punto y sostenimiento, etc.). Backlog de desarrollo, fuera del alcance de
    esta carga de datos.
+
+8. **S0339 — apertura opaca con una coincidencia sospechosa, sin tocar.** Agregado
+   2026-08-06, al revisar S044 (3.6). El texto del recibo 1312 (ene-2023) dice "ABONO AL
+   PUNTO DE AGUA, PENDIENTE $100.000" y coincide exacto con la apertura opaca de S0339
+   ($100.000) — el mismo patrón que resultó ser un error en S044. Pero aquí la
+   aritmética de sostenimiento de CARTERA sí cierra como deuda real: saldo 2022
+   ($205.000) + causación ($60.000) − pagos ($65.000: recibos 1313, 1499, 1603) =
+   $200.000, contra los $100.000 que el Excel escribió. Si hay error, parece que el Excel
+   escribió el pendiente del punto EN LUGAR del saldo de sostenimiento, no sumado encima
+   -- y S0339 arrancó en abril de 2022 con historial irregular, así que $200.000 es
+   plausible como deuda real. No se corrigió (ponerla en 0 podría borrar deuda real).
+   Queda para revisión manual contra el talonario físico.
 
 ## 6. Confirmación final
 
@@ -351,3 +402,17 @@ una.)
   Excel nunca registró ese pago) -- eso no cambia, porque `paso11` ya suma el crédito
   disponible al target: mover la plata de "deuda" a "crédito" dentro del sistema no mueve la
   brecha contra el Excel, solo la representa correctamente.
+- **S044, corregida 2026-08-06 (ver 3.6).** Encontrada al validar en pantalla el fix de
+  `getSaldos` (que reparte la deuda entre exigible y opaco por cargo, no por la etiqueta del
+  abono): la apertura opaca de S044 duplicaba el pendiente del punto de conexión, no era
+  deuda de sostenimiento. Verificada la aritmética de CARTERA (saldo 2022 + causación 2023 −
+  pagos 2023 = 156.000 sin moverse, el mismo pendiente que el recibo 1296 atribuye al punto)
+  y confirmado contra el precio del punto ($306.000 = $150.000 + $156.000, saldado por los
+  tres abonos de 2024). Se corrigió la apertura a 0 y el período mal cargado del recibo 2229
+  (`paso9b-correcciones.js`, 2 correcciones nuevas, 4 tests). Al revisar el mismo patrón en
+  las demás 173 cuentas con apertura opaca, apareció una segunda coincidencia textual
+  (S0339, $100.000) -- pero su aritmética de sostenimiento sí cierra como deuda real, así
+  que NO se tocó (ver sección 5, punto 8). `paso11` recalculado: **282 cuadran exacto / 13
+  con diferencia** (antes 283/12) -- S044 entra a la lista en −156.000, exactamente el monto
+  de la corrección: antes cuadraba con el Excel por casualidad, porque ambos arrastraban el
+  mismo error de origen.

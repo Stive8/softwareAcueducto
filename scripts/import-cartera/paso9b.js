@@ -18,6 +18,8 @@ function main() {
   console.log(`Recibo 2137: ${r.reasignacion2137.reasignado ? 'reasignado de S0312 a S0393' : 'ya estaba en S0393'}`);
   console.log(`Recibo 2384: ${r.correccion2384.corregido ? 'período corregido a 2025' : 'ya estaba corregido'} (texto); ${r.reimputacion2384.reimputado ? 're-imputado contra 2025' : 'ya estaba re-imputado'} (modelo nuevo)`);
   console.log(`S010 (recibos 1659/1825): ${r.recalculoS010.yaCorregido ? 'ya estaba corregido' : `1659 eliminado, ${r.recalculoS010.abonos.length} abonos recalculados`}`);
+  console.log(`S044 apertura opaca: ${r.correccionAperturaS044.corregido ? 'corregida a 0' : 'ya estaba en 0'}`);
+  console.log(`Recibo 2229: ${r.correccionPeriodo2229.corregido ? 'período corregido a enero-junio 2025' : 'ya estaba corregido'} (texto); ${r.reimputacion2229.reimputado ? 're-imputado contra enero-junio 2025' : 'ya estaba re-imputado'}`);
 
   const outDir = path.join(__dirname, 'output');
   fs.mkdirSync(outDir, { recursive: true });

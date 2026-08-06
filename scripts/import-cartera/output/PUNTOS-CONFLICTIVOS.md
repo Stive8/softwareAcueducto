@@ -4,7 +4,7 @@ Este documento es para la junta y la administración. No tiene lenguaje técnico
 referencias internas del sistema — solo qué pasa con cada cuenta, cuánta plata hay de
 por medio, por qué se decidió así, y qué falta decidir.
 
-De las 295 cuentas que se pudieron comparar contra el Excel de CARTERA, 283 quedaron
+De las 295 cuentas que se pudieron comparar contra el Excel de CARTERA, 282 quedaron
 cuadradas al peso. Las otras 11 cuentas del sistema no tienen fila en ese Excel, así que
 no hay contra qué compararlas. Este documento cubre las que no cuadran, y las decisiones
 que quedaron pendientes.
@@ -13,7 +13,7 @@ que quedaron pendientes.
 
 ## 1. Cuentas cuyo saldo no coincide con el Excel, y por qué
 
-Doce cuentas quedan con una diferencia frente al Excel de CARTERA. Ninguna se "ajustó a
+Trece cuentas quedan con una diferencia frente al Excel de CARTERA. Ninguna se "ajustó a
 la fuerza" para que cuadrara — cada una tiene una explicación verificada, y se deja
 registrada así, con la diferencia visible, en vez de forzar el número.
 
@@ -113,7 +113,22 @@ fórmula dentro del propio Excel, anterior a esta carga.
 | S0162 | +$210.000 | En 2024, con lo que ya debía más lo que causó ese año y sin ningún pago, el saldo debía quedar en $240.000. CARTERA lo escribió en $30.000. El error se arrastra a 2025 y 2026: hoy debe $480.000, no los $270.000 que muestra el Excel — no ha pagado sostenimiento desde 2018. |
 | C021 (parte) | +$120.000 | En 2025, con la causación de ese año y sin pagos, el saldo debía quedar en $120.000. CARTERA lo escribió en $0. |
 
-### 1.7 Punto de conexión (ya resuelto, no aparece arriba)
+### 1.7 CARTERA confundió el pendiente del punto de conexión con deuda de sostenimiento
+
+CARTERA arrastraba en el saldo de apertura los $156.000 que en realidad eran el
+pendiente del punto de conexión (declarado textualmente en el recibo 1296 de dic-2022),
+no deuda de sostenimiento. Ese pendiente se cubrió con los tres abonos de $52.000 de
+2024. La apertura del sistema se corrigió a $0. La diferencia frente al Excel es de
+$156.000.
+
+| Cuenta | Diferencia | Qué pasó |
+|---|---|---|
+| S044 | −$156.000 | Apertura opaca corregida a 0 (duplicaba el pendiente del punto); antes cuadraba con el Excel por casualidad, porque ambos arrastraban el mismo error. |
+
+*(Ver sección 2 — S0339 tiene el mismo texto de recibo "pendiente del punto" pero su
+aritmética de sostenimiento no cierra igual, así que no se tocó.)*
+
+### 1.8 Punto de conexión (ya resuelto, no aparece arriba)
 
 Al principio, la mayor fuente de diferencias — más de 30 cuentas — era que CARTERA
 mezclaba en una sola columna la plata del sostenimiento (la cuota mensual) con la plata
@@ -146,6 +161,18 @@ referencia para inventarla.
 2021 y CARTERA no le dejó un saldo final registrado para 2026. No se pudo verificar si
 su deuda calculada es correcta porque no existe la cifra de CARTERA con la cual
 compararla.
+
+**S0339: apertura de sostenimiento con una coincidencia sospechosa, pero sin tocar.** Su
+apertura de $100.000 coincide textualmente con un recibo que dice "pendiente del punto"
+($100.000, ene-2023) — el mismo patrón que resultó ser un error en S044 (sección 1.7).
+Pero a diferencia de esa, aquí la aritmética de sostenimiento de CARTERA sí parece cerrar
+como deuda real: saldo 2022 ($205.000) + causación ($60.000) − pagos ($65.000: recibos
+1313, 1499 y 1603) = $200.000, contra los $100.000 que el Excel escribió — el error del
+Excel, si lo hay, parece haber sido escribir el pendiente del punto EN LUGAR DEL saldo de
+sostenimiento, no sumado encima. S0339 arrancó en abril de 2022 con historial irregular,
+así que $200.000 de deuda real es plausible. No se corrigió — ponerla en 0 podría borrar
+deuda real de sostenimiento. Queda marcada para que alguien la revise contra el talonario
+físico.
 
 ---
 

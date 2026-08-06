@@ -76,11 +76,33 @@
 //    a primera vista): S010 NO cierra -- queda debiendo 50.000 y la diferencia final es -90.000,
 //    exactamente el monto del recibo 1825 que CARTERA nunca registró (mismo patrón que S034).
 //
+// 8. S044: la apertura opaca ($156.000) NO era deuda de sostenimiento -- duplicaba el saldo
+//    pendiente del punto de agua. Verificado con la aritmética de CARTERA: saldo 31/12/2022
+//    ($156.000) + causación 2023 ($240.000) - pagos 2023 ($240.000) = $156.000 sin moverse, y
+//    ese mismo arrastre coincide exacto con el recibo 1296 (dic-2022): "PAGA ENERO A DICIEMBRE
+//    2022 - PENDIENTE $156.000 DEL PUNTO" -- el sostenimiento de 2022 estaba al día, lo
+//    pendiente era del punto. Encaja además con el precio del punto ($306.000 = $150.000 del
+//    recibo 177/2018 + estos mismos $156.000, saldados por los tres abonos de 52.000 en 2024).
+//    Se corrige la apertura a 0, con nota. NO se toca S0339 (mismo patrón textual -- recibo
+//    "PENDIENTE $100.000 DEL PUNTO" -- pero su aritmética SÍ cierra como deuda real de
+//    sostenimiento: saldo 2022 $205.000 + causación $60.000 - pagos $65.000 = $200.000, contra
+//    los $100.000 que trae CARTERA -- ahí el error del Excel fue escribir el pendiente del
+//    punto EN LUGAR DEL saldo de sostenimiento, no sumado. Queda marcada para revisión manual,
+//    no para esta corrección automática).
+//
+// 9. Recibo 2229 (S044): período mal cargado. El concepto dice "ENERIO A JUNIO 2025" (con el
+//    typo del texto original) pero periodo_desde/periodo_hasta quedaron ambos en "Junio 2025"
+//    en vez de "Enero 2025" a "Junio 2025". Por eso el paso 10 solo emparejó junio por período
+//    y el sobrante ($250.000) cayó al FIFO general, que gastó $156.000 en la apertura opaca
+//    (corrección 8, ya errónea) antes de llegar a enero/febrero de 2025. Se corrige el período
+//    y se reimputa el abono contra los 6 meses correctos -- con la apertura ya en 0, los
+//    $300.000 alcanzan exacto para enero-junio 2025, sin sobrante.
+//
 // Idempotente: antes de insertar, borra los CargoMensual existentes de la cuenta en los años
 // que va a recrear (2024-2026 completos para las 4 de tarifa; solo 2024 para S03311), así que
 // re-ejecutar da el mismo resultado sin duplicar ni acumular montos viejos. La asignación de
 // propietario de S0244 solo inserta si la cuenta sigue sin propietario activo. Las correcciones
-// 4 a 7 se detectan por si el movimiento/campo que tocan ya quedó en el estado corregido (ver
+// 4 a 9 se detectan por si el movimiento/campo que tocan ya quedó en el estado corregido (ver
 // cada bloque), así que repetir la corrida no duplica imputaciones ni revierte nada.
 const { normalizarCodigo } = require('./normalizar');
 const { primerDiaDelMes } = require('../../src/services/cartera/periodos');
@@ -135,6 +157,23 @@ const RECALCULO_S010 = {
     { numeroRecibo: 2151, periodoDesde: '2024-01', periodoHasta: '2024-12' },
     { numeroRecibo: 2302, periodoDesde: '2025-01', periodoHasta: '2025-12' }
   ]
+};
+
+const OBSERVACION_APERTURA_S044 =
+  'Apertura opaca corregida a 0: los 156.000 originales eran el saldo pendiente del punto de ' +
+  'agua (recibo 1296, dic-2022: "PENDIENTE $156.000 DEL PUNTO"), no deuda de sostenimiento -- ' +
+  'CARTERA lo arrastro por error en el saldo 31/12/2023. Ese pendiente del punto ya quedo ' +
+  'cubierto por los tres abonos de 2024 (recibos 1751, 1815, 1816, 52.000 c/u = 156.000).';
+
+const CORRECCION_APERTURA_S044 = {
+  codigoCuenta: 'S044',
+  montoNuevo: 0
+};
+
+const CORRECCION_PERIODO_RECIBO_2229 = {
+  numeroRecibo: 2229,
+  periodoDesdeNuevo: 'Enero 2025',
+  periodoHastaNuevo: 'Junio 2025'
 };
 
 function borrarCargoMensualDelAnio(db, cuentaId, anio) {
@@ -234,6 +273,9 @@ function ejecutarPaso9b({ dbService }) {
   let correccion2384 = null;
   let reimputacion2384 = null;
   let recalculoS010 = null;
+  let correccionAperturaS044 = null;
+  let correccionPeriodo2229 = null;
+  let reimputacion2229 = null;
 
   const transaccion = db.transaction(() => {
     // 1. S03311: causar 2024 completo a 10.000
@@ -407,16 +449,68 @@ function ejecutarPaso9b({ dbService }) {
 
       recalculoS010 = { yaCorregido: false, eliminado1659: abono1659.id, abonos: resultados };
     }
+
+    // 8. S044: la apertura opaca duplicaba el pendiente del punto de agua -- se corrige a 0.
+    const cuentaS044 = idPorCodigo.get(normalizarCodigo(CORRECCION_APERTURA_S044.codigoCuenta));
+    if (cuentaS044 === undefined) throw new Error('S044: no existe en la base -- ¿corrieron los pasos 1-2?');
+    const aperturaS044 = db.prepare(
+      `SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='AperturaOpaca'`
+    ).get(cuentaS044);
+    if (!aperturaS044) throw new Error('S044: no tiene movimiento AperturaOpaca -- ¿corrió el paso 5?');
+
+    if (aperturaS044.monto === CORRECCION_APERTURA_S044.montoNuevo) {
+      correccionAperturaS044 = { movId: aperturaS044.id, corregido: false };
+    } else {
+      repo.actualizarMontoMovimiento(aperturaS044.id, CORRECCION_APERTURA_S044.montoNuevo, OBSERVACION_APERTURA_S044);
+      correccionAperturaS044 = { movId: aperturaS044.id, corregido: true };
+    }
+
+    // 9. Recibo 2229 (S044): período mal cargado (junio-junio -> enero-junio 2025). Corrige el
+    // texto y luego reimputa el abono contra el período correcto -- con la apertura ya en 0
+    // (paso 8, que corre antes en esta misma transacción), el sobrante ya no tiene adónde
+    // desviarse.
+    const { detalleId: detalle2229 } = getReciboDetalle(db, CORRECCION_PERIODO_RECIBO_2229.numeroRecibo);
+    const actual2229 = db.prepare('SELECT periodo_desde, periodo_hasta FROM recibo_detalles WHERE id=?').get(detalle2229);
+    if (actual2229.periodo_desde === CORRECCION_PERIODO_RECIBO_2229.periodoDesdeNuevo &&
+        actual2229.periodo_hasta === CORRECCION_PERIODO_RECIBO_2229.periodoHastaNuevo) {
+      correccionPeriodo2229 = { detalleId: detalle2229, corregido: false };
+    } else {
+      db.prepare('UPDATE recibo_detalles SET periodo_desde=?, periodo_hasta=? WHERE id=?').run(
+        CORRECCION_PERIODO_RECIBO_2229.periodoDesdeNuevo, CORRECCION_PERIODO_RECIBO_2229.periodoHastaNuevo, detalle2229
+      );
+      correccionPeriodo2229 = { detalleId: detalle2229, corregido: true };
+    }
+
+    const abono2229 = getAbonoPorDetalle(db, detalle2229);
+    if (!abono2229) throw new Error(`Recibo ${CORRECCION_PERIODO_RECIBO_2229.numeroRecibo}: no tiene movimiento de Abono -- ¿corrió el paso 8?`);
+    const imputacionesActuales2229 = db.prepare(`
+      SELECT cg.anio, cg.mes, cg.tipo FROM cartera_imputaciones i JOIN cartera_movimientos cg ON cg.id = i.cargo_id
+      WHERE i.abono_id = ?
+    `).all(abono2229.id);
+    const yaImputadoCorrecto2229 = imputacionesActuales2229.length > 0 &&
+      imputacionesActuales2229.every(c => c.tipo === 'CargoMensual' && c.anio === 2025 && c.mes >= 1 && c.mes <= 6);
+    if (yaImputadoCorrecto2229) {
+      reimputacion2229 = { abonoId: abono2229.id, reimputado: false };
+    } else {
+      db.prepare('DELETE FROM cartera_imputaciones WHERE abono_id=?').run(abono2229.id);
+      const r = reimputarAbono(db, repo, {
+        abonoId: abono2229.id, cuentaId: abono2229.cuenta_id, monto: redondear(-abono2229.monto),
+        periodoDesde: '2025-01', periodoHasta: '2025-06'
+      });
+      reimputacion2229 = { abonoId: abono2229.id, reimputado: true, ...r };
+    }
   });
   transaccion();
 
   return {
     s03311Creados, tarifaCorregida, propietarioS0244,
-    reasignacion2137, correccion2384, reimputacion2384, recalculoS010
+    reasignacion2137, correccion2384, reimputacion2384, recalculoS010,
+    correccionAperturaS044, correccionPeriodo2229, reimputacion2229
   };
 }
 
 module.exports = {
   ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, OBSERVACION_S03311, OBSERVACION_TARIFA, PROPIETARIO_S0244,
-  REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010, reimputarAbono
+  REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
+  CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229, OBSERVACION_APERTURA_S044, reimputarAbono
 };

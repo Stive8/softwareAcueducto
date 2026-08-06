@@ -4,7 +4,8 @@ const { crearDbTemporal, cerrarDbTemporal } = require('../../src/testUtils/dbTem
 const CarteraRepository = require('../../src/repositories/CarteraRepository');
 const {
   ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, PROPIETARIO_S0244,
-  REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010
+  REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
+  CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229
 } = require('./paso9b-correcciones');
 
 function sembrarCuenta(db, codigo) {
@@ -123,6 +124,34 @@ function sembrarTodas(db) {
     periodoDesde: 'Enero 2025', periodoHasta: 'Diciembre 2025'
   });
   repo.crearMovimiento({ cuentaId: ids.S010, fecha: '2025-10-11', tipo: 'Abono', exigible: 1, monto: -120000, reciboDetalleId: r2302.detalleId });
+
+  // --- S044: apertura opaca duplicaba el pendiente del punto de agua (corrección 8) + recibo
+  // 2229 con período mal cargado (corrección 9). Se simula el estado real encontrado en
+  // producción: el paso 10 ya corrió con el período roto (solo junio matcheó) y el sobrante de
+  // $250.000 fue a FIFO -- $156.000 a la apertura opaca (entonces "válida") + $50.000 a enero +
+  // $44.000 a febrero (parcial), dejando marzo-mayo sin cubrir.
+  ids.S044 = sembrarCuenta(db, 'S044');
+  const aperturaS044Id = repo.crearMovimiento({ cuentaId: ids.S044, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 156000 });
+  ids.aperturaS044Id = aperturaS044Id;
+  for (let mes = 1; mes <= 6; mes++) {
+    repo.crearMovimiento({ cuentaId: ids.S044, fecha: `2025-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 50000, anio: 2025, mes });
+  }
+  const r2229 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: CORRECCION_PERIODO_RECIBO_2229.numeroRecibo, cuentaId: ids.S044, fecha: '2025-06-28',
+    valor: 300000, concepto: 'CUOTA DE SOSTENIMIENTO ENERIO A JUNIO 2025',
+    periodoDesde: 'Junio 2025', periodoHasta: 'Junio 2025'
+  });
+  ids.detalle2229Id = r2229.detalleId;
+  const abono2229Id = repo.crearMovimiento({
+    cuentaId: ids.S044, fecha: '2025-06-28', tipo: 'Abono', exigible: 1, monto: -300000, reciboDetalleId: r2229.detalleId
+  });
+  ids.abono2229Id = abono2229Id;
+  const cargosS044 = db.prepare(`SELECT id, mes FROM cartera_movimientos WHERE cuenta_id=? AND anio=2025 ORDER BY mes`).all(ids.S044);
+  const cargoS044 = mes => cargosS044.find(c => c.mes === mes).id;
+  repo.crearImputacion({ abonoId: abono2229Id, cargoId: cargoS044(6), monto: 50000 });
+  repo.crearImputacion({ abonoId: abono2229Id, cargoId: aperturaS044Id, monto: 156000 });
+  repo.crearImputacion({ abonoId: abono2229Id, cargoId: cargoS044(1), monto: 50000 });
+  repo.crearImputacion({ abonoId: abono2229Id, cargoId: cargoS044(2), monto: 44000 });
 
   return ids;
 }
@@ -461,6 +490,94 @@ test('paso9b: S010 -- idempotente, correr dos veces no reintroduce el abono de 1
     const repoCartera = new CarteraRepository(ctx.dbService);
     assert.equal(repoCartera.getSaldos(ids.S010).deudaExigible, 0);
     assert.equal(repoCartera.getSaldoCreditoDisponible(ids.S010), 30000, 'correr dos veces no duplica el crédito');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S044 -- corrige la apertura opaca a 0 y deja nota de por qué', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.correccionAperturaS044.corregido, true);
+    const apertura = db.prepare(`SELECT monto, observaciones FROM cartera_movimientos WHERE id=?`).get(ids.aperturaS044Id);
+    assert.equal(apertura.monto, 0);
+    assert.match(apertura.observaciones, /pendiente del punto de agua/i);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: recibo 2229 -- corrige el período a enero-junio 2025 sin tocar el concepto', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.correccionPeriodo2229.corregido, true);
+    const detalle = db.prepare(`SELECT concepto, periodo_desde, periodo_hasta FROM recibo_detalles WHERE id=?`).get(ids.detalle2229Id);
+    assert.equal(detalle.periodo_desde, 'Enero 2025');
+    assert.equal(detalle.periodo_hasta, 'Junio 2025');
+    assert.equal(detalle.concepto, 'CUOTA DE SOSTENIMIENTO ENERIO A JUNIO 2025', 'el concepto original (con el typo) no se toca');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: recibo 2229 -- reimputa contra enero-junio 2025 (con la apertura ya en 0, sin sobrante)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.reimputacion2229.reimputado, true);
+    assert.equal(r.reimputacion2229.periodoImputados, 6, 'los 6 meses de enero-junio 2025 quedan cubiertos');
+    assert.equal(r.reimputacion2229.fifoImputados, 0, '300.000 alcanza exacto para los 6 meses, sin sobrante FIFO');
+    assert.equal(r.reimputacion2229.creditoId, null, 'sin sobrante, no genera crédito');
+
+    const imps = db.prepare(`
+      SELECT cg.anio, cg.mes, cg.tipo, i.monto FROM cartera_imputaciones i
+      JOIN cartera_movimientos cg ON cg.id = i.cargo_id WHERE i.abono_id = ? ORDER BY cg.mes
+    `).all(ids.abono2229Id);
+    assert.equal(imps.length, 6);
+    assert.ok(imps.every(i => i.tipo === 'CargoMensual' && i.anio === 2025 && i.monto === 50000),
+      'ya no debe tocar la apertura opaca');
+    assert.deepEqual(imps.map(i => i.mes), [1, 2, 3, 4, 5, 6]);
+
+    const repoCartera = new CarteraRepository(ctx.dbService);
+    const saldos = repoCartera.getSaldos(ids.S044);
+    assert.equal(saldos.deudaExigible, 0, 'los 6 cargos de 2025 quedan totalmente cubiertos');
+    assert.equal(saldos.saldoOpaco, 0, 'la apertura corregida a 0 ya no aporta saldo opaco');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S044/2229 -- idempotente (apertura, texto y re-imputación)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.correccionAperturaS044.corregido, false);
+    assert.equal(r2.correccionPeriodo2229.corregido, false);
+    assert.equal(r2.reimputacion2229.reimputado, false);
+
+    const apertura = db.prepare(`SELECT monto FROM cartera_movimientos WHERE id=?`).get(ids.aperturaS044Id);
+    assert.equal(apertura.monto, 0);
+    const imps = db.prepare(`SELECT * FROM cartera_imputaciones WHERE abono_id=?`).all(ids.abono2229Id);
+    assert.equal(imps.length, 6, 'no debe duplicar ni volver a re-imputar en la segunda corrida');
   } finally {
     cerrarDbTemporal(ctx);
   }
