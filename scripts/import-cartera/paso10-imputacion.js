@@ -171,9 +171,14 @@ function ejecutarPaso10({ dbService, recibosJson }) {
         conSobrante.push({ ...c, sobrante: restante });
 
         // El sobrante no se queda como saldo a favor implícito: se recorta el Abono a lo
-        // realmente imputado y el resto pasa a cuenta_creditos, sin aplicarse solo.
+        // realmente imputado y el resto pasa a cuenta_creditos, sin aplicarse solo. Si no quedó
+        // nada imputado (monto final $0), se deja observación: una fila en $0 sin explicación
+        // confunde en el detalle de movimientos.
         const imputadoTotal = redondear(c.monto - restante);
-        repo.actualizarMontoMovimiento(c.abonoId, -imputadoTotal);
+        repo.actualizarMontoMovimiento(
+          c.abonoId, -imputadoTotal,
+          imputadoTotal === 0 ? `Recibo ${c.numeroRecibo}: convertido íntegro a saldo a favor (sin imputación)` : undefined
+        );
         const creditoId = repo.crearCredito({
           cuentaId: c.cuentaId, tipo: 'Abono', monto: restante, fecha: c.fecha,
           reciboDetalleId: c.reciboDetalleId,

@@ -227,11 +227,23 @@ class CarteraService {
   // Meses transcurridos entre el último mes cubierto (exclusive) y el actual (inclusive).
   // Nunca incluye deuda anterior al corte, punto de conexión ni saldo a favor.
   //
-  // Si el mes YA tiene un CargoMensual causado, ese monto es la verdad y se usa tal cual --
-  // nunca se recalcula contra categoria_tarifas. Hay causaciones deliberadas que ninguna tarifa
-  // vigente reproduce: tarifa derogada corregida (C021/R080/R091/S0244), cuentas suspendidas
-  // causadas a una tarifa reducida a propósito, o meses con un monto fraccionario que no sale de
-  // ninguna tarifa. Recalcular en vivo perdería esas decisiones.
+  // "Último mes cubierto" (cubiertoHasta) exige cobertura CONTIGUA desde el primer mes: se
+  // detiene en el primer hueco aunque meses posteriores ya estén pagados (ver
+  // calcularCubiertoHasta). Eso es correcto para esa cifra, pero significa que un mes DESPUÉS
+  // del hueco puede ya estar total o parcialmente pagado por una imputación que no siguió el
+  // orden cronológico (FIFO saltó al mes más viejo pendiente, no necesariamente el siguiente
+  // al hueco). Por eso cada mes ya causado se cobra por lo que REALMENTE le falta (monto menos
+  // lo ya imputado, vía getCargosConCobertura), no por su monto completo -- si no, se cobraría
+  // dos veces lo que ya se pagó fuera de orden. Regla que debe cumplirse siempre: deudaExigible
+  // (bucket "meses desde 2024") + la parte de aPagar que corresponde a meses aún no causados
+  // = aPagar total.
+  //
+  // Si el mes YA tiene causación (CargoMensual/AjusteCategoria/AjusteAsamblea), ese monto es la
+  // verdad y se usa tal cual -- nunca se recalcula contra categoria_tarifas. Hay causaciones
+  // deliberadas que ninguna tarifa vigente reproduce: tarifa derogada corregida
+  // (C021/R080/R091/S0244), cuentas suspendidas causadas a una tarifa reducida a propósito, o
+  // meses con un monto fraccionario que no sale de ninguna tarifa. Recalcular en vivo perdería
+  // esas decisiones.
   //
   // Solo se recalcula en vivo (vía categoria_tarifas) el mes que todavía NO se ha causado -- y
   // solo si la cuenta estaba Activa en ese mes, igual que asegurarCausacion. Si no hay tarifa
@@ -251,14 +263,19 @@ class CarteraService {
       desdeCod = codificarPeriodo(inicio.anio, inicio.mes);
     }
 
+    const coberturaPorMes = new Map(
+      this.repository.getCargosConCobertura(cuentaId, 1).map(c => [`${c.anio}-${c.mes}`, c])
+    );
+
     const meses = [];
     const mesesSinTarifa = [];
     for (let cod = desdeCod; cod <= periodoActualCod; cod++) {
       const { anio, mes } = decodificarPeriodo(cod);
 
-      const cargo = this.repository.getCargoMensual(cuentaId, anio, mes);
-      if (cargo) {
-        meses.push({ anio, mes, valor: cargo.monto });
+      const cobertura = coberturaPorMes.get(`${anio}-${mes}`);
+      if (cobertura) {
+        const pendiente = redondear(cobertura.monto - cobertura.cubierto);
+        if (esMayor(pendiente, 0)) meses.push({ anio, mes, valor: pendiente });
         continue;
       }
 

@@ -18,9 +18,12 @@ test('getSaldos separa la deuda exigible del saldo opaco', () => {
     const cuentaId = crearCuenta(ctx.dbService);
 
     repo.crearMovimiento({ cuentaId, fecha: '2021-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 180000 });
-    repo.crearMovimiento({ cuentaId, fecha: '2022-01-01', tipo: 'CargoMensual', exigible: 1, monto: 5000, anio: 2022, mes: 1 });
+    const cargoEne = repo.crearMovimiento({ cuentaId, fecha: '2022-01-01', tipo: 'CargoMensual', exigible: 1, monto: 5000, anio: 2022, mes: 1 });
     repo.crearMovimiento({ cuentaId, fecha: '2022-02-01', tipo: 'CargoMensual', exigible: 1, monto: 5000, anio: 2022, mes: 2 });
-    repo.crearMovimiento({ cuentaId, fecha: '2022-03-15', tipo: 'Abono', exigible: 1, monto: -3000 });
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2022-03-15', tipo: 'Abono', exigible: 1, monto: -3000 });
+    // getSaldos reparte por lo que dice cartera_imputaciones, no por la etiqueta del abono --
+    // simula que el paso de imputación ya corrió.
+    repo.crearImputacion({ abonoId, cargoId: cargoEne, monto: 3000 });
 
     const s = repo.getSaldos(cuentaId);
     assert.equal(s.deudaExigible, 7000);
@@ -30,13 +33,18 @@ test('getSaldos separa la deuda exigible del saldo opaco', () => {
   }
 });
 
-test('getSaldos devuelve deuda exigible negativa cuando hay saldo a favor', () => {
+test('getSaldos devuelve deuda exigible negativa cuando una recategorización hacia abajo deja un mes ya pagado por encima de lo que ahora debe', () => {
   const ctx = crearDbTemporal();
   try {
     const repo = new CarteraRepository(ctx.dbService);
     const cuentaId = crearCuenta(ctx.dbService);
-    repo.crearMovimiento({ cuentaId, fecha: '2026-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 1 });
-    repo.crearMovimiento({ cuentaId, fecha: '2026-01-05', tipo: 'Abono', exigible: 1, monto: -30000 });
+    const cargoId = repo.crearMovimiento({ cuentaId, fecha: '2026-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 1 });
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2026-01-05', tipo: 'Abono', exigible: 1, monto: -10000 });
+    repo.crearImputacion({ abonoId, cargoId, monto: 10000 });
+    // Recategorización hacia abajo sobre un mes ya pagado del todo: el AjusteCategoria negativo
+    // deja ese mes en -20.000 neto (no hay con qué imputar un ajuste negativo, es la fuente de
+    // saldo a favor implícito que describe CarteraService.getEstadoCartera).
+    repo.crearMovimiento({ cuentaId, fecha: '2026-01-06', tipo: 'AjusteCategoria', exigible: 1, monto: -20000, anio: 2026, mes: 1 });
     assert.equal(repo.getSaldos(cuentaId).deudaExigible, -20000);
   } finally {
     cerrarDbTemporal(ctx);
@@ -176,6 +184,40 @@ test('actualizarMontoMovimiento recorta el monto de un movimiento ya creado', ()
 
     const fila = ctx.dbService.getDb().prepare('SELECT monto FROM cartera_movimientos WHERE id = ?').get(abonoId);
     assert.equal(fila.monto, -10000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('actualizarMontoMovimiento sin tercer parámetro no toca observaciones', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2026-01-01', tipo: 'Abono', exigible: 1, monto: -60000, observaciones: 'original' });
+
+    repo.actualizarMontoMovimiento(abonoId, -10000);
+
+    const fila = ctx.dbService.getDb().prepare('SELECT monto, observaciones FROM cartera_movimientos WHERE id = ?').get(abonoId);
+    assert.equal(fila.monto, -10000);
+    assert.equal(fila.observaciones, 'original');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('actualizarMontoMovimiento con tercer parámetro reemplaza observaciones', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2026-01-01', tipo: 'Abono', exigible: 1, monto: -60000 });
+
+    repo.actualizarMontoMovimiento(abonoId, 0, 'Convertido íntegro a saldo a favor (sin imputación)');
+
+    const fila = ctx.dbService.getDb().prepare('SELECT monto, observaciones FROM cartera_movimientos WHERE id = ?').get(abonoId);
+    assert.equal(fila.monto, 0);
+    assert.equal(fila.observaciones, 'Convertido íntegro a saldo a favor (sin imputación)');
   } finally {
     cerrarDbTemporal(ctx);
   }

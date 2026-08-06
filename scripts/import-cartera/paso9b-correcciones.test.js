@@ -425,8 +425,10 @@ test('paso9b: S010 -- recalcula los 3 abonos restantes en orden cronológico (18
     assert.equal(abono1825.periodoImputados, 0, '1825 no tiene período: la pasada de MesesEspecificos ni corre');
     assert.equal(abono1825.fifoImputados, 0, '1825 sin período nunca entra al FIFO');
     assert.ok(abono1825.creditoId, 'el monto completo de 1825 generó un crédito');
-    const movimiento1825 = db.prepare('SELECT monto FROM cartera_movimientos WHERE id=?').get(abono1825.abonoId);
+    const movimiento1825 = db.prepare('SELECT monto, observaciones FROM cartera_movimientos WHERE id=?').get(abono1825.abonoId);
     assert.equal(movimiento1825.monto, 0, 'el Abono de 1825 queda en 0: nada se le imputó');
+    assert.match(movimiento1825.observaciones, /convertido íntegro a saldo a favor/i,
+      'un Abono en $0 debe explicar por qué en vez de quedar vacío');
 
     // Los otros dos SÍ generaron su crédito o cobertura vía período declarado, sin FIFO de por medio.
     for (const numeroRecibo of [2151, 2302]) {

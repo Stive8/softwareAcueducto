@@ -256,7 +256,7 @@ test('paso8: el recibo #1284 (SINCODIFICAR) se omite siempre aunque venga con ge
   }
 });
 
-test('paso8: el saldo de la cuenta refleja el abono (deudaMesesDesde2024 baja con el Abono)', () => {
+test('paso8: crea el Abono con el monto del recibo (la imputación real es del paso 10, todavía no corrió)', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -265,10 +265,14 @@ test('paso8: el saldo de la cuenta refleja el abono (deudaMesesDesde2024 baja co
     const carteraRepo = new CarteraRepository(ctx.dbService);
     carteraRepo.crearMovimiento({ cuentaId, fecha: '2024-05-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 5 });
 
-    ejecutarPaso8({ dbService: ctx.dbService, recibosJson: [registro()] });
+    const r = ejecutarPaso8({ dbService: ctx.dbService, recibosJson: [registro()] });
 
-    const { deudaExigible } = carteraRepo.getSaldos(cuentaId);
-    assert.equal(deudaExigible, 0, '10.000 de cargo - 10.000 de abono');
+    // getSaldos reparte por cartera_imputaciones (ver CarteraRepository.getSaldos), que todavía
+    // no existen a esta altura del pipeline -- eso es trabajo del paso 10, no del paso 8. Lo que
+    // sí puede verificar el paso 8 por sí solo es que el Abono quedó creado con el monto
+    // correcto del recibo.
+    const abono = db.prepare(`SELECT monto FROM cartera_movimientos WHERE id = ?`).get(r.movimientosCartera[0].movId);
+    assert.equal(abono.monto, -10000);
   } finally {
     cerrarDbTemporal(ctx);
   }

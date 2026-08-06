@@ -203,7 +203,11 @@ function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, peri
   let creditoId = null;
   if (esMayor(restante, 0)) {
     const movimiento = db.prepare('SELECT fecha, recibo_detalle_id FROM cartera_movimientos WHERE id=?').get(abonoId);
-    repo.actualizarMontoMovimiento(abonoId, -redondear(monto - restante));
+    const imputadoTotal = redondear(monto - restante);
+    repo.actualizarMontoMovimiento(
+      abonoId, -imputadoTotal,
+      imputadoTotal === 0 ? 'Convertido íntegro a saldo a favor (sin imputación)' : undefined
+    );
     creditoId = repo.crearCredito({
       cuentaId, tipo: 'Abono', monto: restante, fecha: movimiento.fecha,
       reciboDetalleId: movimiento.recibo_detalle_id,

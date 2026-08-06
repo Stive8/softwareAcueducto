@@ -23,3 +23,11 @@ test('motivosDiferencia: una cuenta sin diferencia documentada devuelve null', (
   assert.equal(getMotivoDiferencia('R068888'), null);
   assert.equal(getMotivoDiferencia('S9999'), null);
 });
+
+test('motivosDiferencia: cada texto deja explícito que el monto es la diferencia frente al Excel, no lo que se cobra', () => {
+  for (const codigo of LAS_12_CUENTAS) {
+    const motivo = getMotivoDiferencia(codigo);
+    assert.match(motivo, /diferencia frente al Excel/, `${codigo}: debe aclarar que el monto es la diferencia contra CARTERA`);
+    assert.doesNotMatch(motivo, /debe \$/i, `${codigo}: no debe afirmar "debe $X", eso lo calcula aPagar en vivo`);
+  }
+});

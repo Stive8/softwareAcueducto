@@ -84,8 +84,10 @@ test('paso10: sin período declarado NUNCA entra al FIFO -- el monto completo pa
 
     const cubiertoEne = db.prepare('SELECT COALESCE(SUM(monto),0) c FROM cartera_imputaciones WHERE cargo_id=?').get(cargoEne).c;
     assert.equal(cubiertoEne, 0, 'el cargo pendiente real se queda sin tocar: nadie decidió aplicarle este pago');
-    const movimiento = db.prepare('SELECT monto FROM cartera_movimientos WHERE id=?').get(abonoId);
+    const movimiento = db.prepare('SELECT monto, observaciones FROM cartera_movimientos WHERE id=?').get(abonoId);
     assert.equal(movimiento.monto, 0, 'el Abono se recorta a 0: nada se imputó');
+    assert.match(movimiento.observaciones, /convertido íntegro a saldo a favor/i,
+      'un Abono en $0 debe explicar por qué, no quedar vacío en el detalle de movimientos');
   } finally {
     cerrarDbTemporal(ctx);
   }

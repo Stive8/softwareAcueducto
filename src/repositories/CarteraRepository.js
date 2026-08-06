@@ -3,10 +3,12 @@ const { redondear } = require('../services/cartera/dinero');
 
 // Acceso a cartera_movimientos y cartera_imputaciones.
 //
-// Regla central: el SALDO sale de la suma de montos de los movimientos, nunca de las
-// imputaciones. Las imputaciones solo explican qué abono cubrió qué cargo. Gracias a esa
-// separación, un movimiento de contrapartida (AjusteCategoria negativo) corrige el saldo sin
-// que haya que deshacer ninguna imputación existente.
+// Regla central: el saldo TOTAL sale de la suma de montos de los movimientos, nunca de las
+// imputaciones -- un movimiento de contrapartida (AjusteCategoria negativo) corrige el saldo
+// sin que haya que deshacer ninguna imputación existente. Las imputaciones solo explican qué
+// abono cubrió qué cargo -- EXCEPTO para el reparto entre exigible y opaco de getSaldos, que sí
+// necesita mirarlas: un abono puede pagar cargos de los dos buckets a la vez y su propia
+// etiqueta `exigible` no alcanza para saber cuánto fue a cada uno (ver comentario de getSaldos).
 class CarteraRepository {
   constructor(dbService) {
     this.db = dbService.getDb();
@@ -30,8 +32,15 @@ class CarteraRepository {
   // Recorta el monto de un movimiento ya creado a lo que realmente terminó imputado (ver
   // paso10-imputacion.js y CarteraService.registrarAbono): el sobrante no se queda ahí como
   // saldo a favor implícito, se mueve a cuenta_creditos aparte.
-  actualizarMontoMovimiento(id, monto) {
-    this.db.prepare(`UPDATE cartera_movimientos SET monto = ? WHERE id = ?`).run(redondear(monto), id);
+  // observaciones es opcional: si se pasa, reemplaza el texto existente (útil para dejar
+  // constancia de por qué un movimiento quedó en $0 -- ver paso10-imputacion.js/paso9b).
+  actualizarMontoMovimiento(id, monto, observaciones = undefined) {
+    if (observaciones === undefined) {
+      this.db.prepare(`UPDATE cartera_movimientos SET monto = ? WHERE id = ?`).run(redondear(monto), id);
+    } else {
+      this.db.prepare(`UPDATE cartera_movimientos SET monto = ?, observaciones = ? WHERE id = ?`)
+        .run(redondear(monto), observaciones, id);
+    }
   }
 
   crearImputacion({ abonoId, cargoId, monto }) {
@@ -41,12 +50,29 @@ class CarteraRepository {
     return r.lastInsertRowid;
   }
 
+  // El saldo TOTAL (deudaExigible + saldoOpaco) sigue siendo la suma de los montos de los
+  // movimientos -- eso no cambió. Lo que cambió (2026-08-07) es el REPARTO entre los dos
+  // buckets: se decide por el cargo que efectivamente recibió cada imputación, no por la
+  // etiqueta `exigible` del abono que pagó. Un abono queda marcado exigible=1 si la mayoría de
+  // su imputación fue contra deuda exigible, pero cargosPendientesCombinados no separa los dos
+  // pools en el FIFO de respaldo: por sobrante, ese mismo abono puede terminar cubriendo parte
+  // de la apertura opaca (exigible=0). Sumar por la etiqueta del abono (como antes) dejaba la
+  // apertura opaca sin descontar -- se cobraba dos veces -- y deudaExigible subestimada por el
+  // mismo monto. La corrección: cada CARGO (no cada movimiento) se muestra por
+  // monto - cubierto, igual que ya hace getCargosConCobertura, y cada bucket es la suma de sus
+  // propios cargos netos. No se toca el abono ni se parte en dos -- cartera_imputaciones ya
+  // tiene el dato de a qué cargo fue cada peso.
   getSaldos(cuentaId) {
+    const tipos = CarteraRepository.TIPOS_CARGO.map(t => `'${t}'`).join(', ');
     const fila = this.db.prepare(`
       SELECT
-        COALESCE(SUM(CASE WHEN exigible = 1 THEN monto ELSE 0 END), 0) AS deuda_exigible,
-        COALESCE(SUM(CASE WHEN exigible = 0 THEN monto ELSE 0 END), 0) AS saldo_opaco
-      FROM cartera_movimientos WHERE cuenta_id = ?
+        COALESCE(SUM(CASE WHEN m.exigible = 1 THEN m.monto - COALESCE(imp.cubierto, 0) ELSE 0 END), 0) AS deuda_exigible,
+        COALESCE(SUM(CASE WHEN m.exigible = 0 THEN m.monto - COALESCE(imp.cubierto, 0) ELSE 0 END), 0) AS saldo_opaco
+      FROM cartera_movimientos m
+      LEFT JOIN (
+        SELECT cargo_id, SUM(monto) AS cubierto FROM cartera_imputaciones GROUP BY cargo_id
+      ) imp ON imp.cargo_id = m.id
+      WHERE m.cuenta_id = ? AND m.tipo IN (${tipos})
     `).get(cuentaId);
     return {
       deudaExigible: redondear(fila.deuda_exigible),
@@ -61,9 +87,11 @@ class CarteraRepository {
     `).get(cuentaId, anio, mes);
   }
 
-  // Tipos que representan algo cobrable. Los abonos y los castigos no se imputan.
+  // Tipos que representan algo cobrable (incluye ajustes que pueden ser negativos, como una
+  // recategorización hacia abajo o el residuo de conciliación de la carga inicial). Los abonos
+  // y los castigos (CastigoCartera) no se imputan, así que quedan fuera.
   static get TIPOS_CARGO() {
-    return ['CargoMensual', 'AjusteCategoria', 'AperturaOpaca', 'AjusteAsamblea'];
+    return ['CargoMensual', 'AjusteCategoria', 'AperturaOpaca', 'AjusteAsamblea', 'AjusteCargaInicial'];
   }
 
   // Cargos con saldo sin cubrir, del más antiguo al más nuevo. Los que no tienen mes
@@ -86,6 +114,13 @@ class CarteraRepository {
 
   // Todos los cargos con mes, cubiertos o no, para calcular "cubierto hasta". Agrupa por mes
   // sumando cargo + ajustes, porque un mes puede tener varias filas.
+  //
+  // AND m.mes IS NOT NULL es a propósito, no un descuido: un AjusteCategoria sin mes asignado
+  // (ej. cuenta R096, +3.000) es un caso legítimo del modelo -- un ajuste que no corresponde a
+  // un mes concreto -- y por eso mismo no puede aparecer en "último mes cubierto" ni en "a
+  // pagar" (que son, por diseño, listas de MESES). Sigue contando en deudaExigible vía
+  // getSaldos, que sí lo ve (no filtra por mes). No "arreglar" agregándolo aquí: rompería el
+  // contrato de esta función, que es estrictamente por mes.
   getCargosConCobertura(cuentaId, exigible) {
     const tipos = CarteraRepository.TIPOS_CARGO.map(t => `'${t}'`).join(', ');
     const filas = this.db.prepare(`

@@ -202,3 +202,44 @@ test('calcularAPagar no incluye meses en que la cuenta no estaba Activa', () => 
     cerrarDbTemporal(ctx);
   }
 });
+
+test('calcularAPagar no cobra dos veces un mes que un FIFO fuera de orden ya cubrió después del hueco', () => {
+  // Reproduce el caso real de R007: un abono cubre un mes viejo solo a medias (queda un
+  // hueco), y OTRO abono posterior, por FIFO, salta ese hueco pendiente y cubre por completo
+  // un mes MÁS NUEVO todavía. cubiertoHasta se detiene en el hueco (correcto, por diseño), pero
+  // el mes ya cubierto que viene después no debe volver a aparecer como "a pagar" completo.
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    db.prepare(`INSERT INTO cuentas (codigo, direccion, estado) VALUES ('T003', 'Vereda Test', 'Activo')`).run();
+    const cuentaId = db.prepare(`SELECT id FROM cuentas WHERE codigo = 'T003'`).get().id;
+
+    const estadoRepo = new CuentaEstadoRepository(ctx.dbService);
+    estadoRepo.sembrarVigenciaInicial({ cuentaId, estado: 'Activo', fechaInicio: '2026-01-01' });
+    estadoRepo.cambiarEstado({ cuentaId, estado: 'Suspendido', fechaInicio: '2026-04-01', motivo: 'test' });
+
+    const service = new CarteraService(ctx.dbService);
+    const cargoEnero = service.repository.crearMovimiento({ cuentaId, fecha: '2026-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 1 });
+    const cargoFebrero = service.repository.crearMovimiento({ cuentaId, fecha: '2026-02-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 2 });
+    const cargoMarzo = service.repository.crearMovimiento({ cuentaId, fecha: '2026-03-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 3 });
+
+    // Enero queda cubierto del todo.
+    const abono1 = service.repository.crearMovimiento({ cuentaId, fecha: '2026-01-15', tipo: 'Abono', exigible: 1, monto: -10000 });
+    service.repository.crearImputacion({ abonoId: abono1, cargoId: cargoEnero, monto: 10000 });
+
+    // Un segundo abono deja febrero a medias (4.000 de 10.000) pero, por FIFO, también cubre
+    // marzo por completo -- salta el hueco de febrero, tal como pasó con R007.
+    const abono2 = service.repository.crearMovimiento({ cuentaId, fecha: '2026-03-20', tipo: 'Abono', exigible: 1, monto: -14000 });
+    service.repository.crearImputacion({ abonoId: abono2, cargoId: cargoFebrero, monto: 4000 });
+    service.repository.crearImputacion({ abonoId: abono2, cargoId: cargoMarzo, monto: 10000 });
+
+    const estado = service.getEstadoCartera(cuentaId);
+    assert.deepEqual(estado.ultimoMesCubierto, { anio: 2026, mes: 1 }, 'se detiene en el hueco de febrero, aunque marzo ya esté pago');
+    assert.deepEqual(estado.mesesAPagar.map(m => `${m.anio}-${m.mes}: ${m.valor}`), ['2026-2: 6000'],
+      'febrero cobra solo lo que falta (6.000); marzo, ya cubierto del todo, no vuelve a aparecer');
+    assert.equal(estado.aPagar, 6000);
+    assert.equal(estado.deudaMesesDesde2024, 6000, 'la regla de consistencia: deudaExigible ya refleja exactamente lo pendiente');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
