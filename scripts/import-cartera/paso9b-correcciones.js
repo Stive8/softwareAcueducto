@@ -45,16 +45,25 @@
 //    que la cartera nueva ya lo cuenta bien bajo S0393. Efecto: S0393 cierra contra CARTERA;
 //    S0312 se abre con +270.000 (ver `motivosDiferencia.js`).
 //
-// 5. Recibo 2384 (S048) -- corregir el período del recibo de 2026 a 2025. Solo cambia
+// 5. Recibo 2384 (S048) -- corregir el período del recibo de 2026 a 2025. Cambia
 //    `recibo_detalles.periodo_desde/periodo_hasta` (lo que muestra "Historial de Aportes" del
 //    sistema viejo); el `concepto_original` ("...ENERO A DICIEMBRE 2026") se conserva intacto.
 //    Evidencia: la asociada paga una vez al año, a fin de año o comienzos del siguiente, sin
 //    fallar desde 2017 y sin adelantar nunca un año completo; CARTERA registra PAGOS EN 2025 =
-//    192.000, lo que confirma que este pago era de 2025, no de 2026. NO se re-imputa el abono
-//    contra otros cargos -- el saldo de una cuenta sale de la suma de los montos de sus
-//    movimientos, nunca de a qué cargo quedó imputado un abono, así que este cambio no mueve
-//    ningún número de la conciliación. S048 sigue con su diferencia de +192.000 documentada
-//    (CARTERA proyectó un tercer pago anual que nunca existió).
+//    192.000, lo que confirma que este pago era de 2025, no de 2026.
+//
+//    Corrección 2026-08-06: la primera versión de esto solo tocaba el texto de
+//    recibo_detalles y dejaba dicho (equivocadamente) que no hacía falta re-imputar porque "el
+//    saldo sale de la suma de los montos, no de a qué cargo quedó imputado un abono" -- cierto
+//    para el TOTAL de la conciliación (paso11, que sigue igual), pero falso para la cifra
+//    principal nueva (calcularAPagar), que sí depende de a qué mes quedó imputado cada abono.
+//    El abono seguía imputado contra su período ORIGINAL (2026, tal como decía el recibo antes
+//    de la corrección): 112.000 a ene-jul 2026 (los únicos meses de 2026 que existían al correr
+//    el paso 10) + 80.000 de sobrante FIFO contra la apertura opaca. Resultado: 2025 aparecía
+//    sin cubrir y ene-jul 2026 se cobraban dos veces. Ahora también se re-imputa contra el
+//    período ya corregido (2025 completo, 12 × 16.000 = 192.000 exacto, sin sobrante), igual
+//    que las correcciones 4, 6 y 7. La conciliación (paso11) no se mueve -- sigue siendo la
+//    suma de los mismos montos, solo cambia a qué cargo quedan atados.
 //
 // 6 y 7. Recibos 1659 y 1825 (S010) -- 1659 deja de generar movimiento de abono: su efecto ya
 //    está incorporado en el saldo de apertura al 31/12/2023 según CARTERA (que usó este recibo
@@ -219,6 +228,7 @@ function ejecutarPaso9b({ dbService }) {
   let propietarioS0244 = null;
   let reasignacion2137 = null;
   let correccion2384 = null;
+  let reimputacion2384 = null;
   let recalculoS010 = null;
 
   const transaccion = db.transaction(() => {
@@ -320,9 +330,8 @@ function ejecutarPaso9b({ dbService }) {
       reasignacion2137 = { abonoId: abono2137.id, reasignado: true, ...r };
     }
 
-    // 5. Recibo 2384 (S048): corregir el período de 2026 a 2025. Solo texto de recibo_detalles
-    // -- no cambia ningún cargo ni imputación (el saldo sale del monto, no de a qué cargo quedó
-    // imputado un abono), así que la diferencia de S048 sigue siendo +192.000.
+    // 5. Recibo 2384 (S048): corregir el período de 2026 a 2025. Corrige primero el texto de
+    // recibo_detalles (lo que ve el sistema viejo).
     const { detalleId: detalle2384 } = getReciboDetalle(db, CORRECCION_PERIODO_RECIBO_2384.numeroRecibo);
     const actual2384 = db.prepare('SELECT periodo_desde, periodo_hasta FROM recibo_detalles WHERE id=?').get(detalle2384);
     if (actual2384.periodo_desde === CORRECCION_PERIODO_RECIBO_2384.periodoDesdeNuevo &&
@@ -333,6 +342,28 @@ function ejecutarPaso9b({ dbService }) {
         CORRECCION_PERIODO_RECIBO_2384.periodoDesdeNuevo, CORRECCION_PERIODO_RECIBO_2384.periodoHastaNuevo, detalle2384
       );
       correccion2384 = { detalleId: detalle2384, corregido: true };
+    }
+
+    // 5b. Re-imputa el abono contra el período ya corregido (modelo nuevo). Idempotencia
+    // propia, independiente de la del texto: si sus imputaciones actuales ya son 12 meses de
+    // CargoMensual de 2025, ya corrió antes.
+    const abono2384 = getAbonoPorDetalle(db, detalle2384);
+    if (!abono2384) throw new Error(`Recibo ${CORRECCION_PERIODO_RECIBO_2384.numeroRecibo}: no tiene movimiento de Abono -- ¿corrió el paso 8?`);
+    const imputacionesActuales2384 = db.prepare(`
+      SELECT cg.anio, cg.mes, cg.tipo FROM cartera_imputaciones i JOIN cartera_movimientos cg ON cg.id = i.cargo_id
+      WHERE i.abono_id = ?
+    `).all(abono2384.id);
+    const yaImputado2025 = imputacionesActuales2384.length > 0 &&
+      imputacionesActuales2384.every(c => c.tipo === 'CargoMensual' && c.anio === 2025);
+    if (yaImputado2025) {
+      reimputacion2384 = { abonoId: abono2384.id, reimputado: false };
+    } else {
+      db.prepare('DELETE FROM cartera_imputaciones WHERE abono_id=?').run(abono2384.id);
+      const r = reimputarAbono(db, repo, {
+        abonoId: abono2384.id, cuentaId: abono2384.cuenta_id, monto: redondear(-abono2384.monto),
+        periodoDesde: '2025-01', periodoHasta: '2025-12'
+      });
+      reimputacion2384 = { abonoId: abono2384.id, reimputado: true, ...r };
     }
 
     // 6 y 7. S010: recibo 1659 sin abono (su efecto ya está en la apertura), recibo 1825 como
@@ -377,7 +408,7 @@ function ejecutarPaso9b({ dbService }) {
 
   return {
     s03311Creados, tarifaCorregida, propietarioS0244,
-    reasignacion2137, correccion2384, recalculoS010
+    reasignacion2137, correccion2384, reimputacion2384, recalculoS010
   };
 }
 

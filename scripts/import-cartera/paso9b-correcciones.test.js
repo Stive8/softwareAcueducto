@@ -56,14 +56,32 @@ function sembrarTodas(db) {
   repo.crearImputacion({ abonoId: abono2137Id, cargoId: cargoMarzoS0312.id, monto: 10000 });
   ids.abono2137Id = abono2137Id;
 
-  // --- Recibo 2384: S048, corregir período ---
+  // --- Recibo 2384: S048, corregir período. Se simula el estado real encontrado en
+  // producción: el paso 10 ya corrió con el período ORIGINAL (2026, tal como decía el recibo)
+  // -- 7 meses de 2026 (los únicos que existían) + el sobrante como FIFO contra la apertura
+  // opaca -- para que la re-imputación de la corrección tenga algo real que deshacer.
   ids.S048 = sembrarCuenta(db, 'S048');
+  repo.crearMovimiento({ cuentaId: ids.S048, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 102000 });
+  for (let mes = 1; mes <= 12; mes++) {
+    repo.crearMovimiento({ cuentaId: ids.S048, fecha: `2025-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 16000, anio: 2025, mes });
+  }
+  for (let mes = 1; mes <= 7; mes++) {
+    repo.crearMovimiento({ cuentaId: ids.S048, fecha: `2026-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 16000, anio: 2026, mes });
+  }
   const r2384 = sembrarRecibo(db, propietarioId, {
     numeroRecibo: CORRECCION_PERIODO_RECIBO_2384.numeroRecibo, cuentaId: ids.S048, fecha: '2026-01-17',
     valor: 192000, concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026',
     periodoDesde: 'Enero 2026', periodoHasta: 'Diciembre 2026'
   });
   ids.detalle2384Id = r2384.detalleId;
+  const abono2384Id = repo.crearMovimiento({
+    cuentaId: ids.S048, fecha: '2026-01-17', tipo: 'Abono', exigible: 1, monto: -192000, reciboDetalleId: r2384.detalleId
+  });
+  const cargos2026S048 = db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND anio=2026 ORDER BY mes`).all(ids.S048);
+  for (const c of cargos2026S048) repo.crearImputacion({ abonoId: abono2384Id, cargoId: c.id, monto: 16000 });
+  const aperturaS048 = db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND tipo='AperturaOpaca'`).get(ids.S048);
+  repo.crearImputacion({ abonoId: abono2384Id, cargoId: aperturaS048.id, monto: 80000 });
+  ids.abono2384Id = abono2384Id;
 
   // --- S010: recibos 1659, 1825, 2151, 2302 -- 24 meses de causación (2024+2025) a 10.000 ---
   ids.S010 = sembrarCuenta(db, 'S010');
@@ -319,7 +337,35 @@ test('paso9b: recibo 2384 -- corrige el período a 2025 sin tocar el concepto ni
   }
 });
 
-test('paso9b: recibo 2384 -- idempotente', () => {
+test('paso9b: recibo 2384 -- re-imputa el abono contra 2025 (modelo nuevo), no solo el texto', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.reimputacion2384.reimputado, true);
+    assert.equal(r.reimputacion2384.periodoImputados, 12, 'los 12 meses de 2025 quedan cubiertos');
+    assert.equal(r.reimputacion2384.fifoImputados, 0, '192.000 alcanza exacto para 2025, sin sobrante FIFO');
+    assert.equal(r.reimputacion2384.creditoId, null, 'sin sobrante, no genera crédito');
+
+    const imps = db.prepare(`
+      SELECT cg.anio, cg.mes, cg.tipo, i.monto FROM cartera_imputaciones i
+      JOIN cartera_movimientos cg ON cg.id = i.cargo_id WHERE i.abono_id = ? ORDER BY cg.anio, cg.mes
+    `).all(ids.abono2384Id);
+    assert.equal(imps.length, 12);
+    assert.ok(imps.every(i => i.tipo === 'CargoMensual' && i.anio === 2025 && i.monto === 16000),
+      'ya no debe tocar ni los meses de 2026 ni la apertura opaca');
+
+    const abono = db.prepare(`SELECT monto FROM cartera_movimientos WHERE id=?`).get(ids.abono2384Id);
+    assert.equal(abono.monto, -192000, 'el monto del movimiento no cambia, solo a qué cargo queda atado');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: recibo 2384 -- idempotente (texto y re-imputación)', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -329,6 +375,9 @@ test('paso9b: recibo 2384 -- idempotente', () => {
     const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
 
     assert.equal(r2.correccion2384.corregido, false);
+    assert.equal(r2.reimputacion2384.reimputado, false);
+    const imps = db.prepare(`SELECT * FROM cartera_imputaciones WHERE abono_id=?`).all(ids.abono2384Id);
+    assert.equal(imps.length, 12, 'no debe duplicar ni volver a re-imputar en la segunda corrida');
   } finally {
     cerrarDbTemporal(ctx);
   }

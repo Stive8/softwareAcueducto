@@ -16,7 +16,7 @@ function main() {
   }
   console.log(`S0244 propietario: ${r.propietarioS0244.creado ? 'asignado' : 'ya estaba asignado'}`);
   console.log(`Recibo 2137: ${r.reasignacion2137.reasignado ? 'reasignado de S0312 a S0393' : 'ya estaba en S0393'}`);
-  console.log(`Recibo 2384: ${r.correccion2384.corregido ? 'período corregido a 2025' : 'ya estaba corregido'}`);
+  console.log(`Recibo 2384: ${r.correccion2384.corregido ? 'período corregido a 2025' : 'ya estaba corregido'} (texto); ${r.reimputacion2384.reimputado ? 're-imputado contra 2025' : 'ya estaba re-imputado'} (modelo nuevo)`);
   console.log(`S010 (recibos 1659/1825): ${r.recalculoS010.yaCorregido ? 'ya estaba corregido' : `1659 eliminado, ${r.recalculoS010.abonos.length} abonos recalculados`}`);
 
   const outDir = path.join(__dirname, 'output');

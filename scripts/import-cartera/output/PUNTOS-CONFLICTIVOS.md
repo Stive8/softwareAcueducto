@@ -172,6 +172,17 @@ CARTERA. De los $3.918.000, **$1.085.000 corresponden al período de enero 2024 
 2026** ($155.000 por cuenta). Ese es el tramo que la junta puede decidir congelar; el
 resto es deuda anterior a 2024.
 
+**Decisión confirmada 2026-08-05 sobre S004:** al corregir la cifra "a pagar" se encontró
+que S004 arrastraba $19 de más (un placeholder de $1/mes de la categoría "Sin
+clasificar" filtrándose en los meses de 2025 en adelante). Ya corregido -- los $155.000
+de S004 en la tabla de arriba son limpios, sin ese residuo. Aparte, se evaluó si había
+que registrar en el sistema la suspensión real de S004 desde 2021-06-30 (hoy el sistema
+solo sabe que quedó suspendida desde agosto de 2026, por la carga inicial) y **se decidió
+explícitamente que no** -- causarle 2024-2026 con normalidad y dejarla en esta lista es
+el tratamiento acordado: los $155.000 de ese tramo son justamente la cifra que la junta
+necesita ver para decidir si castiga esta cartera. Si la junta decide congelarla, se hace
+con acta, no retroactivamente en el código.
+
 ---
 
 ## 4. Oportunidades detectadas
