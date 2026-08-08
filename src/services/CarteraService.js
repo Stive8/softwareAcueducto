@@ -45,6 +45,19 @@ class CarteraService {
     `).get(cuentaId);
     if (cargo && cargo.f) return String(cargo.f).split(' ')[0];
 
+    // El período más antiguo que el modelo viejo (pago_periodos) registra como pagado es una
+    // señal más precisa que la fecha de emisión del recibo: un recibo puede emitirse mucho
+    // después del período que cubre (pago atrasado/retroactivo pagado todo junto), pero el
+    // período elegido sigue siendo el mes real desde el que la cuenta se factura -- y por eso
+    // se consulta antes que "primer recibo".
+    const periodo = this.db.prepare(`
+      SELECT MIN(anio * 12 + (mes - 1)) AS cod FROM pago_periodos WHERE cuenta_id = ?
+    `).get(cuentaId);
+    if (periodo && periodo.cod !== null) {
+      const { anio, mes } = decodificarPeriodo(periodo.cod);
+      return primerDiaDelMes(anio, mes);
+    }
+
     const recibo = this.db.prepare(`
       SELECT MIN(fecha_recibo) AS f FROM recibos
       WHERE cuenta_id = ? AND estado != 'Anulado'

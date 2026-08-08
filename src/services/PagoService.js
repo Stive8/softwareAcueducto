@@ -5,6 +5,8 @@ const NuevoPuntoRepository = require('../repositories/NuevoPuntoRepository');
 const AsientoContableService = require('./AsientoContableService');
 const PeriodoContableRepository = require('../repositories/PeriodoContableRepository');
 const PeriodoContableService = require('./PeriodoContableService');
+const CarteraService = require('./CarteraService');
+const { MODOS } = require('./cartera/imputacion');
 
 const NOMBRES_MES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -59,6 +61,7 @@ class PagoService {
     this.nuevoPuntoRepository = new NuevoPuntoRepository(dbService);
     this.asientoContableService = new AsientoContableService(dbService);
     this.periodoContableService = new PeriodoContableService(new PeriodoContableRepository(dbService), dbService);
+    this.carteraService = new CarteraService(dbService);
   }
 
   formatPeriodo(anio, mes) {
@@ -230,6 +233,7 @@ class PagoService {
       this.repository.incrementarConsecutivoRecibo(numeroRecibo + 1);
 
       const grupos = this.agruparPeriodos(periodos);
+      let primerDetalleId = null;
       for (const grupo of grupos) {
         const primero = grupo.periodos[0];
         const ultimo = grupo.periodos[grupo.periodos.length - 1];
@@ -244,10 +248,38 @@ class PagoService {
           periodoHasta: this.formatPeriodo(ultimo.anio, ultimo.mes),
           valor: grupo.valor
         });
+        if (primerDetalleId === null) primerDetalleId = detalleId;
 
         for (const periodo of grupo.periodos) {
           this.repository.crearPeriodoPago(cuentaId, periodo.anio, periodo.mes, periodo.valor, detalleId, fechaPago);
         }
+      }
+
+      // Espejo en el motor de cartera nuevo: causar los meses que falten y abonarlos con la
+      // porción en efectivo de este pago. MesesEspecificos (no FIFO) porque el operador ya
+      // decidió, con anioInicio/mesInicio/cantidadMeses, exactamente qué meses cubre este recibo
+      // -- igual criterio que ya usa paso10-imputacion.js para los recibos con período declarado.
+      const ultimoPeriodo = periodos[periodos.length - 1];
+      const resultadoCausacion = this.carteraService.asegurarCausacion(cuentaId, ultimoPeriodo.anio, ultimoPeriodo.mes);
+      if (resultadoCausacion.omitidos.length > 0) {
+        throw new Error(
+          'No se pudo causar en el motor de cartera: ' +
+          resultadoCausacion.omitidos.map(o => `${o.anio}-${o.mes}: ${o.motivo}`).join('; ')
+        );
+      }
+
+      const cargosPendientesCartera = this.carteraService.repository.getCargosPendientes(cuentaId, 1);
+      const cargosDeEstePago = cargosPendientesCartera
+        .filter(c => periodos.some(p => p.anio === c.anio && p.mes === c.mes))
+        .map(c => c.id);
+
+      const montoEfectivoSostenimiento = totalACobrar - abonoConexion;
+      if (montoEfectivoSostenimiento > 0 && cargosDeEstePago.length > 0) {
+        this.carteraService.registrarAbono({
+          cuentaId, fecha: fechaPago, monto: montoEfectivoSostenimiento,
+          modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: cargosDeEstePago,
+          reciboDetalleId: primerDetalleId, usuarioId
+        });
       }
 
       if (creditoAplicado > 0) {
