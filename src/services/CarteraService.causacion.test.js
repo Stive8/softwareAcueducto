@@ -255,3 +255,46 @@ test('getFechaInicioFacturacion prefiere el primer CargoMensual sobre el primer 
     cerrarDbTemporal(ctx);
   }
 });
+
+test('getFechaInicioFacturacion prefiere el período más antiguo de pago_periodos (modelo viejo) sobre la fecha del recibo: un recibo puede emitirse después del período que cubre', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    // El recibo se emite en abril (pago atrasado pagado todo junto, como hace
+    // PagoService.registrarPagoSostenimiento), pero pago_periodos deja registrado que el mes
+    // más viejo efectivamente pagado es enero -- ese es el mes real desde el que se factura.
+    const cuentaId = sembrarCuenta(ctx.dbService, { fechaPrimerRecibo: '2026-04-01' });
+    db.prepare(`
+      INSERT INTO pago_periodos (cuenta_id, anio, mes, valor, fecha_pago) VALUES
+        (?, 2026, 1, 10000, '2026-04-01'),
+        (?, 2026, 2, 10000, '2026-04-01'),
+        (?, 2026, 3, 10000, '2026-04-01')
+    `).run(cuentaId, cuentaId, cuentaId);
+
+    const service = new CarteraService(ctx.dbService);
+    assert.equal(service.getFechaInicioFacturacion(cuentaId), '2026-01-01',
+      'el período de enero en pago_periodos ancla antes que la fecha de emisión del recibo (abril)');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getFechaInicioFacturacion sigue prefiriendo el primer CargoMensual aunque también haya pago_periodos', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuenta(ctx.dbService, { desde: '2022-01-01', fechaPrimerRecibo: '2024-03-10' });
+    db.prepare(`
+      INSERT INTO pago_periodos (cuenta_id, anio, mes, valor, fecha_pago) VALUES (?, 2023, 6, 10000, '2024-03-10')
+    `).run(cuentaId);
+    const service = new CarteraService(ctx.dbService);
+    service.repository.crearMovimiento({
+      cuentaId, fecha: '2022-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2022, mes: 1
+    });
+
+    assert.equal(service.getFechaInicioFacturacion(cuentaId), '2022-01-01',
+      'el cargo causado en 2022 sigue anclando antes que pago_periodos (2023), que a su vez es anterior al recibo (2024)');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

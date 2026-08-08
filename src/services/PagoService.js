@@ -7,6 +7,7 @@ const PeriodoContableRepository = require('../repositories/PeriodoContableReposi
 const PeriodoContableService = require('./PeriodoContableService');
 const CarteraService = require('./CarteraService');
 const { MODOS } = require('./cartera/imputacion');
+const { redondear, esMayor } = require('./cartera/dinero');
 
 const NOMBRES_MES = [
   'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
@@ -273,13 +274,42 @@ class PagoService {
         .filter(c => periodos.some(p => p.anio === c.anio && p.mes === c.mes))
         .map(c => c.id);
 
-      const montoEfectivoSostenimiento = totalACobrar - abonoConexion;
-      if (montoEfectivoSostenimiento > 0 && cargosDeEstePago.length > 0) {
-        this.carteraService.registrarAbono({
+      // Respaldo del check de arriba: asegurarCausacion puede devolver omitidos vacío y aun así
+      // no haber dejado un cargo PENDIENTE para alguno de los meses que este recibo va a cobrar.
+      // Dos casos reales: (1) el ancla de facturación cae DESPUÉS de alguno de los meses pedidos
+      // (ej. pagar diciembre de 2021 cuando la causación empieza en enero de 2022) -- el rango
+      // interno de asegurarCausacion se invierte y su bucle nunca corre, así que nunca llega a
+      // poblar omitidos; (2) la carga inicial ya cubrió ese mes por FIFO (paso10-imputacion.js)
+      // sin que exista una fila en pago_periodos para ese mes exacto, o con el cargo ya en cero
+      // -- getCargosPendientes lo filtra por no tener saldo. En cualquiera de los dos casos,
+      // cargosDeEstePago queda corto frente a periodos: nunca hay que seguir en silencio, mejor
+      // que el recibo no se registre a que se registre sin su espejo completo en cartera.
+      if (cargosDeEstePago.length !== periodos.length) {
+        throw new Error(
+          'No se pudo causar en el motor de cartera: se esperaban ' +
+          `${periodos.length} cargo(s) pendiente(s) para los meses de este recibo y solo se ` +
+          `encontraron ${cargosDeEstePago.length}`
+        );
+      }
+
+      const montoEfectivoSostenimiento = redondear(totalACobrar - abonoConexion);
+      if (montoEfectivoSostenimiento > 0) {
+        const resultadoAbono = this.carteraService.registrarAbono({
           cuentaId, fecha: fechaPago, monto: montoEfectivoSostenimiento,
           modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: cargosDeEstePago,
           reciboDetalleId: primerDetalleId, usuarioId
         });
+        // Si distribuir() dejó un sobrante, es porque cargosDeEstePago no absorbió el monto
+        // completo (ej. algún cargo ya traía saldo parcial de otro lado) -- CarteraService lo
+        // convertiría en un crédito fantasma en cuenta_creditos que el operador nunca pidió,
+        // mientras el modelo viejo ya muestra el recibo como pagado completo. Mismo criterio que
+        // arriba: no dejarlo pasar en silencio.
+        if (esMayor(resultadoAbono.sobrante, 0)) {
+          throw new Error(
+            'El motor de cartera no pudo imputar completa la porción en efectivo de este pago: ' +
+            `sobraron $${resultadoAbono.sobrante} sin poder aplicarse a los meses elegidos`
+          );
+        }
       }
 
       if (creditoAplicado > 0) {

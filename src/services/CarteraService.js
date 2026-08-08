@@ -31,13 +31,21 @@ class CarteraService {
   // (el pago es consecuencia, no causa). Prioridad:
   //   1. Primer CargoMensual en cartera_movimientos -- es la fuente de verdad de cuándo se
   //      empezó a causar sostenimiento, exista o no un pago encima.
-  //   2. Si no hay cargos causados todavía: primer recibo (aproximación -- casi toda cuenta
-  //      con historial real ha pagado alguna vez, pero conceptualmente es un sustituto).
-  //      Excluye los recibos anulados: un recibo anulado nunca representó un cobro real.
-  //   3. Si no hay ni cargos ni recibos (cuenta recién dada de alta, sin nada facturado aún):
-  //      fecha_creacion de la cuenta. Nota: en cuentas migradas desde el talonario físico esto
-  //      es la fecha del lote de importación, no una fecha de alta real -- solo es correcto
-  //      para cuentas nuevas creadas una por una desde la app.
+  //   2. Si no hay cargos causados todavía: el período más antiguo en pago_periodos (modelo
+  //      viejo). Es una señal más precisa que la fecha de emisión del recibo: un recibo puede
+  //      emitirse mucho después del período que cubre (pago atrasado/retroactivo pagado todo
+  //      junto, ej. PagoService.registrarPagoSostenimiento cobrando en abril tres meses de
+  //      enero-marzo), pero el período elegido sigue siendo el mes real desde el que la cuenta
+  //      se factura.
+  //   3. Si tampoco hay pago_periodos: primer recibo (aproximación -- casi toda cuenta con
+  //      historial real ha pagado alguna vez, pero conceptualmente es un sustituto; hay recibos
+  //      reales, ej. abonos a deuda o a punto de conexión, que nunca se atribuyen a un mes
+  //      concreto y por eso no aparecen en pago_periodos). Excluye los recibos anulados: un
+  //      recibo anulado nunca representó un cobro real.
+  //   4. Si no hay cargos, ni pago_periodos, ni recibos (cuenta recién dada de alta, sin nada
+  //      facturado aún): fecha_creacion de la cuenta. Nota: en cuentas migradas desde el
+  //      talonario físico esto es la fecha del lote de importación, no una fecha de alta real
+  //      -- solo es correcto para cuentas nuevas creadas una por una desde la app.
   getFechaInicioFacturacion(cuentaId) {
     const cargo = this.db.prepare(`
       SELECT MIN(fecha) AS f FROM cartera_movimientos
@@ -45,11 +53,6 @@ class CarteraService {
     `).get(cuentaId);
     if (cargo && cargo.f) return String(cargo.f).split(' ')[0];
 
-    // El período más antiguo que el modelo viejo (pago_periodos) registra como pagado es una
-    // señal más precisa que la fecha de emisión del recibo: un recibo puede emitirse mucho
-    // después del período que cubre (pago atrasado/retroactivo pagado todo junto), pero el
-    // período elegido sigue siendo el mes real desde el que la cuenta se factura -- y por eso
-    // se consulta antes que "primer recibo".
     const periodo = this.db.prepare(`
       SELECT MIN(anio * 12 + (mes - 1)) AS cod FROM pago_periodos WHERE cuenta_id = ?
     `).get(cuentaId);
