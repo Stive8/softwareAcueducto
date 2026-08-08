@@ -223,6 +223,45 @@ class CarteraService {
     });
   }
 
+  // Aplica un saldo a favor YA VALIDADO por el llamador contra cargos elegidos: deja el mismo
+  // rastro que redimirCredito (un Abono real + sus imputaciones + una fila 'Aplicado' en
+  // cuenta_creditos), pero sin volver a consultar/descontar el saldo disponible -- quien llama
+  // (PagoService.registrarPagoSostenimiento) ya lo hizo contra la MISMA tabla compartida
+  // (cuenta_creditos no tiene una copia por modelo, ver migración 041). A diferencia de
+  // redimirCredito (una acción de pantalla donde el operador elige cuánto redimir y el sistema
+  // decide contra qué por FIFO), acá el destino ya está decidido: los meses de este recibo.
+  aplicarCreditoAMeses({ cuentaId, monto, cargosElegidos, fecha, reciboDetalleId = null, usuarioId = null }) {
+    if (!cuentaId) throw new Error('La cuenta es obligatoria');
+    if (!fecha) throw new Error('La fecha es obligatoria');
+    if (!(Number(monto) > 0)) throw new Error('El monto a aplicar debe ser mayor a cero');
+    if (!cargosElegidos || cargosElegidos.length === 0) {
+      throw new Error('Debe elegir al menos un mes contra el cual aplicar el crédito');
+    }
+
+    return this.repository.transaccion(() => {
+      const cargos = this.repository.getCargosPendientes(cuentaId, 1);
+      const { imputaciones } = distribuir({ modo: MODOS.MESES_ESPECIFICOS, cargos, monto, cargosElegidos });
+      const imputado = redondear(imputaciones.reduce((s, i) => s + i.monto, 0));
+
+      if (!esMayor(imputado, 0)) {
+        throw new Error('Los meses elegidos no tienen deuda pendiente contra la cual aplicar este crédito');
+      }
+
+      const abonoId = this.repository.crearMovimiento({
+        cuentaId, fecha, tipo: 'Abono', exigible: 1, monto: -imputado, reciboDetalleId, usuarioId
+      });
+      for (const imp of imputaciones) {
+        this.repository.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
+      }
+
+      const creditoId = this.repository.crearCredito({
+        cuentaId, tipo: 'Aplicado', monto: imputado, fecha, reciboDetalleId, abonoMovimientoId: abonoId
+      });
+
+      return { abonoId, creditoId, aplicado: imputado, sobrante: redondear(monto - imputado) };
+    });
+  }
+
   // La cifra principal: SOLO responde "¿cuánto paga esta persona hoy por su cuota corriente?".
   // Meses transcurridos entre el último mes cubierto (exclusive) y el actual (inclusive).
   // Nunca incluye deuda anterior al corte, punto de conexión ni saldo a favor.
