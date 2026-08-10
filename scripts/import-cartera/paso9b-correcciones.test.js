@@ -6,7 +6,7 @@ const {
   ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, PROPIETARIO_S0244,
   REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
   CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229,
-  CAUSACION_S058, SUSPENSIONES_SIN_CARTERA
+  CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, INACTIVA_FUSIONADA_S063
 } = require('./paso9b-correcciones');
 
 function sembrarCuenta(db, codigo) {
@@ -170,6 +170,15 @@ function sembrarTodas(db) {
       VALUES (?, 'Activo', '2026-06-27', 'Estado inicial al migrar a cartera')
     `).run(ids[item.codigoCuenta]);
   }
+
+  // --- S063: fusionada con S0365, mismo marcador sintético que las 7 anteriores -- sin
+  // ningún movimiento de cartera (reproduce el caso real: categoría "Sin clasificar", cero
+  // CargoMensual, solo recibos viejos de 2019 que ya no importan).
+  ids.S063 = sembrarCuenta(db, INACTIVA_FUSIONADA_S063.codigoCuenta);
+  db.prepare(`
+    INSERT INTO cuenta_estados (cuenta_id, estado, fecha_inicio, motivo)
+    VALUES (?, 'Activo', '2026-06-27', 'Estado inicial al migrar a cartera')
+  `).run(ids.S063);
 
   return ids;
 }
@@ -696,6 +705,47 @@ test('paso9b: las 7 suspensiones son idempotentes -- correr dos veces no duplica
       const vigencias = db.prepare('SELECT * FROM cuenta_estados WHERE cuenta_id=?').all(ids[item.codigoCuenta]);
       assert.equal(vigencias.length, 1, `${item.codigoCuenta}: la segunda corrida no debe agregar una vigencia más`);
     }
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S063 (fusionada con S0365) queda Inactivo', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.inactivaS063.corregido, true);
+
+    const cuenta = db.prepare('SELECT estado FROM cuentas WHERE id=?').get(ids.S063);
+    assert.equal(cuenta.estado, 'Inactivo');
+
+    const vigencias = db.prepare('SELECT estado, fecha_inicio, fecha_fin, motivo FROM cuenta_estados WHERE cuenta_id=?').all(ids.S063);
+    assert.equal(vigencias.length, 1, 'el marcador sintético se reemplaza, no se apila');
+    assert.equal(vigencias[0].estado, 'Inactivo');
+    assert.equal(vigencias[0].fecha_inicio, INACTIVA_FUSIONADA_S063.fechaInicio);
+    assert.equal(vigencias[0].fecha_fin, null);
+    assert.match(vigencias[0].motivo, /[Ff]usionada con S0365/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S063 -- correr dos veces no duplica cuenta_estados', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.inactivaS063.corregido, false);
+    const vigencias = db.prepare('SELECT * FROM cuenta_estados WHERE cuenta_id=?').all(ids.S063);
+    assert.equal(vigencias.length, 1, 'la segunda corrida no debe agregar una vigencia más');
   } finally {
     cerrarDbTemporal(ctx);
   }

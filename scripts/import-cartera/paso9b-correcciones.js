@@ -118,14 +118,24 @@
 //    está marcada como cuenta corrupta desactivada desde el paso 1 (`construirPlan` la salta
 //    explícitamente), nunca tuvo cuenta_estados que corregir.
 //
+// 12. S063: fusionada con S0365 ("punto no existe, punto verdadero S0365" según CARTERA) --
+//    decisión ya tomada en la carga inicial, con la observación puesta en la cuenta, pero el
+//    `estado` se quedó en Activo por descuido (nunca se le tocó cuenta_estados). No es un hallazgo
+//    del reporte de Fase 2 (ver docs/superpowers/specs/2026-08-10-fase2-reportes-dashboard-design.md):
+//    el reporte solo expuso que esta cuenta, sin ningún movimiento de cartera ni tarifa vigente
+//    (categoría "Sin clasificar"), no debía seguir contando ni como al día ni como en mora -- el
+//    dato incompleto de la migración es este. Se pasa a Inactivo, mismo mecanismo que la
+//    corrección 11 (reemplaza el marcador sintético "Estado inicial al migrar a cartera", no hay
+//    historial real que preservar).
+//
 // Idempotente: antes de insertar, borra los CargoMensual existentes de la cuenta en los años
 // que va a recrear (2024-2026 completos para las 4 de tarifa; solo 2024 para S03311; feb-jul
 // 2026 para S058), así que re-ejecutar da el mismo resultado sin duplicar ni acumular montos
 // viejos. La asignación de propietario de S0244 solo inserta si la cuenta sigue sin propietario
 // activo. Las correcciones 4 a 9 se detectan por si el movimiento/campo que tocan ya quedó en el
 // estado corregido (ver cada bloque), así que repetir la corrida no duplica imputaciones ni
-// revierte nada. La corrección 11 se detecta por si la vigencia abierta de cuenta_estados ya es
-// exactamente el Suspendido esperado (mismo estado, misma fecha_inicio).
+// revierte nada. Las correcciones 11 y 12 se detectan por si la vigencia abierta de cuenta_estados
+// ya es exactamente la esperada (mismo estado, misma fecha_inicio).
 const { normalizarCodigo } = require('./normalizar');
 const { primerDiaDelMes } = require('../../src/services/cartera/periodos');
 const { distribuir, MODOS } = require('../../src/services/cartera/imputacion');
@@ -226,6 +236,13 @@ const SUSPENSIONES_SIN_CARTERA = [
   { codigoCuenta: 'S061', fechaInicio: '2021-05-01' },
   { codigoCuenta: 'S091', fechaInicio: '2021-06-01' }
 ];
+
+const OBSERVACION_INACTIVA_S063 =
+  'Fusionada con S0365 ("punto no existe, punto verdadero S0365" segun CARTERA): decision ya ' +
+  'tomada en la carga inicial (ver observaciones de la cuenta), pero el estado se quedo en ' +
+  'Activo por descuido -- corregido acá.';
+
+const INACTIVA_FUSIONADA_S063 = { codigoCuenta: 'S063', fechaInicio: '2026-06-27' };
 
 function borrarCargoMensualDelAnio(db, cuentaId, anio) {
   return db.prepare("DELETE FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=?")
@@ -329,6 +346,7 @@ function ejecutarPaso9b({ dbService }) {
   let reimputacion2229 = null;
   let correccionS058 = null;
   const suspensionesSinCartera = [];
+  let inactivaS063 = null;
 
   const transaccion = db.transaction(() => {
     // 1. S03311: causar 2024 completo a 10.000
@@ -617,6 +635,27 @@ function ejecutarPaso9b({ dbService }) {
 
       suspensionesSinCartera.push({ codigo: item.codigoCuenta, corregido: true });
     }
+
+    // 12. S063: fusionada con S0365, se quedó en Activo por descuido. Mismo mecanismo que la
+    // corrección 11 -- reemplaza el marcador sintético si no es ya exactamente el Inactivo
+    // esperado.
+    const cuentaS063 = idPorCodigo.get(normalizarCodigo(INACTIVA_FUSIONADA_S063.codigoCuenta));
+    if (cuentaS063 === undefined) throw new Error('S063: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+    const abiertaS063 = db.prepare(
+      'SELECT id, estado, fecha_inicio FROM cuenta_estados WHERE cuenta_id=? AND fecha_fin IS NULL'
+    ).get(cuentaS063);
+    if (abiertaS063 && abiertaS063.estado === 'Inactivo' && abiertaS063.fecha_inicio === INACTIVA_FUSIONADA_S063.fechaInicio) {
+      inactivaS063 = { corregido: false };
+    } else {
+      db.prepare('DELETE FROM cuenta_estados WHERE cuenta_id=?').run(cuentaS063);
+      db.prepare(`
+        INSERT INTO cuenta_estados (cuenta_id, estado, fecha_inicio, motivo) VALUES (?, 'Inactivo', ?, ?)
+      `).run(cuentaS063, INACTIVA_FUSIONADA_S063.fechaInicio, OBSERVACION_INACTIVA_S063);
+      db.prepare("UPDATE cuentas SET estado='Inactivo' WHERE id=?").run(cuentaS063);
+
+      inactivaS063 = { corregido: true };
+    }
   });
   transaccion();
 
@@ -624,7 +663,7 @@ function ejecutarPaso9b({ dbService }) {
     s03311Creados, tarifaCorregida, propietarioS0244,
     reasignacion2137, correccion2384, reimputacion2384, recalculoS010,
     correccionAperturaS044, correccionPeriodo2229, reimputacion2229,
-    correccionS058, suspensionesSinCartera
+    correccionS058, suspensionesSinCartera, inactivaS063
   };
 }
 
@@ -632,5 +671,6 @@ module.exports = {
   ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, OBSERVACION_S03311, OBSERVACION_TARIFA, PROPIETARIO_S0244,
   REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
   CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229, OBSERVACION_APERTURA_S044, reimputarAbono,
-  CAUSACION_S058, OBSERVACION_CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, OBSERVACION_SUSPENSION_SIN_CARTERA
+  CAUSACION_S058, OBSERVACION_CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, OBSERVACION_SUSPENSION_SIN_CARTERA,
+  INACTIVA_FUSIONADA_S063, OBSERVACION_INACTIVA_S063
 };

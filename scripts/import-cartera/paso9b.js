@@ -24,6 +24,7 @@ function main() {
   for (const s of r.suspensionesSinCartera) {
     console.log(`${s.codigo}: ${s.corregido ? 'suspendida' : 'ya estaba suspendida'} (sin fila en CARTERA, sin barrido de campo)`);
   }
+  console.log(`S063: ${r.inactivaS063.corregido ? 'pasada a Inactivo' : 'ya estaba Inactivo'} (fusionada con S0365)`);
 
   const outDir = path.join(__dirname, 'output');
   fs.mkdirSync(outDir, { recursive: true });

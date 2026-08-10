@@ -103,6 +103,40 @@ test('getIndicadoresBulk: una apertura opaca ya redimida a crédito (negativa) n
   }
 });
 
+test('getIndicadoresMoraTodas: trae cubiertoHasta, deudaExigible, deudaAntes2024 y deudaPuntoConexion por cada cuenta pedida', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const idConTodo = sembrarCuenta(db, 'T920');
+    const idSinNada = sembrarCuenta(db, 'T921');
+
+    const repo = new CarteraRepository(ctx.dbService);
+    repo.crearMovimiento({ cuentaId: idConTodo, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 80000 });
+    const cargo = repo.crearMovimiento({ cuentaId: idConTodo, fecha: '2026-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 1 });
+    const abonoId = repo.crearMovimiento({ cuentaId: idConTodo, fecha: '2026-01-05', tipo: 'Abono', exigible: 1, monto: -4000 });
+    repo.crearImputacion({ abonoId, cargoId: cargo, monto: 4000 });
+    const puntoRepo = new NuevoPuntoRepository(ctx.dbService);
+    puntoRepo.create({ cuentaId: idConTodo, valorTotal: 500000, fechaRegistro: '2026-01-01' });
+
+    const service = new CarteraService(ctx.dbService);
+    const indicadores = service.getIndicadoresMoraTodas([idConTodo, idSinNada]);
+
+    const deConTodo = indicadores.find(i => i.cuentaId === idConTodo);
+    assert.equal(deConTodo.cubiertoHasta, null, 'el cargo de enero quedó parcial, no cubierto');
+    assert.equal(deConTodo.deudaExigible, 6000, '10.000 - 4.000');
+    assert.equal(deConTodo.deudaAntes2024, 80000);
+    assert.equal(deConTodo.deudaPuntoConexion, 500000);
+
+    const deSinNada = indicadores.find(i => i.cuentaId === idSinNada);
+    assert.equal(deSinNada.cubiertoHasta, null);
+    assert.equal(deSinNada.deudaExigible, 0);
+    assert.equal(deSinNada.deudaAntes2024, 0);
+    assert.equal(deSinNada.deudaPuntoConexion, 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('getMotivoDiferencia: devuelve el texto fijo para una cuenta documentada, null para las demás', () => {
   const ctx = crearDbTemporal();
   try {

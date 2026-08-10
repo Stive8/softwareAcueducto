@@ -7,13 +7,6 @@ const PlantillaReporteService = require('./PlantillaReporteService');
 
 const NOMBRES_MES = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 
-// Extrae año/mes de una fecha 'YYYY-MM-DD' sin pasar por new Date(): evita el desfase de un
-// día (y a veces un mes completo) que ocurre en zonas horarias negativas como Colombia (UTC-5).
-function anioMesDeFecha(fechaString) {
-  const [anio, mes] = fechaString.split(' ')[0].split('-').map(Number);
-  return { anio, mes };
-}
-
 class ReporteService {
   constructor(dbService) {
     this.repository = new ReporteRepository(dbService);
@@ -192,31 +185,45 @@ class ReporteService {
     };
   }
 
+  // "En mora" = debe algo en 2024+ (meses_mora > 0) O tiene deuda anterior al corte pendiente
+  // (deuda_antes_2024 > 0), aunque esté al día en lo corriente -- ver
+  // docs/superpowers/specs/2026-08-10-fase2-reportes-dashboard-design.md. motivo_mora es un
+  // array ('meses_corrientes', 'deuda_anterior_2024') para que una cuenta que sale "pagado
+  // hasta: julio 2026" pero igual aparece en mora no quede como una contradicción sin explicar
+  // en pantalla. El punto de conexión NO entra acá a propósito -- es otra naturaleza de deuda.
+  //
+  // meses_mora = meses_impagos (cuenta real de meses con saldo pendiente), NO
+  // (periodo_actual - ultimo_periodo_num). cubiertoHasta se congela en el primer hueco a
+  // propósito (no esconde huecos viejos), pero eso significa que el rango desde ahí hasta hoy
+  // puede incluir meses que ya se pagaron después del hueco (caso R007: un mes de 2024 mal
+  // aplicado por $12.000, con los 19 meses siguientes ya pagados, salía como "21 meses en mora"
+  // cuando la deuda real era de 2 meses / $28.000). pagado_hasta sigue mostrando cubiertoHasta
+  // sin cambios -- eso sigue siendo correcto, es el conteo el que estaba mal.
   procesarEstadoCuentas() {
-    const ahora = new Date();
-    const periodoActual = ahora.getFullYear() * 12 + ahora.getMonth();
-
     return this.repository.getCuentasConUltimoPeriodo().map(c => {
       let pagadoHasta = null;
-      let siguienteCod;
 
       if (c.ultimo_periodo_num !== null && c.ultimo_periodo_num !== undefined) {
         const anio = Math.floor(c.ultimo_periodo_num / 12);
         const mes = (c.ultimo_periodo_num % 12) + 1;
         pagadoHasta = `${NOMBRES_MES[mes - 1]} ${anio}`;
-        siguienteCod = c.ultimo_periodo_num + 1;
-      } else {
-        const inicio = anioMesDeFecha(c.fecha_inicio_facturacion || c.fecha_creacion);
-        siguienteCod = inicio.anio * 12 + (inicio.mes - 1);
       }
 
-      const mesesMora = Math.max(periodoActual - siguienteCod + 1, 0);
-      return { ...c, pagado_hasta: pagadoHasta, meses_mora: mesesMora };
+      const mesesMora = c.meses_impagos;
+      const deudaAntes2024 = c.deuda_antes_2024 || 0;
+      const motivoMora = [];
+      if (mesesMora > 0) motivoMora.push('meses_corrientes');
+      if (deudaAntes2024 > 0) motivoMora.push('deuda_anterior_2024');
+
+      return {
+        ...c, pagado_hasta: pagadoHasta, meses_mora: mesesMora,
+        en_mora: motivoMora.length > 0, motivo_mora: motivoMora
+      };
     });
   }
 
   reporteCuentasAlDia() {
-    const filas = this.procesarEstadoCuentas().filter(c => c.meses_mora === 0);
+    const filas = this.procesarEstadoCuentas().filter(c => !c.en_mora);
     return {
       tipo: 'tabla',
       titulo: 'Cuentas al Día',
@@ -233,7 +240,11 @@ class ReporteService {
   }
 
   reporteCuentasEnMora() {
-    const filas = this.procesarEstadoCuentas().filter(c => c.meses_mora > 0);
+    const ETIQUETA_MOTIVO = { meses_corrientes: 'Meses corrientes', deuda_anterior_2024: 'Deuda anterior al corte' };
+    const filas = this.procesarEstadoCuentas().filter(c => c.en_mora).map(c => ({
+      ...c,
+      motivo_mora_label: c.motivo_mora.map(m => ETIQUETA_MOTIVO[m]).join(', ')
+    }));
     return {
       tipo: 'tabla',
       titulo: 'Cuentas en Mora',
@@ -244,7 +255,8 @@ class ReporteService {
         { key: 'direccion', label: 'Dirección' },
         { key: 'propietario', label: 'Propietario' },
         { key: 'pagado_hasta', label: 'Pagado Hasta' },
-        { key: 'meses_mora', label: 'Meses en Mora' }
+        { key: 'meses_mora', label: 'Meses en Mora' },
+        { key: 'motivo_mora_label', label: 'Motivo' }
       ],
       filas
     };
@@ -357,6 +369,7 @@ class ReporteService {
     const totalPatrimonio = patrimonioRegistrado + resultadoEjercicio;
 
     const cuentasPorCobrar = this.repository.getCuentasPorCobrarEstimado();
+    const saldoAFavorTotal = this.repository.getCuentasConSaldoAFavor().reduce((s, f) => s + f.saldo, 0);
 
     return {
       tipo: 'resumen',
@@ -386,11 +399,28 @@ class ReporteService {
         // Fuera de la ecuación Activo = Pasivo + Patrimonio a propósito: este sistema reconoce
         // el ingreso por sostenimiento solo cuando se recibe el pago (no cuando se causa la
         // mora), así que la cartera pendiente no tiene una cuenta por cobrar contabilizada que
-        // sumar al Activo. Se muestra aparte, como memo informativo.
+        // sumar al Activo. Se muestra aparte, como memo informativo. Desglosada en las tres
+        // deudas reales de cartera (ver docs/superpowers/specs/2026-08-10-fase2-reportes-dashboard-design.md):
+        // la apertura opaca y el punto de conexión SÍ cuentan como "por cobrar" -- es dinero que
+        // la asociación tiene derecho a cobrar, aunque no esté contabilizado como cuenta real.
         {
           titulo: 'Cartera Pendiente (informativo, no incluida en el balance contable)',
-          items: [{ label: 'Estimado por meses en mora a la tarifa vigente', valor: cuentasPorCobrar }],
-          total: cuentasPorCobrar
+          items: [
+            { label: 'Deuda anterior al corte (2024)', valor: cuentasPorCobrar.deudaAntes2024 },
+            { label: 'Deuda desde 2024', valor: cuentasPorCobrar.deudaExigible },
+            { label: 'Deuda de conexión', valor: cuentasPorCobrar.deudaPuntoConexion }
+          ],
+          total: cuentasPorCobrar.total
+        },
+        // Mismo motivo que la sección anterior: cuenta_creditos no genera asiento contable, así
+        // que no puede sumarse a la sección real "Pasivos" de arriba sin un asiento real que lo
+        // sustente. Contablemente ES un pasivo -- plata ya recibida que la asociación todavía
+        // debe en servicio -- por eso se muestra del lado informativo, nunca restando de
+        // "Cartera Pendiente".
+        {
+          titulo: 'Saldo a Favor de Asociados (informativo, no incluido en el balance contable)',
+          items: [{ label: 'Créditos disponibles sin aplicar', valor: saldoAFavorTotal }],
+          total: saldoAFavorTotal
         }
       ]
     };
@@ -605,8 +635,8 @@ class ReporteService {
   // el sistema mientras estuvo a cargo. No es un reporte nuevo de cero: reutiliza los existentes.
   reporteInformeEmpalme({ fechaDesde = '', fechaHasta = '' } = {}) {
     const cartera = this.procesarEstadoCuentas();
-    const alDia = cartera.filter(c => c.meses_mora === 0).length;
-    const enMora = cartera.filter(c => c.meses_mora > 0).length;
+    const alDia = cartera.filter(c => !c.en_mora).length;
+    const enMora = cartera.filter(c => c.en_mora).length;
     const conSaldoFavor = this.repository.getCuentasConSaldoAFavor().length;
 
     const balance = this.reporteBalanceGeneral({ fechaCorte: fechaHasta });
@@ -689,7 +719,8 @@ class ReporteService {
         { key: 'direccion', label: 'Dirección' },
         { key: 'propietario', label: 'Propietario' },
         { key: 'fecha_ultimo_pago', label: 'Último Pago', tipo: 'fecha' },
-        { key: 'meses_mora', label: 'Meses en Mora', tipo: 'numero' },
+        { key: 'meses_mora', label: 'Meses en Mora (2024+)', tipo: 'numero' },
+        { key: 'deuda_antes_2024', label: 'Deuda Anterior al Corte', tipo: 'moneda' },
         { key: 'rango_mora', label: 'Rango de Mora' },
         { key: 'tarifa_mensual', label: 'Tarifa Mensual', tipo: 'moneda' },
         { key: 'valor_estimado', label: 'Valor Estimado', tipo: 'moneda' }

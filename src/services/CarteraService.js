@@ -410,6 +410,36 @@ class CarteraService {
     };
   }
 
+  // Para reportes y dashboard (Fase 2 del decommission del modelo viejo, ver
+  // docs/superpowers/specs/2026-08-10-fase2-reportes-dashboard-design.md): los ingredientes
+  // crudos de mora/deuda de cada cuenta de `cuentaIds`, en un solo lugar, para que
+  // ReporteRepository/DashboardRepository/DashboardService no repitan cada uno su propio loop
+  // ni su propia idea de qué cuenta como deuda -- todos leen de acá. Deliberadamente NO decide
+  // qué es "estar en mora": eso es una decisión de presentación de cada reporte (ver el spec),
+  // no una pregunta que cartera deba responder por sí sola.
+  //
+  // mesesImpagos/mesMasAntiguoImpago vienen de mesesAPagar (calcularAPagar), NO de restar
+  // cubiertoHasta contra el mes actual: ese rango cuenta TODOS los meses desde el primer hueco,
+  // aunque ya estén pagados (cubiertoHasta se congela ahí a propósito, ver S050/R007). mesesAPagar
+  // ya filtra uno por uno cuáles de esos meses tienen saldo pendiente de verdad, así que su
+  // longitud es la cuenta real de meses impagos -- y aPagar, la suma en pesos, ya coincide con
+  // deudaExigible (misma fuente).
+  getIndicadoresMoraTodas(cuentaIds) {
+    return cuentaIds.map(cuentaId => {
+      const estado = this.getEstadoCartera(cuentaId);
+      return {
+        cuentaId,
+        cubiertoHasta: estado.cubiertoHasta,
+        deudaExigible: estado.deudaExigible,
+        deudaAntes2024: estado.deudaAntes2024,
+        deudaPuntoConexion: estado.deudaPuntoConexion,
+        mesesImpagos: estado.mesesAPagar.length,
+        mesMasAntiguoImpago: estado.mesesAPagar[0] || null,
+        aPagar: estado.aPagar
+      };
+    });
+  }
+
   // "Próximo período sugerido": el mes siguiente al último cubierto (alDiaHasta), IGNORANDO
   // huecos históricos -- esos siguen contando como deuda en getEstadoCartera/calcularAPagar, no
   // acá. Puede devolver un mes que todavía no tiene CargoMensual causado (ej. una cuenta al día

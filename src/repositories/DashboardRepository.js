@@ -1,6 +1,10 @@
+const CarteraService = require('../services/CarteraService');
+const { codificarPeriodo } = require('../services/cartera/periodos');
+
 class DashboardRepository {
   constructor(dbService) {
     this.db = dbService.getDb();
+    this.carteraService = new CarteraService(dbService);
   }
 
   getIngresosMes() {
@@ -33,20 +37,33 @@ class DashboardRepository {
     return ahora.getFullYear() * 12 + ahora.getMonth();
   }
 
-  // Cuentas activas cuyo último mes de sostenimiento pagado cubre el mes actual (o más adelante)
-  getCuentasAlDia() {
+  // Ids de todas las cuentas activas -- también la usa DashboardService para calcular
+  // carteraPendiente sobre todas las cuentas, no solo las "en mora" (una cuenta puede estar al
+  // día en deuda y aun así tener un punto de conexión pendiente).
+  getIdsActivas() {
+    return this.db.prepare(`SELECT id FROM cuentas WHERE estado = 'Activo'`).all().map(r => r.id);
+  }
+
+  // "En mora" = debe algo en 2024+ (cubiertoHasta no llega al mes actual) O tiene deuda
+  // anterior al corte pendiente, aunque esté al día en lo corriente -- mismo criterio que
+  // ReporteService.procesarEstadoCuentas (ver
+  // docs/superpowers/specs/2026-08-10-fase2-reportes-dashboard-design.md). El punto de conexión
+  // NO cuenta para esto a propósito -- es otra naturaleza de deuda. Antes se leía de
+  // pago_periodos (MAX de mes pagado, sin importar huecos); ahora de cubiertoHasta.
+  _idsEnMora() {
     const periodoActual = this.getPeriodoActualCodigo();
+    return this.carteraService.getIndicadoresMoraTodas(this.getIdsActivas())
+      .filter(ind => {
+        const cubiertoCod = ind.cubiertoHasta ? codificarPeriodo(ind.cubiertoHasta.anio, ind.cubiertoHasta.mes) : -1;
+        return cubiertoCod < periodoActual || ind.deudaAntes2024 > 0;
+      })
+      .map(ind => ind.cuentaId);
+  }
 
-    const result = this.db.prepare(`
-      SELECT COUNT(*) as total
-      FROM cuentas c
-      WHERE c.estado = 'Activo'
-      AND (
-        SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id
-      ) >= ?
-    `).get(periodoActual);
-
-    return result.total;
+  // Cuentas activas sin ninguna deuda 2024+ ni anterior al corte.
+  getCuentasAlDia() {
+    const idsEnMora = new Set(this._idsEnMora());
+    return this.getIdsActivas().filter(id => !idsEnMora.has(id)).length;
   }
 
   // Cuentas activas cuyo último mes pagado es anterior al mes actual (o que nunca han pagado)
@@ -55,20 +72,9 @@ class DashboardRepository {
   }
 
   // Mismo criterio que getCuentasEnMora(), pero devuelve los ids: lo usa DashboardService
-  // para sumar la deuda estimada de cada una reutilizando PagoService.getEstadoCuenta().
+  // para sumar la deuda pendiente de cada una.
   getCuentasEnMoraIds() {
-    const periodoActual = this.getPeriodoActualCodigo();
-
-    const rows = this.db.prepare(`
-      SELECT c.id
-      FROM cuentas c
-      WHERE c.estado = 'Activo'
-      AND COALESCE((
-        SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id
-      ), -1) < ?
-    `).all(periodoActual);
-
-    return rows.map(r => r.id);
+    return this._idsEnMora();
   }
 
   // Cuentas con saldo a favor: abonos registrados que aún no se han aplicado a meses de sostenimiento

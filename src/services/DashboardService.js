@@ -2,7 +2,8 @@ const CuentaRepository = require('../repositories/CuentaRepository');
 const DashboardRepository = require('../repositories/DashboardRepository');
 const CajaRepository = require('../repositories/CajaRepository');
 const CategoriaRepository = require('../repositories/CategoriaRepository');
-const PagoService = require('./PagoService');
+const CarteraService = require('./CarteraService');
+const { redondear } = require('./cartera/dinero');
 
 class DashboardService {
   constructor(dbService) {
@@ -10,10 +11,12 @@ class DashboardService {
     this.dashboardRepo = new DashboardRepository(dbService);
     this.cajaRepo = new CajaRepository(dbService);
     this.categoriaRepo = new CategoriaRepository(dbService);
-    // Reutiliza el mismo cálculo de deuda estimada por cuenta que ya usa la pantalla de Pagos
-    // (mismo criterio: meses en mora x tarifa vigente de la categoría), en vez de duplicar la
-    // fórmula aquí para la cartera pendiente agregada del dashboard.
-    this.pagoService = new PagoService(dbService);
+    // Cartera pendiente se calcula directo desde CarteraService (deudaAntes2024 + deudaExigible
+    // + deudaPuntoConexion), no reutilizando PagoService.getEstadoCuenta: ese método calcula
+    // mesesMora/saldoPendienteEstimado desde alDiaHasta (para "próximo período sugerido"), que
+    // ignora huecos viejos a propósito -- el concepto equivocado para "cuánto debe en total"
+    // (ver docs/superpowers/specs/2026-08-10-fase2-reportes-dashboard-design.md).
+    this.carteraService = new CarteraService(dbService);
   }
 
   getStats() {
@@ -27,10 +30,16 @@ class DashboardService {
     const cuentasEnMora = cuentasEnMoraIds.length;
     const cuentasConSaldoAFavor = this.dashboardRepo.getCuentasConSaldoAFavor();
 
-    const carteraPendiente = cuentasEnMoraIds.reduce((total, cuentaId) => {
-      const estado = this.pagoService.getEstadoCuenta(cuentaId);
-      return total + (estado.saldoPendienteEstimado || 0);
-    }, 0);
+    // Sobre TODAS las cuentas activas, no solo las "en mora": una cuenta puede estar al día en
+    // deuda pero tener un punto de conexión pendiente, y ese sí debe sumar acá (mismo criterio
+    // que "cuentas por cobrar" del Balance General).
+    const idsActivas = this.dashboardRepo.getIdsActivas();
+    const carteraPendiente = redondear(
+      this.carteraService.getIndicadoresMoraTodas(idsActivas).reduce((total, ind) => {
+        const exigiblePositiva = ind.deudaExigible > 0 ? ind.deudaExigible : 0;
+        return total + ind.deudaAntes2024 + exigiblePositiva + ind.deudaPuntoConexion;
+      }, 0)
+    );
 
     // Categorías activas sin ninguna tarifa vigente configurada: si alguien intenta registrar
     // un pago de sostenimiento para una cuenta de esa categoría, fallará. Mejor avisar antes.
