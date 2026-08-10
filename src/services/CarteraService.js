@@ -415,7 +415,12 @@ class CarteraService {
   // inferida...", "Tarifa corregida...") y, aparte, los puntos de conexión de la cuenta con sus
   // abonos (nuevos_puntos/nuevo_punto_abonos, fuera de cartera_movimientos). No escribe nada.
   getDetalleCartera(cuentaId) {
-    const movimientos = this.repository.getMovimientos(cuentaId);
+    // Un Abono no guarda anio/mes propio (puede cubrir varios meses o parte de uno) -- su
+    // período solo existe a través de cartera_imputaciones. Se completa acá, no en el repo,
+    // porque es exclusivamente para mostrar en pantalla.
+    const movimientos = this.repository.getMovimientos(cuentaId).map(m =>
+      m.tipo === 'Abono' ? { ...m, periodos: this.repository.getPeriodosDeAbono(m.id) } : m
+    );
 
     const puntosConexion = this.nuevoPuntoRepository.findByCuentaId(cuentaId).map(punto => ({
       ...punto,

@@ -154,6 +154,21 @@ class CarteraRepository {
     return redondear(fila.total);
   }
 
+  // Meses que cubrió un abono, vía cartera_imputaciones -- el abono en sí no guarda anio/mes
+  // (puede cubrir varios meses o una parte de uno), así que su "período" solo existe a través
+  // de a qué cargos quedó imputado. Excluye cargos sin mes (ej. AperturaOpaca): no tienen
+  // período que mostrar.
+  getPeriodosDeAbono(abonoId) {
+    const filas = this.db.prepare(`
+      SELECT DISTINCT c.anio, c.mes
+      FROM cartera_imputaciones i
+      JOIN cartera_movimientos c ON c.id = i.cargo_id
+      WHERE i.abono_id = ? AND c.anio IS NOT NULL AND c.mes IS NOT NULL
+      ORDER BY c.anio ASC, c.mes ASC
+    `).all(abonoId);
+    return filas;
+  }
+
   getMesesCausados(cuentaId) {
     const filas = this.db.prepare(`
       SELECT anio, mes FROM cartera_movimientos

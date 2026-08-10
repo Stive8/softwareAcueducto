@@ -411,7 +411,7 @@ const Pagos = {
                 <tr>
                   <td>${this.formatDate(m.fecha)}</td>
                   <td>${TIPO_LABEL[m.tipo] || m.tipo}</td>
-                  <td>${m.anio ? `${m.anio}-${String(m.mes).padStart(2, '0')}` : '-'}</td>
+                  <td>${m.tipo === 'Abono' ? (this.formatRangoAPagar(m.periodos) || '-') : (m.anio ? `${m.anio}-${String(m.mes).padStart(2, '0')}` : '-')}</td>
                   <td style="${m.monto < 0 ? 'color: #059669;' : ''}">$${this.formatNumber(m.monto)}</td>
                   <td style="color: #475569; font-size: 0.8125rem;">${m.observaciones || ''}</td>
                 </tr>

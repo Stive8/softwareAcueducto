@@ -62,6 +62,41 @@ test('getSaldos de una cuenta sin movimientos devuelve ceros', () => {
   }
 });
 
+test('getPeriodosDeAbono devuelve los meses cubiertos por un abono que pagó varios meses', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+
+    const c1 = repo.crearMovimiento({ cuentaId, fecha: '2026-01-01', tipo: 'CargoMensual', exigible: 1, monto: 20000, anio: 2026, mes: 1 });
+    const c2 = repo.crearMovimiento({ cuentaId, fecha: '2026-02-01', tipo: 'CargoMensual', exigible: 1, monto: 20000, anio: 2026, mes: 2 });
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2026-03-01', tipo: 'Abono', exigible: 1, monto: -40000 });
+    repo.crearImputacion({ abonoId, cargoId: c1, monto: 20000 });
+    repo.crearImputacion({ abonoId, cargoId: c2, monto: 20000 });
+
+    const periodos = repo.getPeriodosDeAbono(abonoId);
+    assert.deepEqual(periodos, [{ anio: 2026, mes: 1 }, { anio: 2026, mes: 2 }]);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getPeriodosDeAbono no cuenta cargos sin mes (ej. AperturaOpaca) como período', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = crearCuenta(ctx.dbService);
+
+    const opaca = repo.crearMovimiento({ cuentaId, fecha: '2021-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 50000 });
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2026-01-01', tipo: 'Abono', exigible: 0, monto: -50000 });
+    repo.crearImputacion({ abonoId, cargoId: opaca, monto: 50000 });
+
+    assert.deepEqual(repo.getPeriodosDeAbono(abonoId), []);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('getCargosPendientes descuenta lo imputado, ordena por período y omite los cubiertos', () => {
   const ctx = crearDbTemporal();
   try {
