@@ -1110,9 +1110,9 @@ function setupIpcHandlers() {
     }
   });
 
-  envolverHandle('pagos:simularPago', async (event, cuentaId, anioInicio, mesInicio, cantidadMeses) => {
+  envolverHandle('pagos:simularPago', async (event, cuentaId, anioInicio, mesInicio, cantidadMeses, usarSaldoAFavor) => {
     try {
-      return { success: true, data: pagoService.simularPago(cuentaId, anioInicio, mesInicio, cantidadMeses) };
+      return { success: true, data: pagoService.simularPago(cuentaId, anioInicio, mesInicio, cantidadMeses, usarSaldoAFavor) };
     } catch (error) {
       return { success: false, error: error.message };
     }

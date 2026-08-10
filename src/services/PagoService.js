@@ -164,12 +164,15 @@ class PagoService {
     return grupos;
   }
 
-  // Previsualización: cuánto costaría pagar N meses desde un período de inicio, sin registrar nada
-  simularPago(cuentaId, anioInicio, mesInicio, cantidadMeses) {
+  // Previsualización: cuánto costaría pagar N meses desde un período de inicio, sin registrar nada.
+  // usarSaldoAFavor por defecto en false, igual que registrarPagoSostenimiento (ver el porqué ahí):
+  // la previsualización nunca debe prometer un total distinto del que el registro real va a cobrar.
+  // saldoAFavorDisponible se informa siempre, se use o no, para que quien cobra sepa que existe.
+  simularPago(cuentaId, anioInicio, mesInicio, cantidadMeses, usarSaldoAFavor = false) {
     const periodos = this.construirPeriodos(cuentaId, anioInicio, mesInicio, cantidadMeses);
     const saldoAFavor = this.repository.getSaldoCredito(cuentaId);
     const subtotal = periodos.reduce((sum, p) => sum + p.valor, 0);
-    const creditoAplicado = Math.min(saldoAFavor, subtotal);
+    const creditoAplicado = usarSaldoAFavor ? Math.min(saldoAFavor, subtotal) : 0;
 
     return {
       periodos: periodos.map(p => ({ ...p, label: this.formatPeriodo(p.anio, p.mes) })),
@@ -198,7 +201,15 @@ class PagoService {
   // recibo. Opcionalmente, en el MISMO recibo (mismo número, mismo movimiento de caja) puede incluir un abono
   // al cargo de conexión pendiente de la cuenta (nuevoPuntoId + abonoConexion), para el caso real de que la
   // persona pague meses y conexión juntos en un solo recibo físico.
-  registrarPagoSostenimiento({ cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones, usarSaldoAFavor = true, nuevoPuntoId = null, abonoConexion = 0 }, usuarioId = null) {
+  //
+  // usarSaldoAFavor por defecto en false (cambio 2026-08-09; antes true): el saldo a favor NUNCA
+  // se aplica solo. Antes de este cambio, cualquier pago consumía automáticamente el crédito
+  // disponible sin que nadie lo pidiera -- alguien con saldo a favor que nunca supo que lo tenía
+  // llegaba a pagar su cuota normal y esta función se la cobraba de menos (o en cero) sin avisarle,
+  // consumiendo un crédito que quizás quería guardar. Mismo criterio que ya rige la pantalla de
+  // cartera nueva (avisos aparte, nada se aplica sin decisión explícita, ver CarteraService.js) --
+  // acá faltaba aplicarlo. Aplicar el crédito ahora es un acto explícito (usarSaldoAFavor: true).
+  registrarPagoSostenimiento({ cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones, usarSaldoAFavor = false, nuevoPuntoId = null, abonoConexion = 0 }, usuarioId = null) {
     this.validarDatosComunes({ cuentaId, fechaPago, metodoPago });
     if (!anioInicio || !mesInicio) throw new Error('El período inicial es obligatorio');
     if (!cantidadMeses || cantidadMeses < 1) throw new Error('La cantidad de meses debe ser al menos 1');

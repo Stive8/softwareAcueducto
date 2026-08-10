@@ -50,7 +50,7 @@ contextBridge.exposeInMainWorld('api', {
   pagos: {
     getCuentasConEstado: (params) => ipcRenderer.invoke('pagos:getCuentasConEstado', params),
     getEstadoCuenta: (cuentaId) => ipcRenderer.invoke('pagos:getEstadoCuenta', cuentaId),
-    simularPago: (cuentaId, anioInicio, mesInicio, cantidadMeses) => ipcRenderer.invoke('pagos:simularPago', cuentaId, anioInicio, mesInicio, cantidadMeses),
+    simularPago: (cuentaId, anioInicio, mesInicio, cantidadMeses, usarSaldoAFavor) => ipcRenderer.invoke('pagos:simularPago', cuentaId, anioInicio, mesInicio, cantidadMeses, usarSaldoAFavor),
     registrarPagoSostenimiento: (payload) => ipcRenderer.invoke('pagos:registrarPagoSostenimiento', payload),
     getHistorialPagos: (cuentaId) => ipcRenderer.invoke('pagos:getHistorialPagos', cuentaId),
     imprimirEstadoCuenta: (cuentaId) => ipcRenderer.invoke('pagos:imprimirEstadoCuenta', cuentaId),
