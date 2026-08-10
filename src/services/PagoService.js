@@ -323,10 +323,20 @@ class PagoService {
         // es la MISMA tabla para los dos modelos (migración 041), así que esto no descuenta el
         // saldo dos veces -- lo descuenta igual, pero además deja la imputación contra los
         // cargos reales de cartera_movimientos, que antes no quedaba en ningún lado.
-        this.carteraService.aplicarCreditoAMeses({
+        const resultadoCredito = this.carteraService.aplicarCreditoAMeses({
           cuentaId, monto: creditoAplicado, cargosElegidos: cargosDeEstePago,
           fecha: fechaPago, reciboDetalleId: detalleCreditoId, usuarioId
         });
+        // Mismo criterio que con la porción en efectivo (arriba): si distribuir() dejó un
+        // sobrante es porque cargosDeEstePago ya no tenía pendiente suficiente para absorber
+        // todo el crédito -- el recibo viejo ya mostraría el saldo a favor como aplicado por
+        // completo, mientras cartera_movimientos se quedaría corto. No dejarlo pasar en silencio.
+        if (esMayor(resultadoCredito.sobrante, 0)) {
+          throw new Error(
+            'El motor de cartera no pudo imputar completa la porción de saldo a favor de este pago: ' +
+            `sobraron $${resultadoCredito.sobrante} sin poder aplicarse a los meses elegidos`
+          );
+        }
       }
 
       let estadoConexion = null;

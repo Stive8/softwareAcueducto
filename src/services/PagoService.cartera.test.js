@@ -8,6 +8,7 @@ const assert = require('node:assert/strict');
 const { crearDbTemporal, cerrarDbTemporal } = require('../testUtils/dbTemporal');
 const PagoService = require('./PagoService');
 const CarteraService = require('./CarteraService');
+const { MODOS } = require('./cartera/imputacion');
 
 function sembrarCuentaPagable(db, { codigo = 'T001', tarifa = 10000, fechaCategoria = '2026-01-01' } = {}) {
   db.prepare(`INSERT INTO cuentas (codigo, direccion) VALUES (?, 'Vereda Test')`).run(codigo);
@@ -131,6 +132,51 @@ test('registrarPagoSostenimiento con saldo a favor aplica esa porción también 
     ).all(cuentaId);
     assert.equal(abonos.length, 2, 'un Abono por la porción en efectivo y otro por la porción de crédito');
     assert.deepEqual(abonos.map(a => a.monto).sort((a, b) => a - b), [-15000, -5000]);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('registrarPagoSostenimiento lanza si la porción de crédito no puede imputarse completa contra los cargos elegidos', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuentaPagable(db, { tarifa: 10000 });
+    const carteraService = new CarteraService(ctx.dbService);
+    const pagoService = new PagoService(ctx.dbService);
+
+    // Siembra directo en el motor nuevo los 2 cargos que este recibo va a pedir (mismo patrón
+    // que CarteraService.aplicarCredito.test.js) y deja el primero ya parcialmente pagado
+    // (3.000) por fuera de este recibo -- así cargosDeEstePago tiene menos pendiente real
+    // (17.000) que lo que el modelo viejo va a creer que vale el subtotal (20.000).
+    const cargo1 = carteraService.repository.crearMovimiento({
+      cuentaId, fecha: '2026-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 1
+    });
+    carteraService.repository.crearMovimiento({
+      cuentaId, fecha: '2026-02-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 2
+    });
+    carteraService.registrarAbono({
+      cuentaId, fecha: '2026-02-15', monto: 3000,
+      modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: [cargo1]
+    });
+
+    // 15.000 de saldo a favor: junto con los 5.000 en efectivo (20.000 subtotal del modelo
+    // viejo - 15.000 crédito) suman el subtotal completo. La porción en efectivo (5.000) se
+    // imputa completa contra los 17.000 reales pendientes, dejando 12.000 -- el crédito
+    // (15.000) sobra 3.000 sin poder aplicarse.
+    db.prepare(
+      `INSERT INTO cuenta_creditos (cuenta_id, tipo, monto, fecha) VALUES (?, 'Abono', 15000, '2026-01-01')`
+    ).run(cuentaId);
+
+    assert.throws(
+      () => pagoService.registrarPagoSostenimiento({
+        cuentaId, anioInicio: 2026, mesInicio: 1, cantidadMeses: 2,
+        fechaPago: '2026-04-01', metodoPago: 'Efectivo', usarSaldoAFavor: true
+      }),
+      /porción de saldo a favor/
+    );
+
+    assert.equal(db.prepare(`SELECT COUNT(*) n FROM recibos`).get().n, 0, 'la transacción completa debe revertir, igual que con el sobrante en efectivo');
   } finally {
     cerrarDbTemporal(ctx);
   }
