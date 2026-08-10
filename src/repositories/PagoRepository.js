@@ -196,12 +196,10 @@ class PagoRepository {
         c.id, c.codigo, c.direccion, c.estado, c.fecha_creacion,
         p.nombre_completo as propietario_actual,
         cat.nombre as categoria_actual,
-        (SELECT MAX(anio * 12 + (mes - 1)) FROM pago_periodos WHERE cuenta_id = c.id) as ultimo_periodo_num,
         (SELECT COALESCE(SUM(CASE WHEN tipo = 'Abono' THEN monto ELSE -monto END), 0)
            FROM cuenta_creditos WHERE cuenta_id = c.id) as saldo_favor,
         (SELECT COALESCE(SUM(saldo_pendiente), 0)
-           FROM nuevos_puntos WHERE cuenta_id = c.id AND estado = 'Pendiente') as conexion_pendiente,
-        (SELECT MIN(fecha_inicio) FROM cuenta_categorias WHERE cuenta_id = c.id) as fecha_inicio_facturacion
+           FROM nuevos_puntos WHERE cuenta_id = c.id AND estado = 'Pendiente') as conexion_pendiente
       FROM cuentas c
       LEFT JOIN cuenta_propietarios cp ON cp.cuenta_id = c.id AND cp.fecha_fin IS NULL
       LEFT JOIN propietarios p ON p.id = cp.propietario_id

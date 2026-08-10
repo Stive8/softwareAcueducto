@@ -209,7 +209,7 @@ const Pagos = {
           </div>
           <div class="detail-row">
             <div class="detail-label">Saldo Pendiente:</div>
-            <div class="detail-value">${estado.saldoPendienteEstimado > 0 ? `<strong style="color: #ef4444;">$${this.formatNumber(estado.saldoPendienteEstimado)}</strong> <small style="color: #64748b;">(estimado a tarifa actual)</small>` : '$0'}</div>
+            <div class="detail-value">${estado.saldoPendienteEstimado > 0 ? `<strong style="color: #ef4444;">$${this.formatNumber(estado.saldoPendienteEstimado)}</strong>` : '$0'}</div>
           </div>
           <div class="detail-row">
             <div class="detail-label">Total Pagado:</div>

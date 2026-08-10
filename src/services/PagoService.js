@@ -16,6 +16,8 @@ const NOMBRES_MES = [
 
 const METODOS_PAGO_VALIDOS = ['Efectivo', 'Transferencia'];
 
+const ETIQUETA_MOTIVO_MORA = { meses_corrientes: 'Meses corrientes', deuda_anterior_2024: 'Deuda anterior al corte' };
+
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
   return String(value)
@@ -99,18 +101,22 @@ class PagoService {
     const ultimoPagado = alDiaHasta;
     const siguiente = siguienteCartera || anioMesDeFecha(cuenta.fecha_creacion);
 
-    const mesesMora = Math.max(codificarPeriodo(periodoActual.anio, periodoActual.mes) - codificarPeriodo(siguiente.anio, siguiente.mes) + 1, 0);
-    const enMora = mesesMora > 0;
     const saldoAFavor = this.repository.getSaldoCredito(cuentaId);
     const { totalPagado, totalMesesPagados } = this.repository.getResumenPagos(cuentaId);
 
-    // Estimado en dinero de la deuda pendiente: meses en mora valorados a la tarifa vigente
-    // hoy de la categoría actual de la cuenta (igual criterio que en los reportes de cartera).
-    let saldoPendienteEstimado = 0;
-    if (enMora) {
-      const tarifaActual = this.repository.getCategoriaTarifaParaMes(cuentaId, periodoActual.anio, periodoActual.mes);
-      saldoPendienteEstimado = tarifaActual ? mesesMora * tarifaActual.tarifa_sostenimiento : 0;
-    }
+    // mesesMora/estadoMora/saldoPendienteEstimado ya NO salen del rango contra alDiaHasta (ese
+    // concepto es correcto solo para "próximo período sugerido", arriba, no para "cuánto debe" --
+    // ver CarteraService.getEstadoCartera). Mismo criterio que ReporteService.procesarEstadoCuentas:
+    // CarteraService.getIndicadoresMoraTodas, meses_impagos (no el rango completo desde el hueco,
+    // caso real R007) + deuda_antes_2024, con su motivo_mora.
+    const [ind] = this.carteraService.getIndicadoresMoraTodas([cuentaId]);
+    const mesesMora = ind.mesesImpagos;
+    const deudaAntes2024 = ind.deudaAntes2024;
+    const motivoMora = [];
+    if (mesesMora > 0) motivoMora.push('meses_corrientes');
+    if (deudaAntes2024 > 0) motivoMora.push('deuda_anterior_2024');
+    const enMora = motivoMora.length > 0;
+    const saldoPendienteEstimado = redondear(deudaAntes2024 + (ind.deudaExigible > 0 ? ind.deudaExigible : 0));
 
     return {
       cuentaId,
@@ -119,6 +125,8 @@ class PagoService {
         : null,
       siguientePeriodo: { anio: siguiente.anio, mes: siguiente.mes, label: this.formatPeriodo(siguiente.anio, siguiente.mes) },
       mesesMora,
+      deudaAntes2024,
+      motivoMora,
       estadoMora: enMora ? 'En mora' : 'Al día',
       saldoAFavor,
       totalPagado,
@@ -460,7 +468,9 @@ class PagoService {
     </div>
     <div class="resumen-card">
       <div class="label">Estado</div>
-      <div class="valor">${estado.estadoMora === 'En mora' ? `En mora (${estado.mesesMora})` : 'Al día'}</div>
+      <div class="valor">${estado.estadoMora === 'En mora'
+        ? `En mora (${estado.mesesMora}) — ${estado.motivoMora.map(m => ETIQUETA_MOTIVO_MORA[m]).join(', ')}`
+        : 'Al día'}</div>
     </div>
     <div class="resumen-card">
       <div class="label">Total Pagado</div>
@@ -487,40 +497,47 @@ class PagoService {
     `;
   }
 
+  // meses_mora/estado_mora/motivo_mora salen de CarteraService.getIndicadoresMoraTodas
+  // (mesesImpagos/deudaAntes2024), NO de pago_periodos ni de un rango (periodo_actual -
+  // ultimo_periodo_num): ese rango cuenta todo lo que pasó desde el primer hueco aunque ya se
+  // haya puesto al día después (cubiertoHasta se congela ahí a propósito -- caso real R007,
+  // 21 meses de rango vs 2 meses de deuda real). Mismo criterio de "en mora" que
+  // ReporteService.procesarEstadoCuentas: meses_impagos > 0 O deuda_antes_2024 > 0 (ver
+  // docs/superpowers/specs/2026-08-10-fase2-reportes-dashboard-design.md) -- así esta lista y el
+  // detalle de cartera de la misma cuenta nunca se contradicen.
   getCuentasConEstado(params) {
     const { page = 1, limit = 10, filtroPago = '' } = params;
     const filas = this.repository.getCuentasConEstado(params);
-    const ahora = new Date();
-    const periodoActualCod = codificarPeriodo(ahora.getFullYear(), ahora.getMonth() + 1);
+    const indicadores = new Map(
+      this.carteraService.getIndicadoresMoraTodas(filas.map(f => f.id)).map(i => [i.cuentaId, i])
+    );
 
     let procesadas = filas.map(row => {
-      let pagadoHasta = null;
-      let siguienteCod;
-
-      if (row.ultimo_periodo_num !== null && row.ultimo_periodo_num !== undefined) {
-        const periodo = decodificarPeriodo(row.ultimo_periodo_num);
-        pagadoHasta = this.formatPeriodo(periodo.anio, periodo.mes);
-        siguienteCod = row.ultimo_periodo_num + 1;
-      } else {
-        const inicio = anioMesDeFecha(row.fecha_inicio_facturacion || row.fecha_creacion);
-        siguienteCod = codificarPeriodo(inicio.anio, inicio.mes);
-      }
-
-      const mesesMora = Math.max(periodoActualCod - siguienteCod + 1, 0);
+      const ind = indicadores.get(row.id);
+      const pagadoHasta = ind.cubiertoHasta ? this.formatPeriodo(ind.cubiertoHasta.anio, ind.cubiertoHasta.mes) : null;
+      const mesesMora = ind.mesesImpagos;
+      const deudaAntes2024 = ind.deudaAntes2024;
+      const motivoMora = [];
+      if (mesesMora > 0) motivoMora.push('meses_corrientes');
+      if (deudaAntes2024 > 0) motivoMora.push('deuda_anterior_2024');
+      const enMora = motivoMora.length > 0;
 
       return {
         ...row,
         pagado_hasta: pagadoHasta,
         meses_mora: mesesMora,
-        estado_mora: mesesMora > 0 ? 'En mora' : 'Al día',
+        deuda_antes_2024: deudaAntes2024,
+        motivo_mora: motivoMora,
+        en_mora: enMora,
+        estado_mora: enMora ? 'En mora' : 'Al día',
         saldo_favor: row.saldo_favor
       };
     });
 
     if (filtroPago === 'al_dia') {
-      procesadas = procesadas.filter(c => c.meses_mora === 0);
+      procesadas = procesadas.filter(c => !c.en_mora);
     } else if (filtroPago === 'en_mora') {
-      procesadas = procesadas.filter(c => c.meses_mora > 0);
+      procesadas = procesadas.filter(c => c.en_mora);
     } else if (filtroPago === 'saldo_favor') {
       procesadas = procesadas.filter(c => c.saldo_favor > 0);
     }

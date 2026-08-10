@@ -431,3 +431,74 @@ test('getEstadoCuenta sugiere un mes futuro sin marcar mora cuando la cuenta ya 
     cerrarDbTemporal(ctx);
   }
 });
+
+test('getEstadoCuenta: mesesMora cuenta los meses realmente pendientes, no el rango completo desde el hueco (reproduce el caso real de R007)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuentaPagable(db, { tarifa: 10000, fechaCategoria: '2024-01-01' });
+    const carteraService = new CarteraService(ctx.dbService);
+    const pagoService = new PagoService(ctx.dbService);
+
+    // Enero-2024 cubierto completo -- cubiertoHasta arranca ahí.
+    const cEne = carteraService.repository.crearMovimiento({
+      cuentaId, fecha: '2024-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 1
+    });
+    carteraService.registrarAbono({ cuentaId, fecha: '2024-01-05', monto: 10000, modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: [cEne] });
+
+    // Febrero-2024 solo parcialmente cubierto ($2.000 de $10.000) -- el único hueco real.
+    const cFeb = carteraService.repository.crearMovimiento({
+      cuentaId, fecha: '2024-02-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 2
+    });
+    carteraService.registrarAbono({ cuentaId, fecha: '2024-02-10', monto: 2000, modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: [cFeb] });
+
+    // Marzo-2024 hasta el mes anterior al actual: todos cubiertos completos -- se puso al día
+    // después del hueco, como R007 real.
+    const hoy = new Date();
+    const mesActualCod = hoy.getFullYear() * 12 + hoy.getMonth();
+    for (let cod = 2024 * 12 + 2; cod < mesActualCod; cod++) {
+      const anio = Math.floor(cod / 12);
+      const mes = (cod % 12) + 1;
+      const mm = String(mes).padStart(2, '0');
+      const c = carteraService.repository.crearMovimiento({
+        cuentaId, fecha: `${anio}-${mm}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio, mes
+      });
+      carteraService.registrarAbono({ cuentaId, fecha: `${anio}-${mm}-05`, monto: 10000, modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: [c] });
+    }
+    // El mes actual queda sin causar a propósito -- también debe contar, igual que R007 real.
+
+    const estado = pagoService.getEstadoCuenta(cuentaId);
+    assert.equal(estado.mesesMora, 2, 'solo febrero-2024 (el hueco de $8.000) + el mes actual sin causar -- no el rango completo desde enero-2024');
+    assert.equal(estado.estadoMora, 'En mora');
+    assert.deepEqual(estado.motivoMora, ['meses_corrientes']);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getEstadoCuenta: deuda anterior al corte cuenta como mora aunque 2024+ esté al día, con motivoMora', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuentaPagable(db, { tarifa: 10000, fechaCategoria: '2020-01-01' });
+    const carteraService = new CarteraService(ctx.dbService);
+    const pagoService = new PagoService(ctx.dbService);
+
+    carteraService.repository.crearMovimiento({ cuentaId, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 90000 });
+    const hoy = new Date();
+    const cargo = carteraService.repository.crearMovimiento({
+      cuentaId, fecha: hoy.toISOString().split('T')[0], tipo: 'CargoMensual', exigible: 1, monto: 10000,
+      anio: hoy.getFullYear(), mes: hoy.getMonth() + 1
+    });
+    carteraService.registrarAbono({ cuentaId, fecha: hoy.toISOString().split('T')[0], monto: 10000, modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: [cargo] });
+
+    const estado = pagoService.getEstadoCuenta(cuentaId);
+    assert.equal(estado.mesesMora, 0, 'al día en meses corrientes');
+    assert.equal(estado.deudaAntes2024, 90000);
+    assert.equal(estado.estadoMora, 'En mora', 'la apertura opaca pendiente ya cuenta como mora, aunque 2024+ esté al día');
+    assert.deepEqual(estado.motivoMora, ['deuda_anterior_2024']);
+    assert.equal(estado.saldoPendienteEstimado, 90000, 'la deuda real, no meses x tarifa actual');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
