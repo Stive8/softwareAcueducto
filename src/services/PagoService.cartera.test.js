@@ -100,3 +100,38 @@ test('registrarPagoSostenimiento no toca pago_periodos ni cuenta_creditos si el 
     cerrarDbTemporal(ctx);
   }
 });
+
+test('registrarPagoSostenimiento con saldo a favor aplica esa porción también en cartera_movimientos', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuentaPagable(db, { tarifa: 10000 });
+    const pagoService = new PagoService(ctx.dbService);
+    const carteraService = new CarteraService(ctx.dbService);
+
+    // Deja 15.000 de saldo a favor en cuenta_creditos -- misma tabla que usa PagoRepository.getSaldoCredito.
+    db.prepare(
+      `INSERT INTO cuenta_creditos (cuenta_id, tipo, monto, fecha) VALUES (?, 'Abono', 15000, '2026-01-01')`
+    ).run(cuentaId);
+
+    const r = pagoService.registrarPagoSostenimiento({
+      cuentaId, anioInicio: 2026, mesInicio: 1, cantidadMeses: 2,
+      fechaPago: '2026-04-01', metodoPago: 'Efectivo', usarSaldoAFavor: true
+    });
+
+    assert.equal(r.creditoAplicado, 15000);
+    assert.equal(r.total, 5000, '20.000 de sostenimiento menos 15.000 de crédito');
+
+    const estado = carteraService.getEstadoCartera(cuentaId);
+    assert.equal(estado.deudaExigible, 0, 'los 2 meses quedan cubiertos: 5.000 en efectivo + 15.000 de crédito');
+    assert.equal(estado.saldoCreditoDisponible, 0);
+
+    const abonos = db.prepare(
+      `SELECT monto FROM cartera_movimientos WHERE cuenta_id = ? AND tipo = 'Abono' ORDER BY id`
+    ).all(cuentaId);
+    assert.equal(abonos.length, 2, 'un Abono por la porción en efectivo y otro por la porción de crédito');
+    assert.deepEqual(abonos.map(a => a.monto).sort((a, b) => a - b), [-15000, -5000]);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

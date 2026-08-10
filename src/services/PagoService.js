@@ -319,7 +319,14 @@ class PagoService {
           valor: -creditoAplicado,
           tipoConceptoContable: 'AplicacionSaldoFavor'
         });
-        this.repository.crearMovimientoCredito(cuentaId, 'Aplicado', creditoAplicado, detalleCreditoId, fechaPago, 'Aplicado a pago de sostenimiento');
+        // Reemplaza el crearMovimientoCredito('Aplicado', ...) que había antes: cuenta_creditos
+        // es la MISMA tabla para los dos modelos (migración 041), así que esto no descuenta el
+        // saldo dos veces -- lo descuenta igual, pero además deja la imputación contra los
+        // cargos reales de cartera_movimientos, que antes no quedaba en ningún lado.
+        this.carteraService.aplicarCreditoAMeses({
+          cuentaId, monto: creditoAplicado, cargosElegidos: cargosDeEstePago,
+          fecha: fechaPago, reciboDetalleId: detalleCreditoId, usuarioId
+        });
       }
 
       let estadoConexion = null;
