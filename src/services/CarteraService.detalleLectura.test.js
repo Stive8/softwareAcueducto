@@ -11,6 +11,18 @@ function sembrarCuenta(db, codigo) {
   return db.prepare(`SELECT id FROM cuentas WHERE codigo = ?`).get(codigo).id;
 }
 
+function asignarTarifaFinca(db, cuentaId, fechaInicio = '2020-01-01') {
+  let catFila = db.prepare(`SELECT id FROM categorias WHERE nombre = 'Finca'`).get();
+  if (!catFila) {
+    db.prepare(`INSERT INTO categorias (nombre) VALUES ('Finca')`).run();
+    catFila = db.prepare(`SELECT id FROM categorias WHERE nombre = 'Finca'`).get();
+  }
+  if (!db.prepare(`SELECT id FROM categoria_tarifas WHERE categoria_id = ?`).get(catFila.id)) {
+    db.prepare(`INSERT INTO categoria_tarifas (categoria_id, tarifa_sostenimiento, fecha_vigencia_desde) VALUES (?, 10000, '2020-01-01')`).run(catFila.id);
+  }
+  db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, ?)`).run(cuentaId, catFila.id, fechaInicio);
+}
+
 test('getDetalleCartera: trae los movimientos con su observación', () => {
   const ctx = crearDbTemporal();
   try {
@@ -132,6 +144,42 @@ test('getIndicadoresMoraTodas: trae cubiertoHasta, deudaExigible, deudaAntes2024
     assert.equal(deSinNada.deudaExigible, 0);
     assert.equal(deSinNada.deudaAntes2024, 0);
     assert.equal(deSinNada.deudaPuntoConexion, 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getEstadoCartera: mesesAPagar distingue causado=true (cargo ya facturado con saldo pendiente) de causado=false (mes futuro/actual proyectado, reproduce el caso real de R007)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuenta(db, 'T901');
+    asignarTarifaFinca(db, cuentaId, '2024-01-01');
+    const repo = new CarteraRepository(ctx.dbService);
+
+    // Noviembre-2024 cubierto completo -- cubiertoHasta arranca ahí, así calcularAPagar empieza
+    // en diciembre en vez de arrastrar meses de años anteriores.
+    const cargoNov = repo.crearMovimiento({ cuentaId, fecha: '2024-11-01', tipo: 'CargoMensual', exigible: 1, monto: 16000, anio: 2024, mes: 11 });
+    const abonoNov = repo.crearMovimiento({ cuentaId, fecha: '2024-11-05', tipo: 'Abono', exigible: 1, monto: -16000 });
+    repo.crearImputacion({ abonoId: abonoNov, cargoId: cargoNov, monto: 16000 });
+
+    // Diciembre-2024: CargoMensual real, solo $4.000 de $16.000 cubiertos -- deuda ya facturada.
+    const cargoDic = repo.crearMovimiento({ cuentaId, fecha: '2024-12-01', tipo: 'CargoMensual', exigible: 1, monto: 16000, anio: 2024, mes: 12 });
+    const abonoDic = repo.crearMovimiento({ cuentaId, fecha: '2024-12-05', tipo: 'Abono', exigible: 1, monto: -4000 });
+    repo.crearImputacion({ abonoId: abonoDic, cargoId: cargoDic, monto: 4000 });
+
+    const service = new CarteraService(ctx.dbService);
+    const estado = service.getEstadoCartera(cuentaId);
+
+    const dic2024 = estado.mesesAPagar.find(m => m.anio === 2024 && m.mes === 12);
+    assert.ok(dic2024, 'diciembre-2024 debe aparecer en mesesAPagar');
+    assert.equal(dic2024.causado, true, 'ya tiene un CargoMensual real facturado, con saldo pendiente');
+    assert.equal(dic2024.valor, 12000);
+
+    const hoy = new Date();
+    const mesActual = estado.mesesAPagar.find(m => m.anio === hoy.getFullYear() && m.mes === hoy.getMonth() + 1);
+    assert.ok(mesActual, 'el mes actual debe aparecer proyectado en mesesAPagar');
+    assert.equal(mesActual.causado, false, 'todavía no tiene CargoMensual -- es una proyección, no una deuda ya facturada');
   } finally {
     cerrarDbTemporal(ctx);
   }

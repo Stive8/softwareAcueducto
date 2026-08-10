@@ -114,7 +114,7 @@ const Pagos = {
               <td><strong>${c.codigo}</strong></td>
               <td>${c.direccion}</td>
               <td>${c.propietario_actual || '<em>Sin asignar</em>'}</td>
-              <td>${c.pagado_hasta || '<em>Sin aportes</em>'}</td>
+              <td>${c.pagado_hasta || (c.tiene_abonos ? '<em>Ningún mes cubierto</em>' : '<em>Sin aportes</em>')}</td>
               <td>
                 ${c.meses_mora > 0
                   ? `<span class="badge badge-mora">En mora (${c.meses_mora} ${c.meses_mora === 1 ? 'mes' : 'meses'})</span>`
@@ -347,7 +347,6 @@ const Pagos = {
       AperturaOpaca: 'Apertura (antes de 2024)'
     };
 
-    const rangoAPagar = this.formatRangoAPagar(carteraEstado.mesesAPagar);
     const avisos = [
       { label: 'Deuda anterior al corte (2024)', valor: carteraEstado.deudaAntes2024, accion: 'Abonar' },
       { label: 'Punto de conexión pendiente', valor: carteraEstado.deudaPuntoConexion, accion: 'Abonar' },
@@ -375,12 +374,19 @@ const Pagos = {
         <div style="border: 1px solid #cbd5e1; border-radius: 6px; padding: 16px; margin-bottom: 12px;">
           <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">Último mes cubierto</div>
           <div style="font-size: 1rem; margin-bottom: 14px;">
-            ${carteraEstado.ultimoMesCubierto ? this.formatMes(carteraEstado.ultimoMesCubierto.anio, carteraEstado.ultimoMesCubierto.mes) : 'ninguno'}
+            ${estadoViejo.pagadoHasta ? estadoViejo.pagadoHasta.label : 'Sin meses cubiertos'}
           </div>
           <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">
-            A pagar${rangoAPagar ? ` (${rangoAPagar})` : ''}
+            A pagar${carteraEstado.mesesAPagar.length > 0 ? ` (${carteraEstado.mesesAPagar.length} ${carteraEstado.mesesAPagar.length === 1 ? 'mes pendiente' : 'meses pendientes'})` : ''}
           </div>
           <div style="font-size: 1.5rem; font-weight: bold;">$${this.formatNumber(carteraEstado.aPagar)}</div>
+          ${carteraEstado.mesesAPagar.length > 1 ? `
+            <ul style="margin: 8px 0 0 0; padding-left: 18px; font-size: 0.8125rem; color: #475569;">
+              ${carteraEstado.mesesAPagar.map(m => `
+                <li>${this.formatMes(m.anio, m.mes)}${m.causado ? ' (pendiente)' : ''} — $${this.formatNumber(m.valor)}</li>
+              `).join('')}
+            </ul>
+          ` : ''}
         </div>
 
         ${avisos.length > 0 ? `

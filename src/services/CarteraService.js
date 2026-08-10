@@ -330,7 +330,12 @@ class CarteraService {
       const cobertura = coberturaPorMes.get(`${anio}-${mes}`);
       if (cobertura) {
         const pendiente = redondear(cobertura.monto - cobertura.cubierto);
-        if (esMayor(pendiente, 0)) meses.push({ anio, mes, valor: pendiente });
+        // causado=true: ya existe un CargoMensual para este mes, con saldo pendiente (una deuda
+        // real, ya facturada). causado=false (más abajo): mes futuro/actual que todavía no se ha
+        // causado, esto es una proyección de lo que costaría -- distinción que necesita la
+        // pantalla para no mostrar "diciembre 2024 (pendiente)" y "agosto 2026" como si fueran
+        // la misma clase de deuda.
+        if (esMayor(pendiente, 0)) meses.push({ anio, mes, valor: pendiente, causado: true });
         continue;
       }
 
@@ -352,7 +357,7 @@ class CarteraService {
         );
         continue;
       }
-      meses.push({ anio, mes, valor: tarifa.tarifa_sostenimiento });
+      meses.push({ anio, mes, valor: tarifa.tarifa_sostenimiento, causado: false });
     }
 
     return { meses, total: redondear(meses.reduce((s, m) => s + m.valor, 0)), mesesSinTarifa };

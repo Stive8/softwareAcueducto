@@ -159,3 +159,41 @@ test('getCuentasConEstado: pagado_hasta sale de cubiertoHasta (cartera), no de p
     cerrarDbTemporal(ctx);
   }
 });
+
+test('getCuentasConEstado: tiene_abonos distingue "nunca pagó" de "pagó, pero ningún mes quedó cubierto" (reproduce el caso real de R0947)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const carteraService = new CarteraService(ctx.dbService);
+    const pagoService = new PagoService(ctx.dbService);
+
+    // T905: nunca pagó nada -- ni un solo movimiento de Abono.
+    const idNuncaPago = sembrarCuenta(db, 'T905');
+    carteraService.repository.crearMovimiento({
+      cuentaId: idNuncaPago, fecha: '2024-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 1
+    });
+
+    // T906: sí tiene un abono real, pero el primer cargo (enero) quedó sin cubrir -- cubiertoHasta
+    // es estricto y se congela ahí para siempre, aunque febrero sí se pagó completo.
+    const idConAbono = sembrarCuenta(db, 'T906');
+    carteraService.repository.crearMovimiento({
+      cuentaId: idConAbono, fecha: '2024-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 1
+    });
+    const cargoFeb = carteraService.repository.crearMovimiento({
+      cuentaId: idConAbono, fecha: '2024-02-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 2
+    });
+    carteraService.registrarAbono({ cuentaId: idConAbono, fecha: '2024-02-10', monto: 10000, modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: [cargoFeb] });
+
+    const r = pagoService.getCuentasConEstado({ page: 1, limit: 50 });
+    const filaNuncaPago = r.data.find(f => f.codigo === 'T905');
+    const filaConAbono = r.data.find(f => f.codigo === 'T906');
+
+    assert.equal(filaNuncaPago.pagado_hasta, null);
+    assert.equal(filaNuncaPago.tiene_abonos, false);
+
+    assert.equal(filaConAbono.pagado_hasta, null, 'cubiertoHasta sigue null -- enero nunca se cubrió');
+    assert.equal(filaConAbono.tiene_abonos, true, 'pero sí hay un abono real (febrero), a diferencia de T905');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

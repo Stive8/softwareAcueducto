@@ -199,7 +199,8 @@ class PagoRepository {
         (SELECT COALESCE(SUM(CASE WHEN tipo = 'Abono' THEN monto ELSE -monto END), 0)
            FROM cuenta_creditos WHERE cuenta_id = c.id) as saldo_favor,
         (SELECT COALESCE(SUM(saldo_pendiente), 0)
-           FROM nuevos_puntos WHERE cuenta_id = c.id AND estado = 'Pendiente') as conexion_pendiente
+           FROM nuevos_puntos WHERE cuenta_id = c.id AND estado = 'Pendiente') as conexion_pendiente,
+        (SELECT EXISTS(SELECT 1 FROM cartera_movimientos WHERE cuenta_id = c.id AND tipo = 'Abono')) as tiene_abonos
       FROM cuentas c
       LEFT JOIN cuenta_propietarios cp ON cp.cuenta_id = c.id AND cp.fecha_fin IS NULL
       LEFT JOIN propietarios p ON p.id = cp.propietario_id

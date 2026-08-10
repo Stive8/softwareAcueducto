@@ -525,6 +525,12 @@ class PagoService {
       return {
         ...row,
         pagado_hasta: pagadoHasta,
+        // Distingue "nunca pagó" de "pagó, pero ningún mes quedó cubierto de corrido desde el
+        // principio" (cubiertoHasta es estricto -- un solo hueco viejo lo deja en null para
+        // siempre, aunque haya abonos reales después, caso real R0947). Sin esto, la tabla decía
+        // "Sin aportes" para una cuenta con historial de pagos real, contradiciendo lo que se ve
+        // dos líneas abajo en su propio detalle.
+        tiene_abonos: !!row.tiene_abonos,
         meses_mora: mesesMora,
         deuda_antes_2024: deudaAntes2024,
         motivo_mora: motivoMora,
