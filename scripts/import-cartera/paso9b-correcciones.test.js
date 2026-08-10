@@ -5,7 +5,8 @@ const CarteraRepository = require('../../src/repositories/CarteraRepository');
 const {
   ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, PROPIETARIO_S0244,
   REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
-  CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229
+  CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229,
+  CAUSACION_S058, SUSPENSIONES_SIN_CARTERA
 } = require('./paso9b-correcciones');
 
 function sembrarCuenta(db, codigo) {
@@ -152,6 +153,23 @@ function sembrarTodas(db) {
   repo.crearImputacion({ abonoId: abono2229Id, cargoId: aperturaS044Id, monto: 156000 });
   repo.crearImputacion({ abonoId: abono2229Id, cargoId: cargoS044(1), monto: 50000 });
   repo.crearImputacion({ abonoId: abono2229Id, cargoId: cargoS044(2), monto: 44000 });
+
+  // --- S058: conexión nueva, sin fila en CARTERA -- quedó con categoría "Sin clasificar" ---
+  ids.S058 = sembrarCuenta(db, CAUSACION_S058.codigoCuenta);
+  const sinClasificarId = db.prepare(`SELECT id FROM categorias WHERE nombre='Sin clasificar'`).get().id;
+  ids.categoriaS058Id = db.prepare(
+    `INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2026-01-31')`
+  ).run(ids.S058, sinClasificarId).lastInsertRowid;
+
+  // --- 7 cuentas sin cartera: mismo marcador sintético que puso la migración a TODAS las
+  // cuentas por igual ("Estado inicial al migrar a cartera") -- es lo que hay que reemplazar.
+  for (const item of SUSPENSIONES_SIN_CARTERA) {
+    ids[item.codigoCuenta] = sembrarCuenta(db, item.codigoCuenta);
+    db.prepare(`
+      INSERT INTO cuenta_estados (cuenta_id, estado, fecha_inicio, motivo)
+      VALUES (?, 'Activo', '2026-06-27', 'Estado inicial al migrar a cartera')
+    `).run(ids[item.codigoCuenta]);
+  }
 
   return ids;
 }
@@ -578,6 +596,106 @@ test('paso9b: S044/2229 -- idempotente (apertura, texto y re-imputación)', () =
     assert.equal(apertura.monto, 0);
     const imps = db.prepare(`SELECT * FROM cartera_imputaciones WHERE abono_id=?`).all(ids.abono2229Id);
     assert.equal(imps.length, 6, 'no debe duplicar ni volver a re-imputar en la segunda corrida');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S058 -- causa febrero a julio 2026 a 10.000 y corrige la categoría a Finca', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.correccionS058.categoriaCorregida, true);
+    assert.equal(r.correccionS058.creados, 6, 'febrero a julio son 6 meses');
+
+    const categoria = db.prepare(`
+      SELECT cat.nombre FROM cuenta_categorias cc JOIN categorias cat ON cat.id = cc.categoria_id
+      WHERE cc.id = ?
+    `).get(ids.categoriaS058Id);
+    assert.equal(categoria.nombre, 'Finca');
+
+    const cargos = getCargos(db, ids.S058);
+    assert.equal(cargos.length, 6);
+    assert.deepEqual(cargos.map(c => c.mes), [2, 3, 4, 5, 6, 7]);
+    assert.ok(cargos.every(c => c.anio === 2026 && c.monto === 10000));
+    assert.ok(cargos.every(c => /mes siguiente a la instalacion/i.test(c.observaciones)));
+
+    assert.equal(
+      db.prepare(`SELECT COUNT(*) n FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=2026 AND mes=1`).get(ids.S058).n,
+      0, 'enero (mes de la conexión) no se causa'
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S058 -- idempotente, correr dos veces no duplica cargos ni vuelve a marcar la categoría como corregida', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.correccionS058.categoriaCorregida, false);
+    assert.equal(r2.correccionS058.creados, 6);
+    assert.equal(getCargos(db, ids.S058).length, 6, 'no debe duplicar los 6 cargos en la segunda corrida');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: las 7 cuentas sin cartera quedan Suspendidas desde el mes siguiente a su último recibo, sin causar nada', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.suspensionesSinCartera.length, 7);
+    assert.ok(r.suspensionesSinCartera.every(s => s.corregido === true));
+
+    for (const item of SUSPENSIONES_SIN_CARTERA) {
+      const cuenta = db.prepare('SELECT estado FROM cuentas WHERE id=?').get(ids[item.codigoCuenta]);
+      assert.equal(cuenta.estado, 'Suspendido', `${item.codigoCuenta} debe quedar Suspendido en cuentas.estado`);
+
+      const vigencias = db.prepare('SELECT estado, fecha_inicio, fecha_fin, motivo FROM cuenta_estados WHERE cuenta_id=?').all(ids[item.codigoCuenta]);
+      assert.equal(vigencias.length, 1, `${item.codigoCuenta} debe quedar con una sola vigencia (el marcador sintético se reemplaza, no se apila)`);
+      assert.equal(vigencias[0].estado, 'Suspendido');
+      assert.equal(vigencias[0].fecha_inicio, item.fechaInicio);
+      assert.equal(vigencias[0].fecha_fin, null);
+      assert.match(vigencias[0].motivo, /sin fila en CARTERA/i);
+
+      assert.equal(
+        db.prepare(`SELECT COUNT(*) n FROM cartera_movimientos WHERE cuenta_id=?`).get(ids[item.codigoCuenta]).n,
+        0, `${item.codigoCuenta} no debe tener ningún movimiento de cartera`
+      );
+    }
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: las 7 suspensiones son idempotentes -- correr dos veces no duplica cuenta_estados', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.ok(r2.suspensionesSinCartera.every(s => s.corregido === false));
+    for (const item of SUSPENSIONES_SIN_CARTERA) {
+      const vigencias = db.prepare('SELECT * FROM cuenta_estados WHERE cuenta_id=?').all(ids[item.codigoCuenta]);
+      assert.equal(vigencias.length, 1, `${item.codigoCuenta}: la segunda corrida no debe agregar una vigencia más`);
+    }
   } finally {
     cerrarDbTemporal(ctx);
   }

@@ -20,6 +20,10 @@ function main() {
   console.log(`S010 (recibos 1659/1825): ${r.recalculoS010.yaCorregido ? 'ya estaba corregido' : `1659 eliminado, ${r.recalculoS010.abonos.length} abonos recalculados`}`);
   console.log(`S044 apertura opaca: ${r.correccionAperturaS044.corregido ? 'corregida a 0' : 'ya estaba en 0'}`);
   console.log(`Recibo 2229: ${r.correccionPeriodo2229.corregido ? 'período corregido a enero-junio 2025' : 'ya estaba corregido'} (texto); ${r.reimputacion2229.reimputado ? 're-imputado contra enero-junio 2025' : 'ya estaba re-imputado'}`);
+  console.log(`S058: categoría ${r.correccionS058.categoriaCorregida ? 'corregida a Finca' : 'ya era Finca'}, ${r.correccionS058.creados} CargoMensual causados (feb-jul 2026 a 10.000)`);
+  for (const s of r.suspensionesSinCartera) {
+    console.log(`${s.codigo}: ${s.corregido ? 'suspendida' : 'ya estaba suspendida'} (sin fila en CARTERA, sin barrido de campo)`);
+  }
 
   const outDir = path.join(__dirname, 'output');
   fs.mkdirSync(outDir, { recursive: true });

@@ -98,12 +98,34 @@
 //    y se reimputa el abono contra los 6 meses correctos -- con la apertura ya en 0, los
 //    $300.000 alcanzan exacto para enero-junio 2025, sin sobrante.
 //
+// 10. S058: conexión nueva sin fila en CARTERA.xlsx -- por eso el paso 9 nunca la causó (no hay
+//    plan_causacion sin fila de origen). De las 8 cuentas activas sin ningún CargoMensual
+//    causado, es la única que SÍ aparece en el barrido de campo de DatosPropietariosCuentas.xlsx
+//    (TIPO=CASA, con coordenadas y teléfono) -- las otras 7 van en la corrección 11. Pagó el
+//    punto de conexión el 31-ene-2026 ($500.000, saldado); se causa sostenimiento desde FEBRERO
+//    2026 (regla de negocio: el mes siguiente a la instalación, nunca el mismo mes) hasta julio
+//    2026 (mismo tope que el resto de la carga inicial, ver paso9-causacion.js), a la tarifa de
+//    Finca vigente (10.000). Categoría corregida de "Sin clasificar" (donde quedó por no tener
+//    fila de origen) a Finca. Nota aparte, no accionable acá: mismo teléfono que R0081 (Arias
+//    Moreno Martha Lucía) -- es la misma persona con un segundo punto de agua; cada punto es su
+//    propia cuenta, no se fusionan.
+//
+// 11. Las otras 7 cuentas sin ningún CargoMensual causado (O40-1, R0103, R031, R0401, S0101,
+//    S061, S091) tampoco aparecen en el barrido de campo de DatosPropietariosCuentas -- son
+//    puntos que dejaron de existir y nadie los dio de baja formalmente. Se suspenden sin causar
+//    nada, con fecha de suspensión el mes siguiente a su último recibo real (para que no generen
+//    deuda desde entonces). S0332S0382 (la octava cuenta con cero CargoMensual) NO entra acá: ya
+//    está marcada como cuenta corrupta desactivada desde el paso 1 (`construirPlan` la salta
+//    explícitamente), nunca tuvo cuenta_estados que corregir.
+//
 // Idempotente: antes de insertar, borra los CargoMensual existentes de la cuenta en los años
-// que va a recrear (2024-2026 completos para las 4 de tarifa; solo 2024 para S03311), así que
-// re-ejecutar da el mismo resultado sin duplicar ni acumular montos viejos. La asignación de
-// propietario de S0244 solo inserta si la cuenta sigue sin propietario activo. Las correcciones
-// 4 a 9 se detectan por si el movimiento/campo que tocan ya quedó en el estado corregido (ver
-// cada bloque), así que repetir la corrida no duplica imputaciones ni revierte nada.
+// que va a recrear (2024-2026 completos para las 4 de tarifa; solo 2024 para S03311; feb-jul
+// 2026 para S058), así que re-ejecutar da el mismo resultado sin duplicar ni acumular montos
+// viejos. La asignación de propietario de S0244 solo inserta si la cuenta sigue sin propietario
+// activo. Las correcciones 4 a 9 se detectan por si el movimiento/campo que tocan ya quedó en el
+// estado corregido (ver cada bloque), así que repetir la corrida no duplica imputaciones ni
+// revierte nada. La corrección 11 se detecta por si la vigencia abierta de cuenta_estados ya es
+// exactamente el Suspendido esperado (mismo estado, misma fecha_inicio).
 const { normalizarCodigo } = require('./normalizar');
 const { primerDiaDelMes } = require('../../src/services/cartera/periodos');
 const { distribuir, MODOS } = require('../../src/services/cartera/imputacion');
@@ -175,6 +197,35 @@ const CORRECCION_PERIODO_RECIBO_2229 = {
   periodoDesdeNuevo: 'Enero 2025',
   periodoHastaNuevo: 'Junio 2025'
 };
+
+const OBSERVACION_CAUSACION_S058 =
+  'Causacion iniciada en febrero 2026 (mes siguiente a la instalacion del punto de conexion, ' +
+  'pagado el 31-ene-2026 por $500.000) -- regla de negocio: el sostenimiento arranca el mes ' +
+  'siguiente a la conexion, no el mismo mes.';
+
+const CAUSACION_S058 = {
+  codigoCuenta: 'S058',
+  categoriaNombre: 'Finca',
+  anio: 2026,
+  mesInicio: 2,
+  mesFin: 7,
+  monto: 10000
+};
+
+const OBSERVACION_SUSPENSION_SIN_CARTERA =
+  'No localizada en el barrido de campo; sin fila en CARTERA. Suspendida en la carga inicial.';
+
+// Fecha de suspensión = mes siguiente al último recibo real de cada cuenta (ver comentario de
+// la corrección 11 arriba para el porqué).
+const SUSPENSIONES_SIN_CARTERA = [
+  { codigoCuenta: 'O40-1', fechaInicio: '2018-01-01' },
+  { codigoCuenta: 'R0103', fechaInicio: '2020-01-01' },
+  { codigoCuenta: 'R031', fechaInicio: '2024-06-01' },
+  { codigoCuenta: 'R0401', fechaInicio: '2018-05-01' },
+  { codigoCuenta: 'S0101', fechaInicio: '2020-09-01' },
+  { codigoCuenta: 'S061', fechaInicio: '2021-05-01' },
+  { codigoCuenta: 'S091', fechaInicio: '2021-06-01' }
+];
 
 function borrarCargoMensualDelAnio(db, cuentaId, anio) {
   return db.prepare("DELETE FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=?")
@@ -276,6 +327,8 @@ function ejecutarPaso9b({ dbService }) {
   let correccionAperturaS044 = null;
   let correccionPeriodo2229 = null;
   let reimputacion2229 = null;
+  let correccionS058 = null;
+  const suspensionesSinCartera = [];
 
   const transaccion = db.transaction(() => {
     // 1. S03311: causar 2024 completo a 10.000
@@ -499,18 +552,85 @@ function ejecutarPaso9b({ dbService }) {
       });
       reimputacion2229 = { abonoId: abono2229.id, reimputado: true, ...r };
     }
+
+    // 10. S058: causar sostenimiento desde febrero 2026 (mes siguiente a la conexión) y
+    // corregir la categoría de "Sin clasificar" a Finca.
+    const cuentaS058 = idPorCodigo.get(normalizarCodigo(CAUSACION_S058.codigoCuenta));
+    if (cuentaS058 === undefined) throw new Error('S058: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+    const categoriaFinca = db.prepare('SELECT id FROM categorias WHERE nombre=?').get(CAUSACION_S058.categoriaNombre);
+    if (!categoriaFinca) throw new Error(`Categoría "${CAUSACION_S058.categoriaNombre}" no existe en la base`);
+
+    const catActualS058 = db.prepare(
+      'SELECT id, categoria_id FROM cuenta_categorias WHERE cuenta_id=? AND fecha_fin IS NULL'
+    ).get(cuentaS058);
+    if (!catActualS058) throw new Error('S058: no tiene categoría activa en cuenta_categorias -- ¿corrió el paso de categorías?');
+
+    let categoriaS058Corregida;
+    if (catActualS058.categoria_id === categoriaFinca.id) {
+      categoriaS058Corregida = false;
+    } else {
+      db.prepare('UPDATE cuenta_categorias SET categoria_id=? WHERE id=?').run(categoriaFinca.id, catActualS058.id);
+      categoriaS058Corregida = true;
+    }
+
+    let borradosS058 = 0;
+    for (let mes = CAUSACION_S058.mesInicio; mes <= CAUSACION_S058.mesFin; mes++) {
+      borradosS058 += db.prepare(
+        "DELETE FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?"
+      ).run(cuentaS058, CAUSACION_S058.anio, mes).changes;
+    }
+    const causacionS058 = [];
+    for (let mes = CAUSACION_S058.mesInicio; mes <= CAUSACION_S058.mesFin; mes++) {
+      const movId = repo.crearMovimiento({
+        cuentaId: cuentaS058, fecha: primerDiaDelMes(CAUSACION_S058.anio, mes),
+        tipo: 'CargoMensual', exigible: 1, monto: CAUSACION_S058.monto,
+        anio: CAUSACION_S058.anio, mes, observaciones: OBSERVACION_CAUSACION_S058
+      });
+      causacionS058.push({ mes, movId });
+    }
+    correccionS058 = { categoriaCorregida: categoriaS058Corregida, borrados: borradosS058, creados: causacionS058.length };
+
+    // 11. Siete cuentas sin cartera y sin barrido de campo: suspender sin causar nada. Se
+    // detecta por si la vigencia abierta ya es exactamente el Suspendido esperado; si no,
+    // se reemplaza entera -- para estas 7 cuentas la única fila que existe hoy es el marcador
+    // sintético "Estado inicial al migrar a cartera" (Activo, 2026-06-27) que puso la carga
+    // inicial por defecto a TODAS las cuentas por igual, así que no hay historial real que
+    // preservar al reemplazarla.
+    for (const item of SUSPENSIONES_SIN_CARTERA) {
+      const cuentaId = idPorCodigo.get(normalizarCodigo(item.codigoCuenta));
+      if (cuentaId === undefined) throw new Error(`${item.codigoCuenta}: no existe en la base -- ¿corrieron los pasos 1-2?`);
+
+      const abierta = db.prepare(
+        'SELECT id, estado, fecha_inicio FROM cuenta_estados WHERE cuenta_id=? AND fecha_fin IS NULL'
+      ).get(cuentaId);
+      if (abierta && abierta.estado === 'Suspendido' && abierta.fecha_inicio === item.fechaInicio) {
+        suspensionesSinCartera.push({ codigo: item.codigoCuenta, corregido: false });
+        continue;
+      }
+
+      db.prepare('DELETE FROM cuenta_estados WHERE cuenta_id=?').run(cuentaId);
+      db.prepare(`
+        INSERT INTO cuenta_estados (cuenta_id, estado, fecha_inicio, motivo) VALUES (?, 'Suspendido', ?, ?)
+      `).run(cuentaId, item.fechaInicio, OBSERVACION_SUSPENSION_SIN_CARTERA);
+      db.prepare("UPDATE cuentas SET estado='Suspendido' WHERE id=?").run(cuentaId);
+
+      suspensionesSinCartera.push({ codigo: item.codigoCuenta, corregido: true });
+    }
   });
   transaccion();
 
   return {
     s03311Creados, tarifaCorregida, propietarioS0244,
     reasignacion2137, correccion2384, reimputacion2384, recalculoS010,
-    correccionAperturaS044, correccionPeriodo2229, reimputacion2229
+    correccionAperturaS044, correccionPeriodo2229, reimputacion2229,
+    correccionS058, suspensionesSinCartera
   };
 }
 
 module.exports = {
   ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, OBSERVACION_S03311, OBSERVACION_TARIFA, PROPIETARIO_S0244,
   REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
-  CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229, OBSERVACION_APERTURA_S044, reimputarAbono
+  CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229, OBSERVACION_APERTURA_S044, reimputarAbono,
+  CAUSACION_S058, OBSERVACION_CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, OBSERVACION_SUSPENSION_SIN_CARTERA
 };
