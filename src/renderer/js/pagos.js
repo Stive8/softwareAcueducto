@@ -5,6 +5,15 @@ const Pagos = {
   search: '',
   filtroPago: '',
 
+  // Apaga la comparación en pantalla contra el modelo viejo (bloque "Sistema actual" + los 4
+  // buckets internos del detalle de cartera) para la entrega -- no se borra el código: es la
+  // herramienta que encontró la mayoría de los bugs de la carga inicial (S048, las 26 cuentas
+  // que cobraban de más, las 109 de apertura opaca, R007) y va a servir igual en las fases 3 y 4
+  // del decommission del modelo viejo, para verificar que la pantalla de registro nueva da lo
+  // mismo que la vieja antes de reemplazarla. Prender desde la consola del navegador:
+  // `Pagos.MOSTRAR_COMPARACION_MODELO_VIEJO = true` y recargar el detalle de una cuenta.
+  MOSTRAR_COMPARACION_MODELO_VIEJO: false,
+
   async load() {
     const content = document.getElementById('page-content');
     content.innerHTML = `
@@ -180,6 +189,7 @@ const Pagos = {
           <h2>Estado de Aportes</h2>
         </div>
 
+        ${this.MOSTRAR_COMPARACION_MODELO_VIEJO ? `
         <div class="detail-section">
           <div class="detail-row">
             <div class="detail-label">Aportado Hasta:</div>
@@ -210,6 +220,7 @@ const Pagos = {
             <div class="detail-value">${estado.totalMesesPagados}</div>
           </div>
         </div>
+        ` : ''}
 
         <div class="detail-section">
           <h3>Historial de Aportes</h3>
@@ -346,11 +357,13 @@ const Pagos = {
     return `
       <div class="detail-section">
         <h3>Cartera (nuevo modelo) — vista de solo lectura</h3>
+        ${this.MOSTRAR_COMPARACION_MODELO_VIEJO ? `
         <p style="color: #64748b; font-size: 0.8125rem; margin: -4px 0 12px 0;">
           El sistema sigue cobrando con el cálculo de arriba ("Sistema actual"). Esto es el
           modelo nuevo de cartera, en paralelo, para validarlo contra datos reales — todavía
           sin botones de registro conectados.
         </p>
+        ` : ''}
 
         ${motivoDiferencia ? `
           <div style="background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px; padding: 12px; margin-bottom: 16px;">
@@ -383,6 +396,7 @@ const Pagos = {
           </div>
         ` : ''}
 
+        ${this.MOSTRAR_COMPARACION_MODELO_VIEJO ? `
         <details style="margin-bottom: 16px;">
           <summary style="cursor: pointer; color: #64748b; font-size: 0.8125rem;">Ver los 4 buckets internos (comparación con el sistema actual)</summary>
           <table style="width: 100%; margin-top: 8px;">
@@ -399,6 +413,7 @@ const Pagos = {
             </tbody>
           </table>
         </details>
+        ` : ''}
 
         <h4 style="margin: 16px 0 8px 0;">Detalle de movimientos</h4>
         ${movimientos.length > 0 ? `
