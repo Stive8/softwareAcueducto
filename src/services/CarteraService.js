@@ -5,7 +5,7 @@ const PagoRepository = require('../repositories/PagoRepository');
 const NuevoPuntoRepository = require('../repositories/NuevoPuntoRepository');
 const { codificarPeriodo, decodificarPeriodo, anioMesDeFecha, primerDiaDelMes, diaAnterior } =
   require('./cartera/periodos');
-const { MODOS, distribuir, calcularCubiertoHasta } = require('./cartera/imputacion');
+const { MODOS, distribuir, calcularCubiertoHasta, calcularAlDiaHasta } = require('./cartera/imputacion');
 const { redondear, esMayor } = require('./cartera/dinero');
 const { getMotivoDiferencia } = require('./cartera/motivosDiferencia');
 
@@ -408,6 +408,24 @@ class CarteraService {
       totalCobrarHoy,
       totalReferencia: redondear(totalCobrarHoy + saldoOpaco)
     };
+  }
+
+  // "Próximo período sugerido": el mes siguiente al último cubierto (alDiaHasta), IGNORANDO
+  // huecos históricos -- esos siguen contando como deuda en getEstadoCartera/calcularAPagar, no
+  // acá. Puede devolver un mes que todavía no tiene CargoMensual causado (ej. una cuenta al día
+  // hasta julio cuando ya es agosto, o una cuenta con un pago anticipado que la causación
+  // todavía no alcanzó): es intencional, asegurarCausacion lo crea al registrar el pago, y si
+  // había un pago anticipado sin causar ya quedó como saldo a favor (ver registrarAbono).
+  getProximoPeriodoSugerido(cuentaId) {
+    const alDiaHasta = calcularAlDiaHasta(this.repository.getCargosConCobertura(cuentaId, 1));
+
+    if (alDiaHasta) {
+      const cod = codificarPeriodo(alDiaHasta.anio, alDiaHasta.mes) + 1;
+      return { alDiaHasta, siguiente: decodificarPeriodo(cod) };
+    }
+
+    const ancla = this.getFechaInicioFacturacion(cuentaId);
+    return { alDiaHasta: null, siguiente: ancla ? anioMesDeFecha(ancla) : null };
   }
 
   // Detalle de solo lectura para mostrar en pantalla: los movimientos de cartera_movimientos

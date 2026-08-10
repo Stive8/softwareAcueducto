@@ -83,15 +83,21 @@ class PagoService {
     const ahora = new Date();
     const periodoActual = { anio: ahora.getFullYear(), mes: ahora.getMonth() + 1 };
 
-    const ultimoPagado = this.repository.getUltimoPeriodoPagado(cuentaId);
-
-    let siguiente;
-    if (ultimoPagado) {
-      siguiente = this.sumarMeses(ultimoPagado.anio, ultimoPagado.mes, 1);
-    } else {
-      const fechaInicio = this.repository.getFechaInicioFacturacion(cuentaId) || cuenta.fecha_creacion;
-      siguiente = anioMesDeFecha(fechaInicio);
-    }
+    // "Pagado hasta"/"próximo período sugerido" se calculan desde cartera_movimientos (vía
+    // CarteraService.getProximoPeriodoSugerido), no desde pago_periodos: cartera es la fuente
+    // completa -- recibe tanto la carga inicial como cada pago nuevo por la doble escritura --
+    // mientras que pago_periodos puede tener huecos para recibos que se causaron directo en
+    // cartera durante la carga inicial (caso real: R001, 2026-08, ver
+    // docs/superpowers/specs/2026-08-09-proximo-periodo-sugerido-design.md). Usar pago_periodos
+    // acá sugería un período que cartera ya tenía cubierto, y el guardián de
+    // registrarPagoSostenimiento lo rechazaba: bloqueaba el cobro por completo para esas cuentas.
+    //
+    // alDiaHasta ignora huecos históricos a propósito (esos siguen siendo deuda real, ver
+    // CarteraService.getEstadoCartera/calcularAPagar, que esta función no toca) -- es
+    // deliberadamente distinto de "cuánto debe en total".
+    const { alDiaHasta, siguiente: siguienteCartera } = this.carteraService.getProximoPeriodoSugerido(cuentaId);
+    const ultimoPagado = alDiaHasta;
+    const siguiente = siguienteCartera || anioMesDeFecha(cuenta.fecha_creacion);
 
     const mesesMora = Math.max(codificarPeriodo(periodoActual.anio, periodoActual.mes) - codificarPeriodo(siguiente.anio, siguiente.mes) + 1, 0);
     const enMora = mesesMora > 0;

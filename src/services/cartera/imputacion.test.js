@@ -1,7 +1,7 @@
 // src/services/cartera/imputacion.test.js
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { MODOS, distribuir, calcularCubiertoHasta } = require('./imputacion');
+const { MODOS, distribuir, calcularCubiertoHasta, calcularAlDiaHasta } = require('./imputacion');
 
 // Cargos de ejemplo: 3 meses de $10.000 sin cubrir, del más antiguo al más nuevo.
 function cargosBase() {
@@ -146,4 +146,40 @@ test('calcularCubiertoHasta ordena por período, no confía en el orden recibido
     { anio: 2026, mes: 1, monto: 10000, cubierto: 10000 }
   ];
   assert.deepEqual(calcularCubiertoHasta(cargos), { anio: 2026, mes: 2 });
+});
+
+test('calcularAlDiaHasta ignora huecos anteriores y devuelve el último mes cubierto (a diferencia de calcularCubiertoHasta)', () => {
+  // Mismo caso real que expuso el problema (cuenta S050, 2026-08): huecos en enero y marzo de
+  // 2024, todo lo demás pagado sin huecos hasta julio de 2026. cubiertoHasta debe seguir viendo
+  // el hueco como deuda real (sin cambios); alDiaHasta debe ignorarlo para la sugerencia de pago.
+  const cargos = [
+    { anio: 2024, mes: 1, monto: 10000, cubierto: 0 },
+    { anio: 2024, mes: 2, monto: 10000, cubierto: 10000 },
+    { anio: 2024, mes: 3, monto: 10000, cubierto: 0 },
+    { anio: 2024, mes: 4, monto: 10000, cubierto: 10000 },
+    { anio: 2026, mes: 7, monto: 10000, cubierto: 10000 }
+  ];
+  assert.equal(calcularCubiertoHasta(cargos), null, 'el hueco de enero-2024 sigue siendo deuda real, sin cambios');
+  assert.deepEqual(calcularAlDiaHasta(cargos), { anio: 2026, mes: 7 }, 'la sugerencia de pago no se frena por un hueco viejo ya superado');
+});
+
+test('calcularAlDiaHasta devuelve null si ningún mes está cubierto', () => {
+  assert.equal(calcularAlDiaHasta([]), null);
+  assert.equal(calcularAlDiaHasta([{ anio: 2026, mes: 1, monto: 10000, cubierto: 0 }]), null);
+});
+
+test('calcularAlDiaHasta sin huecos coincide con calcularCubiertoHasta', () => {
+  const cargos = [
+    { anio: 2026, mes: 1, monto: 10000, cubierto: 10000 },
+    { anio: 2026, mes: 2, monto: 10000, cubierto: 10000 }
+  ];
+  assert.deepEqual(calcularAlDiaHasta(cargos), calcularCubiertoHasta(cargos));
+});
+
+test('calcularAlDiaHasta ordena por período, no confía en el orden recibido', () => {
+  const cargos = [
+    { anio: 2026, mes: 2, monto: 10000, cubierto: 10000 },
+    { anio: 2026, mes: 1, monto: 10000, cubierto: 10000 }
+  ];
+  assert.deepEqual(calcularAlDiaHasta(cargos), { anio: 2026, mes: 2 });
 });

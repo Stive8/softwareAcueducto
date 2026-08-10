@@ -74,4 +74,23 @@ function calcularCubiertoHasta(cargosConCobertura) {
   return ultimo;
 }
 
-module.exports = { MODOS, distribuir, calcularCubiertoHasta };
+// "Al día hasta" X = el mes más reciente ya cubierto por completo. A diferencia de
+// calcularCubiertoHasta, NO se detiene en el primer hueco: un hueco viejo sigue siendo deuda
+// real (eso lo captura cubiertoHasta/calcularAPagar/deudaExigible, sin cambios acá), pero no
+// debe congelar "qué mes le sugiero pagar ahora" en un punto del pasado ya superado. Ordena
+// igual que calcularCubiertoHasta -- no confía en el orden recibido -- y se queda con el
+// último cubierto del recorrido completo, sin cortar en el primer hueco.
+function calcularAlDiaHasta(cargosConCobertura) {
+  const ordenados = [...cargosConCobertura]
+    .filter(c => c.anio !== null && c.mes !== null)
+    .sort((a, b) => codificarPeriodo(a.anio, a.mes) - codificarPeriodo(b.anio, b.mes));
+
+  let ultimo = null;
+  for (const cargo of ordenados) {
+    const falta = redondear(cargo.monto) - redondear(cargo.cubierto);
+    if (!esMayor(falta, 0)) ultimo = { anio: cargo.anio, mes: cargo.mes };
+  }
+  return ultimo;
+}
+
+module.exports = { MODOS, distribuir, calcularCubiertoHasta, calcularAlDiaHasta };
