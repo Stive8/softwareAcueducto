@@ -1750,6 +1750,36 @@ function setupIpcHandlers() {
     }
   });
 
+  // Reemplaza el .db actual por origenPath de forma segura, para los tres caminos de
+  // restauración (manual, "actualizar desde la nube", y la actualización silenciosa de
+  // Consulta). Dos protecciones, en este orden:
+  //  1. Respalda el .db actual en rutaBackupPrevio ANTES de tocar nada -- si el archivo
+  //     elegido resulta ser el equivocado, o la restauración se corta a mitad de camino, los
+  //     datos de producción actuales quedan recuperables.
+  //  2. Copia el archivo nuevo a un temporal junto al destino y recién entonces lo renombra
+  //     sobre el .db real, en vez de copiar directo encima: un fallo a mitad de la copia (disco
+  //     lleno, antivirus, corte de luz) deja el .db original intacto, nunca uno truncado.
+  // rutaBackupPrevio se recibe ya calculada cuando el caller necesita mostrarla en un diálogo
+  // de confirmación antes de ejecutar esto; si no se pasa, se calcula aquí mismo.
+  async function restaurarBaseDeDatosDesde(origenPath, rutaBackupPrevio) {
+    const destinoBackup = rutaBackupPrevio || backupService.rutaBackupPreRestauracion();
+    await backupService.crearBackup(destinoBackup);
+
+    const dbPath = dbService.getDbPath();
+    dbService.close();
+
+    const rutaTemporal = `${dbPath}.tmp-restore`;
+    fs.copyFileSync(origenPath, rutaTemporal);
+    fs.renameSync(rutaTemporal, dbPath);
+
+    for (const ext of ['-wal', '-shm']) {
+      const residual = dbPath + ext;
+      if (fs.existsSync(residual)) fs.unlinkSync(residual);
+    }
+
+    return destinoBackup;
+  }
+
   envolverHandle('backup:restaurar', async () => {
     try {
       const { canceled, filePaths } = await dialog.showOpenDialog(mainWindow, {
@@ -1763,7 +1793,12 @@ function setupIpcHandlers() {
       }
 
       const origenPath = filePaths[0];
-      backupService.validarArchivoRestauracion(origenPath);
+      const validacion = backupService.validarArchivoRestauracion(origenPath);
+      const rutaBackupPrevio = backupService.rutaBackupPreRestauracion();
+
+      const avisoMigraciones = validacion.migracionesPendientes.length > 0
+        ? `\n\nEste archivo corresponde a una versión anterior de la aplicación: al reiniciar se aplicarán ${validacion.migracionesPendientes.length} actualización(es) de base de datos pendientes.`
+        : '';
 
       const confirmacion = await dialog.showMessageBox(mainWindow, {
         type: 'warning',
@@ -1771,21 +1806,14 @@ function setupIpcHandlers() {
         defaultId: 0,
         cancelId: 0,
         title: 'Confirmar restauración',
-        message: 'Esto reemplazará todos los datos actuales con los del archivo seleccionado. La aplicación se reiniciará. ¿Desea continuar?'
+        message: `Esto reemplazará todos los datos actuales con los del archivo seleccionado (${validacion.totalCuentas} cuentas).\n\nAntes de reemplazarlos, se guardará una copia de seguridad de los datos actuales en:\n${rutaBackupPrevio}${avisoMigraciones}\n\nLa aplicación se reiniciará. ¿Desea continuar?`
       });
 
       if (confirmacion.response !== 1) {
         return { success: false, canceled: true };
       }
 
-      const dbPath = dbService.getDbPath();
-      dbService.close();
-
-      fs.copyFileSync(origenPath, dbPath);
-      for (const ext of ['-wal', '-shm']) {
-        const residual = dbPath + ext;
-        if (fs.existsSync(residual)) fs.unlinkSync(residual);
-      }
+      await restaurarBaseDeDatosDesde(origenPath, rutaBackupPrevio);
 
       app.relaunch();
       app.exit();
@@ -1849,25 +1877,19 @@ function setupIpcHandlers() {
   });
 
   // Reemplaza la base de datos local por un archivo ya descargado y válido, y reinicia la app
-  // (mismo patrón que backup:restaurar). Lo comparten el botón manual "Actualizar desde la nube"
-  // y la actualización silenciosa automática para Consulta.
+  // (mismo patrón que backup:restaurar, incluida la protección de restaurarBaseDeDatosDesde).
+  // Lo comparten el botón manual "Actualizar desde la nube" y la actualización silenciosa
+  // automática para Consulta.
   //
   // secuencia es la del respaldo que se está aplicando: hay que guardarla en el estado local
   // ANTES de reiniciar, porque ese estado vive en un archivo aparte del .db (ver comentario en
   // CloudBackupOrchestratorService) y no viaja solo con el archivo que se acaba de copiar. Sin
   // esto, la app seguiría pensando para siempre que hay algo nuevo sin traer, y lo volvería a
   // descargar y aplicar en cada login.
-  function aplicarRespaldoDescargado(rutaLocal, secuencia) {
+  async function aplicarRespaldoDescargado(rutaLocal, secuencia, rutaBackupPrevio) {
     cloudBackupService.marcarRespaldoTraido(secuencia);
 
-    const dbPath = dbService.getDbPath();
-    dbService.close();
-
-    fs.copyFileSync(rutaLocal, dbPath);
-    for (const ext of ['-wal', '-shm']) {
-      const residual = dbPath + ext;
-      if (fs.existsSync(residual)) fs.unlinkSync(residual);
-    }
+    await restaurarBaseDeDatosDesde(rutaLocal, rutaBackupPrevio);
 
     app.relaunch();
     app.exit();
@@ -1891,12 +1913,16 @@ function setupIpcHandlers() {
     try {
       const { archivo, rutaLocal } = await cloudBackupService.descargarUltimoRespaldo();
       archivoTemporal = rutaLocal;
-      backupService.validarArchivoRestauracion(rutaLocal);
+      const validacion = backupService.validarArchivoRestauracion(rutaLocal);
+      const rutaBackupPrevio = backupService.rutaBackupPreRestauracion();
 
       const secuenciaRemota = Number(archivo.properties?.secuencia || 0);
       const secuenciaLocal = cloudBackupService.getEstado().secuenciaLocal;
       const advertenciaConflicto = secuenciaRemota < secuenciaLocal
         ? '\n\nAviso: este respaldo de la nube parece ser MÁS VIEJO que los datos que ya tienes en este equipo. Si continúas, podrías perder información reciente.'
+        : '';
+      const avisoMigraciones = validacion.migracionesPendientes.length > 0
+        ? `\n\nEste respaldo corresponde a una versión anterior de la aplicación: al reiniciar se aplicarán ${validacion.migracionesPendientes.length} actualización(es) de base de datos pendientes.`
         : '';
 
       const fechaLegible = new Date(archivo.createdTime).toLocaleString('es-CO', {
@@ -1909,14 +1935,14 @@ function setupIpcHandlers() {
         defaultId: 0,
         cancelId: 0,
         title: 'Confirmar actualización desde la nube',
-        message: `Esto reemplazará todos los datos actuales con el respaldo más reciente de Google Drive (subido desde "${archivo.properties?.nombreEquipo || 'otro equipo'}" el ${fechaLegible}). La aplicación se reiniciará.${advertenciaConflicto}\n\n¿Desea continuar?`
+        message: `Esto reemplazará todos los datos actuales con el respaldo más reciente de Google Drive (subido desde "${archivo.properties?.nombreEquipo || 'otro equipo'}" el ${fechaLegible}, ${validacion.totalCuentas} cuentas). La aplicación se reiniciará.\n\nAntes de reemplazarlos, se guardará una copia de seguridad de los datos actuales en:\n${rutaBackupPrevio}${advertenciaConflicto}${avisoMigraciones}\n\n¿Desea continuar?`
       });
 
       if (confirmacion.response !== 1) {
         return { success: false, canceled: true };
       }
 
-      aplicarRespaldoDescargado(rutaLocal, secuenciaRemota);
+      await aplicarRespaldoDescargado(rutaLocal, secuenciaRemota, rutaBackupPrevio);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -1967,7 +1993,7 @@ function setupIpcHandlers() {
       try {
         backupService.validarArchivoRestauracion(rutaLocal);
         const secuenciaRemota = Number(ultimo.properties?.secuencia || 0);
-        aplicarRespaldoDescargado(rutaLocal, secuenciaRemota);
+        await aplicarRespaldoDescargado(rutaLocal, secuenciaRemota);
         return { success: true, data: { actualizado: true } };
       } finally {
         if (fs.existsSync(rutaLocal)) fs.unlinkSync(rutaLocal);
