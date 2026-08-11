@@ -69,6 +69,86 @@ test('registrarPagoSostenimiento en efectivo causa y abona los mismos meses en c
   }
 });
 
+test('registrarPagoSostenimiento rechaza un período anterior a 2024 (ya está consolidado en la apertura opaca)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuentaPagable(db, { tarifa: 10000, fechaCategoria: '2018-01-01' });
+    const pagoService = new PagoService(ctx.dbService);
+
+    assert.throws(
+      () => pagoService.registrarPagoSostenimiento({
+        cuentaId, anioInicio: 2020, mesInicio: 1, cantidadMeses: 1,
+        fechaPago: '2026-04-01', metodoPago: 'Efectivo'
+      }),
+      /anteriores a 2024.*apertura/
+    );
+
+    // Nada debe haber quedado escrito: ni recibo, ni CargoMensual.
+    const { total: recibos } = db.prepare(`SELECT COUNT(*) AS total FROM recibos WHERE cuenta_id = ?`).get(cuentaId);
+    assert.equal(recibos, 0);
+    const { total: cargos } = db.prepare(
+      `SELECT COUNT(*) AS total FROM cartera_movimientos WHERE cuenta_id = ? AND tipo = 'CargoMensual'`
+    ).get(cuentaId);
+    assert.equal(cargos, 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('registrarPagoSostenimiento rechaza incluso cuando solo el mes de inicio es anterior a 2024 (diciembre 2023 a febrero 2024)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuentaPagable(db, { tarifa: 10000, fechaCategoria: '2018-01-01' });
+    const pagoService = new PagoService(ctx.dbService);
+
+    assert.throws(
+      () => pagoService.registrarPagoSostenimiento({
+        cuentaId, anioInicio: 2023, mesInicio: 12, cantidadMeses: 3,
+        fechaPago: '2026-04-01', metodoPago: 'Efectivo'
+      }),
+      /anteriores a 2024/
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('registrarPagoSostenimiento acepta el límite exacto de 2024-01', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuentaPagable(db, { tarifa: 10000, fechaCategoria: '2018-01-01' });
+    const pagoService = new PagoService(ctx.dbService);
+
+    const r = pagoService.registrarPagoSostenimiento({
+      cuentaId, anioInicio: 2024, mesInicio: 1, cantidadMeses: 1,
+      fechaPago: '2026-04-01', metodoPago: 'Efectivo'
+    });
+
+    assert.equal(r.total, 10000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('simularPago también rechaza un período anterior a 2024, sin registrar nada', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuentaPagable(db, { tarifa: 10000, fechaCategoria: '2018-01-01' });
+    const pagoService = new PagoService(ctx.dbService);
+
+    assert.throws(
+      () => pagoService.simularPago(cuentaId, 2022, 6, 2),
+      /anteriores a 2024/
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('registrarPagoSostenimiento no toca pago_periodos ni cuenta_creditos si el motor de cartera falla', () => {
   const ctx = crearDbTemporal();
   try {

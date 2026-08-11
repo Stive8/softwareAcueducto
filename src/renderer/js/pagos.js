@@ -698,7 +698,7 @@ const Pagos = {
             <select id="mes_inicio" name="mes_inicio" style="flex: 1;">
               ${this.opcionesMeses(estado.siguientePeriodo.mes)}
             </select>
-            <input type="number" id="anio_inicio" name="anio_inicio" value="${estado.siguientePeriodo.anio}" min="2000" max="2100" style="flex: 1;">
+            <input type="number" id="anio_inicio" name="anio_inicio" value="${estado.siguientePeriodo.anio}" min="2024" max="2100" style="flex: 1;">
           </div>
         </div>
 

@@ -48,6 +48,13 @@ function decodificarPeriodo(codigo) {
   return { anio: Math.floor(codigo / 12), mes: (codigo % 12) + 1 };
 }
 
+// El corte del 31/12/2023 es una frontera dura del modelo de cartera (ver
+// REGLAS_CARGA_INICIAL.md, sección 2): toda la deuda anterior a esa fecha quedó consolidada
+// en un único movimiento AperturaOpaca por cuenta. Dejar que construirPeriodos genere un
+// CargoMensual individual para un mes anterior a 2024 duplicaría esa deuda (ya está ahí,
+// sin detalle mes a mes, dentro del saldo opaco).
+const PRIMER_PERIODO_CAUSABLE = codificarPeriodo(2024, 1);
+
 // Extrae año/mes de una fecha 'YYYY-MM-DD' sin pasar por new Date(): un string de solo fecha
 // se interpreta como medianoche UTC, y en una zona horaria negativa (ej. Colombia, UTC-5) eso
 // puede retroceder la fecha un día y, si era el día 1, retroceder el mes entero.
@@ -137,6 +144,10 @@ class PagoService {
 
   // Construye la lista de períodos a cobrar y valida que ninguno esté ya pagado
   construirPeriodos(cuentaId, anioInicio, mesInicio, cantidadMeses) {
+    if (codificarPeriodo(anioInicio, mesInicio) < PRIMER_PERIODO_CAUSABLE) {
+      throw new Error('Los períodos anteriores a 2024 están consolidados en la deuda de apertura y no pueden causarse individualmente.');
+    }
+
     const periodos = [];
     let cursor = { anio: anioInicio, mes: mesInicio };
 
