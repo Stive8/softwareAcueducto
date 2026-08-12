@@ -189,6 +189,13 @@ class ReciboService {
   }
 
   // Genera el documento HTML imprimible de un recibo (usado tanto para imprimir como para exportar a PDF)
+  //
+  // TODO antes de exponer corregirCampo en la UI (getById/getDetalles todavía no pasan por
+  // getValorVigente, así que hoy no importa -- corregirCampo tampoco está conectado a IPC):
+  // este HTML lee recibo.detalles/recibo directo de la tabla original, nunca la corrección
+  // vigente. Un recibo con concepto/valor corregido seguiría imprimiéndose/exportándose con el
+  // valor ORIGINAL. Auditoría de entrega 2026-08-11, nota final del inventario -- ver
+  // docs/deuda-tecnica-auditoria-2026-08-11.md.
   generarHTML(id) {
     const recibo = this.getById(id);
     if (!recibo) {

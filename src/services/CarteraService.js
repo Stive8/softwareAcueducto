@@ -168,6 +168,14 @@ class CarteraService {
   // más sin decir para qué -- alguien tiene que decidir redimirlo (ver redimirCredito).
   // Si el modo es ANTICIPO (o cualquier otro deja todo sin imputar), no se crea ningún
   // movimiento: el monto entero es crédito.
+  //
+  // TODO antes de conectar esto a IPC (todavía no lo está, ver main.js): en modo
+  // AbonoDeudaFIFO no llama a asegurarCausacion antes de imputar contra getCargosPendientes,
+  // a diferencia de redimirCredito (que sí lo hace desde 2026-08-11). Si el mes en curso
+  // todavía no tiene su CargoMensual real, el FIFO lo salta -- calcularAPagar seguiría
+  // mostrándolo como pendiente aunque haya plata suficiente (mismo caso real R007 que motivó
+  // el fix en redimirCredito). Auditoría de entrega 2026-08-11, hallazgo 7 -- ver
+  // docs/deuda-tecnica-auditoria-2026-08-11.md.
   registrarAbono({ cuentaId, fecha, monto, modo, cargosElegidos = [],
     reciboDetalleId = null, observaciones = null, usuarioId = null }) {
     if (!cuentaId) throw new Error('La cuenta es obligatoria');
@@ -737,6 +745,12 @@ class CarteraService {
   //    MD de la carga inicial) para las ~15 cuentas donde la aritmética del propio Excel no
   //    cierra al centavo.
   // No pasa por causación ni por imputación: es un movimiento directo, igual que AjusteCategoria.
+  //
+  // TODO antes de conectar esto a IPC (todavía no lo está, ver main.js): la guarda de abajo no
+  // rechaza NaN/Infinity/strings no numéricos en monto -- Number(NaN) === 0 es false, así que
+  // pasa. Cambiar a algo como !Number.isFinite(Number(monto)) || Number(monto) === 0 antes de
+  // exponerlo. Auditoría de entrega 2026-08-11, hallazgo 10 -- ver
+  // docs/deuda-tecnica-auditoria-2026-08-11.md.
   ajustarDeuda({ cuentaId, tipo, monto, fecha, exigible = 1, documento = null,
     observaciones, usuarioId = null }) {
     if (!cuentaId) throw new Error('La cuenta es obligatoria');
