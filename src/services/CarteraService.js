@@ -481,17 +481,31 @@ class CarteraService {
   // ya filtra uno por uno cuáles de esos meses tienen saldo pendiente de verdad, así que su
   // longitud es la cuenta real de meses impagos -- y aPagar, la suma en pesos, ya coincide con
   // deudaExigible (misma fuente).
+  //
+  // COBRABLE vs EN MORA (auditoría de entrega, 2026-08-13): aPagar/mesesAPagar de arriba
+  // incluyen el mes en curso aunque todavía no haya vencido -- correcto para "qué puede cobrar
+  // hoy el operador", pero no para "quién está en mora": alguien que pagó hasta el mes anterior
+  // no le debe nada a nadie el día 1 del mes siguiente. mesesImpagos/mesMasAntiguoImpago (los
+  // que alimentan el criterio "en mora" de DashboardRepository.esEnMora y de los reportes)
+  // excluyen el mes en curso sin importar si ya tiene CargoMensual causado o no -- ninguna
+  // cuenta debe contar el mes corriente como vencido. No confundir con "pagó meses futuros":
+  // eso no cubre huecos viejos por sí solo (ver S0271: puede tener crédito disponible de un
+  // pago adelantado Y deuda real de 2024 al mismo tiempo -- son avisos independientes, ninguno
+  // se aplica solo contra el otro).
   getIndicadoresMoraTodas(cuentaIds) {
+    const ahora = new Date();
+    const periodoActualCod = codificarPeriodo(ahora.getFullYear(), ahora.getMonth() + 1);
     return cuentaIds.map(cuentaId => {
       const estado = this.getEstadoCartera(cuentaId);
+      const mesesVencidos = estado.mesesAPagar.filter(m => codificarPeriodo(m.anio, m.mes) < periodoActualCod);
       return {
         cuentaId,
         cubiertoHasta: estado.cubiertoHasta,
         deudaExigible: estado.deudaExigible,
         deudaAntes2024: estado.deudaAntes2024,
         deudaPuntoConexion: estado.deudaPuntoConexion,
-        mesesImpagos: estado.mesesAPagar.length,
-        mesMasAntiguoImpago: estado.mesesAPagar[0] || null,
+        mesesImpagos: mesesVencidos.length,
+        mesMasAntiguoImpago: mesesVencidos[0] || null,
         aPagar: estado.aPagar
       };
     });

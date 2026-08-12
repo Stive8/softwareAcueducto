@@ -550,7 +550,7 @@ test('getEstadoCuenta sugiere un mes futuro sin marcar mora cuando la cuenta ya 
   }
 });
 
-test('getEstadoCuenta: mesesMora cuenta los meses realmente pendientes, no el rango completo desde el hueco (reproduce el caso real de R007)', () => {
+test('getEstadoCuenta: mesesMora cuenta los meses realmente pendientes y vencidos, no el rango completo desde el hueco ni el mes en curso (reproduce el caso real de R007)', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -583,10 +583,11 @@ test('getEstadoCuenta: mesesMora cuenta los meses realmente pendientes, no el ra
       });
       carteraService.registrarAbono({ cuentaId, fecha: `${anio}-${mm}-05`, monto: 10000, modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: [c] });
     }
-    // El mes actual queda sin causar a propósito -- también debe contar, igual que R007 real.
+    // El mes actual queda sin causar a propósito -- no debe contar como mora (aún no vence),
+    // aunque sí sea "a pagar" (cobrable) -- igual que R007 real.
 
     const estado = pagoService.getEstadoCuenta(cuentaId);
-    assert.equal(estado.mesesMora, 2, 'solo febrero-2024 (el hueco de $8.000) + el mes actual sin causar -- no el rango completo desde enero-2024');
+    assert.equal(estado.mesesMora, 1, 'solo febrero-2024 (el hueco de $8.000) -- el mes en curso no cuenta como mora');
     assert.equal(estado.estadoMora, 'En mora');
     assert.deepEqual(estado.motivoMora, ['meses_corrientes']);
   } finally {

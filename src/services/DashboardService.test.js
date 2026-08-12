@@ -98,7 +98,13 @@ test('getStats: cuentasAlDia y cuentasEnMora coinciden con DashboardRepository.g
       cuentaId: idAlDia, fecha: hoy.toISOString().split('T')[0], tipo: 'Abono', exigible: 1, monto: -10000
     });
     repo.crearImputacion({ abonoId: abonoAlDia, cargoId: cargoAlDia, monto: 10000 });
-    // idEnMora: sin ningún movimiento -- nunca ha pagado, cae en mora por mesesImpagos.
+    // idEnMora: un CargoMensual real de enero-2024, nunca pagado -- ya vencido, cae en mora por
+    // mesesImpagos. No basta con "nunca pagó y no tiene movimientos": sin ningún CargoMensual
+    // previo, el ancla de facturación sería la fecha de creación de la cuenta (hoy), y el único
+    // mes que calcularAPagar proyectaría sería el mes en curso -- que el criterio "en mora"
+    // (2026-08-13) excluye a propósito por no estar vencido, dejando la cuenta "al día" por
+    // error de la prueba, no del código.
+    repo.crearMovimiento({ cuentaId: idEnMora, fecha: '2024-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 1 });
     repo.crearMovimiento({ cuentaId: idConAperturaOpaca, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 50000 });
 
     const dashboardService = new DashboardService(ctx.dbService);

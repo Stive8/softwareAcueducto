@@ -34,7 +34,7 @@ function asignarTarifaFinca(db, cuentaId, fechaInicio = '2020-01-01') {
   db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, ?)`).run(cuentaId, catFila.id, fechaInicio);
 }
 
-test('getCuentasConEstado: meses_mora sale de cartera (mesesImpagos), no del rango completo desde pago_periodos (reproduce el caso real de R007)', () => {
+test('getCuentasConEstado: meses_mora sale de cartera (mesesImpagos), no del rango completo desde pago_periodos ni cuenta el mes en curso (reproduce el caso real de R007)', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -71,7 +71,7 @@ test('getCuentasConEstado: meses_mora sale de cartera (mesesImpagos), no del ran
     const r = pagoService.getCuentasConEstado({ page: 1, limit: 50 });
     const fila = r.data.find(f => f.codigo === 'T900');
 
-    assert.equal(fila.meses_mora, 2, 'solo febrero-2024 (el hueco) + el mes actual sin causar');
+    assert.equal(fila.meses_mora, 1, 'solo febrero-2024 (el hueco) -- el mes en curso no cuenta como mora');
     assert.equal(fila.en_mora, true);
     assert.deepEqual(fila.motivo_mora, ['meses_corrientes']);
   } finally {

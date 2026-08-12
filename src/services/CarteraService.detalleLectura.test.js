@@ -149,6 +149,88 @@ test('getIndicadoresMoraTodas: trae cubiertoHasta, deudaExigible, deudaAntes2024
   }
 });
 
+test('getIndicadoresMoraTodas: COBRABLE vs EN MORA -- el mes en curso es cobrable (aPagar) pero no cuenta como mora (mesesImpagos)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const idAlDia = sembrarCuenta(db, 'T922');
+    asignarTarifaFinca(db, idAlDia);
+    const repo = new CarteraRepository(ctx.dbService);
+
+    // Pagó todos los meses hasta el mes anterior al actual, sin ningún hueco. El mes en curso
+    // nunca se causa (asegurarCausacion solo lo hace reactivamente, al tocar la cuenta) --
+    // caso real de R007: pagó todo 2026, pero el sistema solo causa hasta julio.
+    const hoy = new Date();
+    const mesActualCod = hoy.getFullYear() * 12 + hoy.getMonth();
+    for (let cod = 2024 * 12; cod < mesActualCod; cod++) {
+      const anio = Math.floor(cod / 12);
+      const mes = (cod % 12) + 1;
+      const mm = String(mes).padStart(2, '0');
+      const c = repo.crearMovimiento({ cuentaId: idAlDia, fecha: `${anio}-${mm}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio, mes });
+      const a = repo.crearMovimiento({ cuentaId: idAlDia, fecha: `${anio}-${mm}-05`, tipo: 'Abono', exigible: 1, monto: -10000 });
+      repo.crearImputacion({ abonoId: a, cargoId: c, monto: 10000 });
+    }
+
+    const service = new CarteraService(ctx.dbService);
+    const estado = service.getEstadoCartera(idAlDia);
+    const [ind] = service.getIndicadoresMoraTodas([idAlDia]);
+
+    // COBRABLE: el mes en curso sigue apareciendo en aPagar/mesesAPagar -- es lo que el
+    // operador puede cobrar hoy, sin cambios respecto a antes.
+    assert.equal(estado.mesesAPagar.length, 1, 'el mes en curso, sin causar, sigue siendo cobrable');
+    assert.equal(estado.mesesAPagar[0].causado, false);
+    assert.equal(estado.aPagar, 10000);
+
+    // EN MORA: el mismo mes en curso NO cuenta como impago -- no ha vencido.
+    assert.equal(ind.mesesImpagos, 0, 'pagó todo hasta el mes anterior -- el mes en curso no la pone en mora');
+    assert.equal(ind.mesMasAntiguoImpago, null);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('getIndicadoresMoraTodas: COBRABLE vs EN MORA -- un hueco real anterior sigue contando como mora, con el mes en curso descontado del conteo', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuenta(db, 'T923');
+    asignarTarifaFinca(db, cuentaId);
+    const repo = new CarteraRepository(ctx.dbService);
+
+    // Enero-2024 cubierto completo, febrero-2024 con un hueco real de $6.000, marzo en
+    // adelante (hasta el mes anterior al actual) todo pagado -- se puso al día después del
+    // hueco, como R007 real.
+    const cEne = repo.crearMovimiento({ cuentaId, fecha: '2024-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 1 });
+    const aEne = repo.crearMovimiento({ cuentaId, fecha: '2024-01-05', tipo: 'Abono', exigible: 1, monto: -10000 });
+    repo.crearImputacion({ abonoId: aEne, cargoId: cEne, monto: 10000 });
+
+    const cFeb = repo.crearMovimiento({ cuentaId, fecha: '2024-02-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 2 });
+    const aFeb = repo.crearMovimiento({ cuentaId, fecha: '2024-02-10', tipo: 'Abono', exigible: 1, monto: -4000 });
+    repo.crearImputacion({ abonoId: aFeb, cargoId: cFeb, monto: 4000 });
+
+    const hoy = new Date();
+    const mesActualCod = hoy.getFullYear() * 12 + hoy.getMonth();
+    for (let cod = 2024 * 12 + 2; cod < mesActualCod; cod++) {
+      const anio = Math.floor(cod / 12);
+      const mes = (cod % 12) + 1;
+      const mm = String(mes).padStart(2, '0');
+      const c = repo.crearMovimiento({ cuentaId, fecha: `${anio}-${mm}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio, mes });
+      const a = repo.crearMovimiento({ cuentaId, fecha: `${anio}-${mm}-05`, tipo: 'Abono', exigible: 1, monto: -10000 });
+      repo.crearImputacion({ abonoId: a, cargoId: c, monto: 10000 });
+    }
+
+    const service = new CarteraService(ctx.dbService);
+    const [ind] = service.getIndicadoresMoraTodas([cuentaId]);
+
+    // Solo febrero-2024 cuenta como mora -- el mes en curso queda excluido del conteo aunque
+    // también aparezca en mesesAPagar (COBRABLE).
+    assert.equal(ind.mesesImpagos, 1);
+    assert.deepEqual(ind.mesMasAntiguoImpago, { anio: 2024, mes: 2, valor: 6000, causado: true });
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('getEstadoCartera: mesesAPagar distingue causado=true (cargo ya facturado con saldo pendiente) de causado=false (mes futuro/actual proyectado, reproduce el caso real de R007)', () => {
   const ctx = crearDbTemporal();
   try {

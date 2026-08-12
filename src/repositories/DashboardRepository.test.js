@@ -44,7 +44,11 @@ test('getCuentasAlDia/getCuentasEnMoraIds: usan mesesImpagos (cartera), no pago_
     const idEnMora = sembrarCuenta(db, 'T201', { conCategoria: true });
     const repo = new CarteraRepository(ctx.dbService);
     pagarMesActual(repo, idAlDia);
-    // idEnMora: sin ningún movimiento -- nunca ha pagado.
+    // idEnMora: un CargoMensual real de enero-2024, nunca pagado -- ya vencido. Sin esto, sin
+    // ningún movimiento previo, el ancla de facturación sería la fecha de creación (hoy) y el
+    // único mes proyectado sería el mes en curso -- que el criterio "en mora" (2026-08-13)
+    // excluye a propósito, dejando la cuenta "al día" por error de la prueba, no del código.
+    repo.crearMovimiento({ cuentaId: idEnMora, fecha: '2024-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 1 });
 
     const dashRepo = new DashboardRepository(ctx.dbService);
     assert.equal(dashRepo.getCuentasAlDia(), 1);

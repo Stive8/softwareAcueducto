@@ -109,13 +109,14 @@ test('getCuentasConUltimoPeriodo: meses_impagos cuenta los meses realmente pendi
       const a = repo.crearMovimiento({ cuentaId, fecha: `${anio}-${mm}-05`, tipo: 'Abono', exigible: 1, monto: -10000 });
       repo.crearImputacion({ abonoId: a, cargoId: c, monto: 10000 });
     }
-    // El mes actual queda sin causar a propósito -- también debe contar, igual que R007 real.
+    // El mes actual queda sin causar a propósito -- no debe contar como mora (2026-08-13, aún
+    // no vence), aunque siga siendo cobrable.
 
     const reporteRepo = new ReporteRepository(ctx.dbService);
     const fila = reporteRepo.getCuentasConUltimoPeriodo().find(f => f.codigo === 'T012');
 
     assert.equal(fila.ultimo_periodo_num, 2024 * 12, 'cubiertoHasta se congela en enero-2024 aunque todo lo de después esté pagado');
-    assert.equal(fila.meses_impagos, 2, 'solo febrero-2024 (el hueco de $8.000) + el mes actual sin causar -- no el rango completo desde enero-2024');
+    assert.equal(fila.meses_impagos, 1, 'solo febrero-2024 (el hueco de $8.000) -- el mes en curso no cuenta como mora');
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -229,9 +230,9 @@ test('getCartedaPorEdades: hueco viejo de un mes ya superado -- rango por antig�
     const fila = reporteRepo.getCartedaPorEdades().find(f => f.codigo === 'T013');
 
     assert.ok(fila, 'el hueco de febrero-2024 sigue siendo deuda real -- debe aparecer');
-    assert.equal(fila.meses_mora, 2, 'febrero-2024 + el mes actual sin causar, no el rango completo');
+    assert.equal(fila.meses_mora, 1, 'solo febrero-2024 -- el mes en curso no cuenta como mora (2026-08-13), aunque siga siendo cobrable');
     assert.equal(fila.rango_mora, 'Más de 12 meses', 'el hueco en sí (feb-2024) es viejo, aunque la cuenta ya se puso al día después');
-    assert.equal(fila.valor_estimado, 18000, '8.000 pendientes de feb-2024 + 10.000 del mes actual -- no meses_mora × tarifa (habría dado un valor mucho más alto)');
+    assert.equal(fila.valor_estimado, 18000, 'valor_estimado usa aPagar (cobrable), que sigue incluyendo el mes en curso -- 8.000 de feb-2024 + 10.000 del mes en curso');
   } finally {
     cerrarDbTemporal(ctx);
   }
