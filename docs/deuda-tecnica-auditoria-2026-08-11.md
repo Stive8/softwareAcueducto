@@ -23,6 +23,18 @@ de que el runner de migraciones no validaba si un `.db` restaurado era de una ve
 que la app instalada: `BackupService.validarArchivoRestauracion` ahora lo rechaza explícitamente
 en los tres caminos de restauración (manual, actualizar desde la nube, actualización silenciosa).
 
+**2026-08-11 (segunda ronda, a partir de dos preguntas de seguimiento del usuario):**
+
+7. `DashboardService.getStats()` calculaba `getIndicadoresMoraTodas` sobre las 287 cuentas
+   activas **tres veces completas** por carga (vía `getCuentasAlDia()`, `getCuentasEnMoraIds()`
+   y su propio cálculo de `carteraPendiente`) — medido contra `data/acueducto.db`: 2.302 ms /
+   6.265 consultas SQL, bajó a 737 ms / 1.807 consultas SQL reutilizando un solo cálculo.
+   Reordenamiento puro, verificado con las mismas cifras exactas antes/después (287 en mora,
+   $63.212.000 de cartera pendiente, 92 con saldo a favor, 18 suspendidas). De paso se quitó
+   una consulta `getCargosConCobertura` redundante dentro de cada `getEstadoCartera`
+   individual (se pedía una vez para `cubiertoHasta` y otra vez, igual, dentro de
+   `calcularAPagar`).
+
 ## Conteo pedido: cuentas afectadas hoy por `mesesSinTarifa` invisible
 
 Se contó, en modo solo lectura contra `data/acueducto.db`, cuántas de las 287 cuentas activas
@@ -31,6 +43,46 @@ tienen hoy al menos un mes en `mesesSinTarifa` (mes sin categoría/tarifa vigent
 abajo): **0 cuentas**. No sube de categoría por ahora, pero sigue siendo un problema latente —
 basta con que una cuenta quede sin tarifa vigente en el futuro (categoría vencida, o asignada a
 "Sin clasificar") para que vuelva a ocurrir en silencio.
+
+## Decisión pendiente: crédito de apertura de R007
+
+Investigado el 2026-08-11 a partir de un recibo físico encontrado por el usuario (No. 1773,
+16/03/2024: *"CUOTA DE SOSTENIMIENTO DE ENERO A DICIEMBRE 2024 (TENÍA SALDO A FAVOR DE
+$92.000)"*). Aritmética verificada contra `data/acueducto.db` y contra la fórmula real de
+`scripts/import-cartera/paso11-conciliacion.js:34-42, 108`:
+
+- El neto de R007 (deuda − crédito = −$80.000) es correcto y reconcilia exacto contra el Excel.
+  No hay plata contada dos veces.
+- Pero el recibo demuestra que el crédito de $92.000 se aplicó en la realidad en marzo de 2024
+  (junto con los $100.000 en efectivo, cubriendo el año completo de $192.000) — el sistema, en
+  cambio, imputó el efectivo por FIFO cronológico y dejó el crédito sin tocar, con el hueco real
+  cerrándose recién con el pago de 2026. Mostrarle $92.000 disponibles a la persona hoy es
+  engañoso: ya los gastó, según su propio recibo.
+- Verificado que **poner el crédito en $0 sin más rompe la conciliación de R007 en exactamente
+  $92.000** (queda con diferencia ≠ 0 contra el Excel, entraría a la lista de las 13). La versión
+  que sí mantiene la conciliación en $0: aplicar $12.000 del crédito contra el hueco real
+  todavía abierto (diciembre 2024) y dejar $80.000 como saldo a favor genuino — mismo neto,
+  desglose distinto.
+- **Sin implementar todavía** — decisión de negocio pendiente del usuario sobre cuál de las dos
+  opciones (o la variante de conciliación neutra) usar, y si aplica solo a R007 o define un
+  patrón a seguir si aparece otro caso con recibo similar.
+
+## `credito_no_consumido`: metadata informativa, sin efecto contable
+
+Las 14 aperturas negativas (créditos reales al 31/12/2023) traían en el JSON original de la
+carga inicial (`data/carga_inicial_cartera.json`, no versionado, no presente en este
+repositorio) un campo `credito_no_consumido` — `true` para 4 cuentas (S0331, R028, R070, R086),
+`false` para las otras 10 (incluida R007). Investigado el 2026-08-11: **el campo no tiene
+ningún efecto en cómo se cargaron los datos** — las 14 se cargaron igual, como crédito real en
+`cuenta_creditos`, sin ninguna redención aplicada por el propio script. Comparadas las otras 9
+marcadas `false` (además de R007) contra el mismo criterio (recibo con evidencia textual de que
+el crédito se aplicó): **ninguna de las 9 tiene un recibo así** — su patrón (deuda exigible
+grande, crédito chico al lado, sin tocar) se parece más al de las 4 marcadas `true` que al de
+R007. El criterio original con el que se marcó cada cuenta no es reconstruible (vivía solo en
+el JSON fuente, no en ningún script ni test de este repositorio). Tratar la etiqueta como
+información para la junta ("¿esta persona sabe que tiene esto a favor?"), no como una
+instrucción contable — y no asumir que `false` significa "ya gastado" sin evidencia como la de
+R007.
 
 ---
 
@@ -95,6 +147,30 @@ una configuración de impuestos poco común, no confirmada en uso actual.
 Si `cloud.subirRespaldo()` falla (sin internet, por ejemplo) a mitad de camino, el contador local
 ya avanzó — puede silenciar la detección de conflictos entre equipos en un respaldo futuro
 genuino de otro equipo.
+
+### `calcularAPagar` recorre mes a mes sin techo natural — puede envejecer mal
+`CarteraService.calcularAPagar` (`src/services/CarteraService.js:353-410`) recorre cada mes
+entre `cubiertoHasta` (o la ancla, si nunca pagó) y el mes actual, y por cada mes sin
+`CargoMensual` todavía causado hace dos consultas SQL más (`estadoEnMes` +
+`getCategoriaTarifaParaMes`). Hoy eso cuesta poco: medido contra `data/acueducto.db`, 285 de
+287 cuentas activas caen en 5-9 consultas por `getEstadoCartera()`, porque casi ninguna cuenta
+tiene hoy un hueco grande sin causar. Pero ese costo **crece linealmente con cuánto atraso
+acumule cada cuenta**, sin ningún límite — una cuenta que llevara 3 años sin ningún pago
+costaría ~72 consultas solo por su propio cálculo, no ~8. No es un problema hoy, pero es
+justamente lo que le puede pasar a una cuenta en mora real con el tiempo, y no tiene el mismo
+techo natural que el crecimiento de filas históricas (que sí es inofensivo en SQLite incluso a
+varios años). Investigado el 2026-08-11 junto con la optimización del dashboard (hallazgo 7 de
+arriba), sin corregir.
+
+### `ReporteRepository.getDashboardContable()` sigue con el criterio viejo de "en mora"
+`src/repositories/ReporteRepository.js:337-339`: el "Dashboard contable" (módulo de
+Contabilidad) calcula `cuentasMora` con el rango contra `cubiertoHasta`
+(`cubiertoCod < periodoActualCod || deudaAntes2024 > 0`), el mismo criterio que ya se corrigió
+en `DashboardRepository._idsEnMora()` (hallazgo 6 del inventario original: divergía de
+Reportes/Pagos cuando había meses en `mesesSinTarifa`). Encontrado el 2026-08-11 al revisar
+`ReporteRepository` por el hallazgo de performance del dashboard — es una tercera instancia del
+mismo problema, no descubierta en la ronda original. Sin corregir: no fue lo que se pidió
+revisar esta vez (el pedido era sobre consultas repetidas, no sobre el criterio en sí).
 
 ---
 
