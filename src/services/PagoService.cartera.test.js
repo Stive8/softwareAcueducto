@@ -351,7 +351,7 @@ test('getEstadoCuenta calcula siguientePeriodo desde cartera_movimientos, no des
     assert.equal(db.prepare(`SELECT COUNT(*) n FROM pago_periodos`).get().n, 0, 'precondición: sin filas en el modelo viejo');
 
     const estado = pagoService.getEstadoCuenta(cuentaId);
-    assert.deepEqual(estado.pagadoHasta, { anio: 2026, mes: 3, label: 'Marzo 2026' });
+    assert.deepEqual(estado.pagadoHasta, { anio: 2026, mes: 3, label: 'Marzo 2026', huecoAnterior: null });
     assert.deepEqual(estado.siguientePeriodo, { anio: 2026, mes: 4, label: 'Abril 2026' });
 
     // El guardián de registrarPagoSostenimiento ya no rechaza abril: cartera lo ve pendiente,
@@ -379,7 +379,7 @@ test('getEstadoCuenta sigue reportando el período correcto para un pago registr
     });
 
     const estado = pagoService.getEstadoCuenta(cuentaId);
-    assert.deepEqual(estado.pagadoHasta, { anio: 2026, mes: 2, label: 'Febrero 2026' });
+    assert.deepEqual(estado.pagadoHasta, { anio: 2026, mes: 2, label: 'Febrero 2026', huecoAnterior: null });
     assert.deepEqual(estado.siguientePeriodo, { anio: 2026, mes: 3, label: 'Marzo 2026' });
   } finally {
     cerrarDbTemporal(ctx);
@@ -433,11 +433,43 @@ test('getEstadoCuenta ignora un hueco histórico ya superado (reproduce el caso 
     // 2024-1 y 2024-3 quedan sin cubrir a propósito.
 
     const estado = pagoService.getEstadoCuenta(cuentaId);
-    assert.deepEqual(estado.pagadoHasta, { anio: 2026, mes: 7, label: 'Julio 2026' }, 'no se frena en el hueco de 2024');
+    assert.deepEqual(
+      estado.pagadoHasta,
+      { anio: 2026, mes: 7, label: 'Julio 2026', huecoAnterior: { meses: 2 } },
+      'no se frena en el hueco de 2024, pero sí debe avisar que hay 2 meses pendientes (enero y marzo) antes de esa fecha'
+    );
     assert.deepEqual(estado.siguientePeriodo, { anio: 2026, mes: 8, label: 'Agosto 2026' });
 
     // Los huecos de 2024 siguen contando como deuda real en el modelo nuevo -- sin cambios.
     assert.equal(carteraService.getEstadoCartera(cuentaId).deudaExigible, 20000, 'los 20.000 de 2024 (enero+marzo) siguen debiéndose');
+
+    // El estado de cuenta imprimible/exportable a PDF es el mismo documento que se le entrega
+    // al residente -- no puede decir "Pagado Hasta: Julio 2026" sin avisar que hay dos meses
+    // reales sin cubrir antes de esa fecha (el bug real: ese documento y el badge de "Estado"
+    // se contradecían en el mismo papel).
+    const html = pagoService.generarHTMLEstadoCuenta(cuentaId);
+    assert.match(html, /Julio 2026/);
+    assert.match(html, /con 2 meses anteriores pendientes/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('generarHTMLEstadoCuenta no muestra ningún aviso de hueco cuando la cuenta está realmente al día', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuentaPagable(db, { tarifa: 10000 });
+    const pagoService = new PagoService(ctx.dbService);
+
+    pagoService.registrarPagoSostenimiento({
+      cuentaId, anioInicio: 2026, mesInicio: 1, cantidadMeses: 2,
+      fechaPago: '2026-04-01', metodoPago: 'Efectivo', usarSaldoAFavor: false
+    });
+
+    const html = pagoService.generarHTMLEstadoCuenta(cuentaId);
+    assert.doesNotMatch(html, /meses anteriores pendientes/);
+    assert.doesNotMatch(html, /mes anterior pendiente/);
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -502,7 +534,7 @@ test('getEstadoCuenta sugiere un mes futuro sin marcar mora cuando la cuenta ya 
     }
 
     const estado = pagoService.getEstadoCuenta(cuentaId);
-    assert.deepEqual(estado.pagadoHasta, { anio: 2026, mes: 12, label: 'Diciembre 2026' });
+    assert.deepEqual(estado.pagadoHasta, { anio: 2026, mes: 12, label: 'Diciembre 2026', huecoAnterior: null });
     assert.deepEqual(estado.siguientePeriodo, { anio: 2027, mes: 1, label: 'Enero 2027' });
     assert.equal(estado.mesesMora, 0, 'una cuenta pagada por adelantado no está en mora');
     assert.equal(estado.estadoMora, 'Al día');

@@ -419,6 +419,9 @@ const Pagos = {
           <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">Último mes cubierto</div>
           <div style="font-size: 1rem; margin-bottom: 14px;">
             ${estadoViejo.pagadoHasta ? estadoViejo.pagadoHasta.label : 'Sin meses cubiertos'}
+            ${estadoViejo.pagadoHasta && estadoViejo.pagadoHasta.huecoAnterior
+              ? `<div style="font-size: 0.75rem; color: #b45309; font-weight: normal; margin-top: 2px;">⚠ con ${estadoViejo.pagadoHasta.huecoAnterior.meses} ${estadoViejo.pagadoHasta.huecoAnterior.meses === 1 ? 'mes anterior pendiente' : 'meses anteriores pendientes'}</div>`
+              : ''}
           </div>
           <div style="font-size: 0.75rem; text-transform: uppercase; color: #64748b; margin-bottom: 4px;">
             A pagar${carteraEstado.mesesAPagar.length > 0 ? ` (${carteraEstado.mesesAPagar.length} ${carteraEstado.mesesAPagar.length === 1 ? 'mes pendiente' : 'meses pendientes'})` : ''}
@@ -838,7 +841,9 @@ const Pagos = {
 
       <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
         <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
-          ${estado.pagadoHasta ? `<strong>Aportado hasta:</strong> ${estado.pagadoHasta.label}.` : '<strong>Sin aportes previos.</strong>'}
+          ${estado.pagadoHasta
+            ? `<strong>Aportado hasta:</strong> ${estado.pagadoHasta.label}${estado.pagadoHasta.huecoAnterior ? ` (con ${estado.pagadoHasta.huecoAnterior.meses} ${estado.pagadoHasta.huecoAnterior.meses === 1 ? 'mes anterior pendiente' : 'meses anteriores pendientes'})` : ''}.`
+            : '<strong>Sin aportes previos.</strong>'}
           <strong>Próximo período sugerido:</strong> ${estado.siguientePeriodo.label}.
           ${estado.saldoAFavor > 0 ? `<br><strong>Saldo a favor disponible:</strong> $${this.formatNumber(estado.saldoAFavor)}` : ''}
         </p>

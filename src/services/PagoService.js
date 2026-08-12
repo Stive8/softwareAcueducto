@@ -6,7 +6,7 @@ const AsientoContableService = require('./AsientoContableService');
 const PeriodoContableRepository = require('../repositories/PeriodoContableRepository');
 const PeriodoContableService = require('./PeriodoContableService');
 const CarteraService = require('./CarteraService');
-const { MODOS } = require('./cartera/imputacion');
+const { MODOS, calcularCubiertoHasta } = require('./cartera/imputacion');
 const { redondear, esMayor } = require('./cartera/dinero');
 
 const NOMBRES_MES = [
@@ -119,6 +119,23 @@ class PagoService {
     const totalPagado = redondear(cargosConCobertura.reduce((s, c) => s + Math.min(c.cubierto, c.monto), 0));
     const totalMesesPagados = cargosConCobertura.filter(c => redondear(c.monto - c.cubierto) <= 0).length;
 
+    // alDiaHasta (arriba) salta huecos viejos a propósito, para no congelar "qué mes sugerir
+    // ahora" en un hueco ya superado -- pero por eso mismo, mostrado solo, se lee como "todo
+    // pagado" cuando puede haber un hueco real de deuda antes de esa fecha (caso real R007:
+    // diciembre 2024 sin cubrir del todo, con el banner diciendo "Aportado hasta: Julio 2026").
+    // cubiertoHasta sí se detiene en el primer hueco; si difiere de alDiaHasta, hay algo
+    // escondido que hay que decir en pantalla -- mismo criterio que ya usa el desglose de
+    // "a pagar" (ver renderDesgloseAPagar en pagos.js) para no repetir esa confusión acá.
+    const cubiertoHasta = calcularCubiertoHasta(cargosConCobertura);
+    const huecoAntesDeAlDiaHasta = ultimoPagado && (
+      !cubiertoHasta || codificarPeriodo(cubiertoHasta.anio, cubiertoHasta.mes) < codificarPeriodo(ultimoPagado.anio, ultimoPagado.mes)
+    );
+    const mesesEnHueco = huecoAntesDeAlDiaHasta
+      ? cargosConCobertura.filter(c => c.anio !== null && c.mes !== null
+          && codificarPeriodo(c.anio, c.mes) < codificarPeriodo(ultimoPagado.anio, ultimoPagado.mes)
+          && esMayor(redondear(c.monto - c.cubierto), 0)).length
+      : 0;
+
     // mesesMora/estadoMora/saldoPendienteEstimado ya NO salen del rango contra alDiaHasta (ese
     // concepto es correcto solo para "próximo período sugerido", arriba, no para "cuánto debe" --
     // ver CarteraService.getEstadoCartera). Mismo criterio que ReporteService.procesarEstadoCuentas:
@@ -136,7 +153,13 @@ class PagoService {
     return {
       cuentaId,
       pagadoHasta: ultimoPagado
-        ? { anio: ultimoPagado.anio, mes: ultimoPagado.mes, label: this.formatPeriodo(ultimoPagado.anio, ultimoPagado.mes) }
+        ? {
+            anio: ultimoPagado.anio, mes: ultimoPagado.mes,
+            label: this.formatPeriodo(ultimoPagado.anio, ultimoPagado.mes),
+            // Presente solo si hay un hueco real de deuda ANTES de esta fecha que alDiaHasta
+            // saltó a propósito (ver comentario arriba). null si está realmente al día.
+            huecoAnterior: huecoAntesDeAlDiaHasta ? { meses: mesesEnHueco } : null
+          }
         : null,
       siguientePeriodo: { anio: siguiente.anio, mes: siguiente.mes, label: this.formatPeriodo(siguiente.anio, siguiente.mes) },
       mesesMora,
@@ -496,6 +519,7 @@ class PagoService {
   .resumen-card { border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px; text-align: center; }
   .resumen-card .label { font-size: 11px; color: #64748b; text-transform: uppercase; }
   .resumen-card .valor { font-size: 15px; font-weight: bold; color: #1e293b; margin-top: 4px; }
+  .resumen-card .nota { font-size: 10px; color: #b45309; margin-top: 3px; font-weight: normal; }
   table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
   th, td { border: 1px solid #cbd5e1; padding: 8px 10px; font-size: 12px; text-align: left; }
   th { background: #f1f5f9; color: #334155; }
@@ -524,6 +548,9 @@ class PagoService {
     <div class="resumen-card">
       <div class="label">Pagado Hasta</div>
       <div class="valor">${estado.pagadoHasta ? estado.pagadoHasta.label : 'Sin pagos'}</div>
+      ${estado.pagadoHasta && estado.pagadoHasta.huecoAnterior
+        ? `<div class="nota">⚠ con ${estado.pagadoHasta.huecoAnterior.meses} ${estado.pagadoHasta.huecoAnterior.meses === 1 ? 'mes anterior pendiente' : 'meses anteriores pendientes'}</div>`
+        : ''}
     </div>
     <div class="resumen-card">
       <div class="label">Estado</div>
