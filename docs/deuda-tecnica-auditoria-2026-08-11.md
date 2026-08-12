@@ -163,6 +163,20 @@ Si `cloud.subirRespaldo()` falla (sin internet, por ejemplo) a mitad de camino, 
 ya avanzó — puede silenciar la detección de conflictos entre equipos en un respaldo futuro
 genuino de otro equipo.
 
+### No hay causación mensual automática -- depende de que alguien toque la cuenta primero
+`asegurarCausacion` (`CarteraService.js`) solo se dispara reactivamente: al registrar un pago
+(`PagoService.registrarPagoSostenimiento`) o al redimir un crédito (`redimirCredito`). No hay
+ningún job programado ni botón de "causar el mes" que cree el `CargoMensual` del mes en curso
+para toda cuenta activa el día 1 de cada mes. Hoy esto es inofensivo para el criterio "en mora"
+(2026-08-13, ver commit `fix(cartera): el mes en curso ya no cuenta como mora`) porque
+`mesesImpagos` excluye el mes en curso sin importar si está causado o no. Pero `aPagar`
+(COBRABLE) sí depende de que el mes esté causado para reflejarse en pantallas que lean
+`CargoMensual` directo en vez de la proyección en vivo de `calcularAPagar` — y el administrador
+no tiene ninguna forma de forzar la causación de un mes sin que antes alguien pague o redima
+algo en esa cuenta específica. Verificado 2026-08-13: 0 de 287 cuentas activas tenían agosto-2026
+causado el día 12 del mes. Falta decidir: ¿job automático al iniciar la app cada mes, o un botón
+manual en Configuración/Cartera?
+
 ### `calcularAPagar` recorre mes a mes sin techo natural — puede envejecer mal
 `CarteraService.calcularAPagar` (`src/services/CarteraService.js:353-410`) recorre cada mes
 entre `cubiertoHasta` (o la ancla, si nunca pagó) y el mes actual, y por cada mes sin
