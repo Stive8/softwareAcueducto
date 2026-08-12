@@ -34,6 +34,16 @@ en los tres caminos de restauración (manual, actualizar desde la nube, actualiz
    una consulta `getCargosConCobertura` redundante dentro de cada `getEstadoCartera`
    individual (se pedía una vez para `cubiertoHasta` y otra vez, igual, dentro de
    `calcularAPagar`).
+8. `ReporteRepository.getDashboardContable()` (el "Dashboard contable" del módulo de
+   Contabilidad) era un **tercer sitio** con fórmula propia de "en mora" (rango contra
+   `cubiertoHasta`, no `mesesImpagos`) — no detectado en la ronda original, encontrado al
+   revisar `ReporteRepository` por el hallazgo de performance. Unificado al mismo criterio.
+   Barrido completo del resto de la app: no apareció un cuarto sitio. Verificado contra
+   `data/acueducto.db`: Dashboard general, Dashboard contable y el reporte "Cuentas en Mora"
+   coinciden exactamente en 287 cuentas en mora.
+9. R007: el crédito de apertura quedó redimido en $12.000 contra el hueco real de diciembre
+   2024 (dejando $80.000 como saldo a favor genuino), aplicado como corrección 13 en
+   `paso9b-correcciones.js` — ver detalle abajo, movido de "decisión pendiente" a resuelto.
 
 ## Conteo pedido: cuentas afectadas hoy por `mesesSinTarifa` invisible
 
@@ -44,28 +54,33 @@ abajo): **0 cuentas**. No sube de categoría por ahora, pero sigue siendo un pro
 basta con que una cuenta quede sin tarifa vigente en el futuro (categoría vencida, o asignada a
 "Sin clasificar") para que vuelva a ocurrir en silencio.
 
-## Decisión pendiente: crédito de apertura de R007
+## Resuelto: crédito de apertura de R007
 
-Investigado el 2026-08-11 a partir de un recibo físico encontrado por el usuario (No. 1773,
+Investigado el 2026-08-11/12 a partir de un recibo físico encontrado por el usuario (No. 1773,
 16/03/2024: *"CUOTA DE SOSTENIMIENTO DE ENERO A DICIEMBRE 2024 (TENÍA SALDO A FAVOR DE
 $92.000)"*). Aritmética verificada contra `data/acueducto.db` y contra la fórmula real de
 `scripts/import-cartera/paso11-conciliacion.js:34-42, 108`:
 
-- El neto de R007 (deuda − crédito = −$80.000) es correcto y reconcilia exacto contra el Excel.
-  No hay plata contada dos veces.
+- El neto de R007 (deuda − crédito = −$80.000) era correcto y reconciliaba exacto contra el
+  Excel. No había plata contada dos veces.
 - Pero el recibo demuestra que el crédito de $92.000 se aplicó en la realidad en marzo de 2024
   (junto con los $100.000 en efectivo, cubriendo el año completo de $192.000) — el sistema, en
   cambio, imputó el efectivo por FIFO cronológico y dejó el crédito sin tocar, con el hueco real
-  cerrándose recién con el pago de 2026. Mostrarle $92.000 disponibles a la persona hoy es
-  engañoso: ya los gastó, según su propio recibo.
-- Verificado que **poner el crédito en $0 sin más rompe la conciliación de R007 en exactamente
-  $92.000** (queda con diferencia ≠ 0 contra el Excel, entraría a la lista de las 13). La versión
-  que sí mantiene la conciliación en $0: aplicar $12.000 del crédito contra el hueco real
-  todavía abierto (diciembre 2024) y dejar $80.000 como saldo a favor genuino — mismo neto,
-  desglose distinto.
-- **Sin implementar todavía** — decisión de negocio pendiente del usuario sobre cuál de las dos
-  opciones (o la variante de conciliación neutra) usar, y si aplica solo a R007 o define un
-  patrón a seguir si aparece otro caso con recibo similar.
+  cerrándose recién con el pago de 2026. Mostrarle $92.000 disponibles a la persona era
+  engañoso: ya los había gastado, según su propio recibo.
+- Verificado que poner el crédito en $0 sin más rompía la conciliación de R007 en exactamente
+  $92.000 (quedaba con diferencia ≠ 0 contra el Excel, entraba a la lista de las 13).
+- **Corregido 2026-08-12** (corrección 13 de `paso9b-correcciones.js`, idempotente, con test):
+  se redimieron $12.000 del crédito contra el hueco real todavía abierto (diciembre 2024),
+  dejando $80.000 como saldo a favor genuino — mismo neto, desglose ahora fiel a lo que pasó.
+  Aplicado contra `data/acueducto.db` (respaldo previo en
+  `data/acueducto.db.antes-correccion-r007-2026-08-12`, probado primero sobre una copia
+  aislada). Verificado sin violaciones de integridad referencial y con la conciliación
+  algebraica en $0 (el término `saldoCreditoDisponible` del target absorbe el mismo movimiento
+  que `saldoSistema`, por construcción de la fórmula). R007 sigue fuera de la lista de las 13.
+- Las otras 9 cuentas marcadas `credito_no_consumido: false` (además de R007) se dejaron
+  igual, por el argumento de abajo: ninguna tiene un recibo con evidencia textual como la de
+  R007.
 
 ## `credito_no_consumido`: metadata informativa, sin efecto contable
 
@@ -161,16 +176,6 @@ justamente lo que le puede pasar a una cuenta en mora real con el tiempo, y no t
 techo natural que el crecimiento de filas históricas (que sí es inofensivo en SQLite incluso a
 varios años). Investigado el 2026-08-11 junto con la optimización del dashboard (hallazgo 7 de
 arriba), sin corregir.
-
-### `ReporteRepository.getDashboardContable()` sigue con el criterio viejo de "en mora"
-`src/repositories/ReporteRepository.js:337-339`: el "Dashboard contable" (módulo de
-Contabilidad) calcula `cuentasMora` con el rango contra `cubiertoHasta`
-(`cubiertoCod < periodoActualCod || deudaAntes2024 > 0`), el mismo criterio que ya se corrigió
-en `DashboardRepository._idsEnMora()` (hallazgo 6 del inventario original: divergía de
-Reportes/Pagos cuando había meses en `mesesSinTarifa`). Encontrado el 2026-08-11 al revisar
-`ReporteRepository` por el hallazgo de performance del dashboard — es una tercera instancia del
-mismo problema, no descubierta en la ronda original. Sin corregir: no fue lo que se pidió
-revisar esta vez (el pedido era sobre consultas repetidas, no sobre el criterio en sí).
 
 ---
 
