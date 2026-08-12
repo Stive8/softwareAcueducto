@@ -6,7 +6,7 @@ const {
   ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, PROPIETARIO_S0244,
   REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
   CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229,
-  CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, INACTIVA_FUSIONADA_S063
+  CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, INACTIVA_FUSIONADA_S063, REDENCION_R007
 } = require('./paso9b-correcciones');
 
 function sembrarCuenta(db, codigo) {
@@ -179,6 +179,23 @@ function sembrarTodas(db) {
     INSERT INTO cuenta_estados (cuenta_id, estado, fecha_inicio, motivo)
     VALUES (?, 'Activo', '2026-06-27', 'Estado inicial al migrar a cartera')
   `).run(ids.S063);
+
+  // --- R007: crédito de apertura ($92.000) sin tocar + diciembre 2024 con $12.000 pendientes
+  // (cubierto parcial $4.000, simulando el abono de 2026 que llegó hasta ahí por FIFO) --
+  // reproduce el estado real encontrado en producción antes de la corrección 13.
+  ids.R007 = sembrarCuenta(db, 'R007');
+  const cargoDic2024R007Id = repo.crearMovimiento({
+    cuentaId: ids.R007, fecha: '2024-12-01', tipo: 'CargoMensual', exigible: 1, monto: 16000, anio: 2024, mes: 12
+  });
+  ids.cargoDic2024R007Id = cargoDic2024R007Id;
+  const abono2026R007Id = repo.crearMovimiento({
+    cuentaId: ids.R007, fecha: '2026-04-11', tipo: 'Abono', exigible: 1, monto: -4000
+  });
+  repo.crearImputacion({ abonoId: abono2026R007Id, cargoId: cargoDic2024R007Id, monto: 4000 });
+  ids.creditoAperturaR007Id = repo.crearCredito({
+    cuentaId: ids.R007, tipo: 'Abono', monto: 92000, fecha: '2023-12-31',
+    observaciones: 'Apertura opaca negativa al 31/12/2023: saldo a favor anterior al corte, redimible contra deuda de 2024+ (retrofit 2026-08-04)'
+  });
 
   return ids;
 }
@@ -746,6 +763,101 @@ test('paso9b: S063 -- correr dos veces no duplica cuenta_estados', () => {
     assert.equal(r2.inactivaS063.corregido, false);
     const vigencias = db.prepare('SELECT * FROM cuenta_estados WHERE cuenta_id=?').all(ids.S063);
     assert.equal(vigencias.length, 1, 'la segunda corrida no debe agregar una vigencia más');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R007 -- redime $12.000 del crédito contra el hueco real de diciembre 2024, deja $80.000 a favor', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.redencionR007.yaCorregido, false);
+    assert.equal(r.redencionR007.monto, REDENCION_R007.montoARedimir);
+
+    // Diciembre 2024 queda totalmente cubierto: los $4.000 que ya tenía (simulados en el
+    // seed) más los $12.000 que redime esta corrección.
+    const cubiertoDic2024 = db.prepare(
+      `SELECT COALESCE(SUM(monto),0) AS total FROM cartera_imputaciones WHERE cargo_id=?`
+    ).get(ids.cargoDic2024R007Id).total;
+    assert.equal(cubiertoDic2024, 16000);
+
+    // deudaExigible de R007 queda en 0 (nada más pendiente, según el seed).
+    const { deudaExigible } = repo.getSaldos(ids.R007);
+    assert.equal(deudaExigible, 0);
+
+    // El crédito de apertura ($92.000) no se toca -- se agrega una fila 'Aplicado' aparte.
+    const creditos = db.prepare(
+      `SELECT tipo, monto, abono_movimiento_id, fecha, observaciones FROM cuenta_creditos WHERE cuenta_id=? ORDER BY id`
+    ).all(ids.R007);
+    assert.equal(creditos.length, 2);
+    assert.equal(creditos[0].tipo, 'Abono');
+    assert.equal(creditos[0].monto, 92000);
+    assert.equal(creditos[1].tipo, 'Aplicado');
+    assert.equal(creditos[1].monto, 12000);
+    assert.equal(creditos[1].fecha, REDENCION_R007.fecha);
+    assert.match(creditos[1].observaciones, /recibo 1773/);
+    assert.match(creditos[1].observaciones, /TENIA SALDO A FAVOR DE \$92\.000/);
+
+    // Saldo a favor disponible: 92.000 - 12.000 = 80.000, como pidió el usuario.
+    const saldoDisponible = repo.getSaldoCreditoDisponible(ids.R007);
+    assert.equal(saldoDisponible, 80000);
+
+    // El nuevo Abono queda trazado hasta el recibo 1773 vía la observación, fechado cuando
+    // pasó en la realidad (no cuando corrió esta corrección).
+    const nuevoAbono = db.prepare(
+      `SELECT fecha, monto, observaciones FROM cartera_movimientos WHERE id=?`
+    ).get(r.redencionR007.abonoId);
+    assert.equal(nuevoAbono.fecha, '2024-03-16');
+    assert.equal(nuevoAbono.monto, -12000);
+    assert.match(nuevoAbono.observaciones, /recibo 1773/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R007 -- idempotente, correr dos veces no duplica la redención ni deja el saldo en negativo', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.redencionR007.yaCorregido, true);
+
+    const creditos = db.prepare(`SELECT COUNT(*) AS n FROM cuenta_creditos WHERE cuenta_id=?`).get(ids.R007).n;
+    assert.equal(creditos, 2, 'la segunda corrida no debe agregar otra fila Aplicado');
+
+    const abonos = db.prepare(
+      `SELECT COUNT(*) AS n FROM cartera_movimientos WHERE cuenta_id=? AND tipo='Abono' AND fecha='2024-03-16'`
+    ).get(ids.R007).n;
+    assert.equal(abonos, 1, 'la segunda corrida no debe crear otro movimiento de redención');
+
+    assert.equal(repo.getSaldoCreditoDisponible(ids.R007), 80000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R007 -- se detiene con un error si diciembre 2024 no tiene el pendiente esperado (no adivina cuánto redimir)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+    // Alguien ya cubrió parte del hueco por otra vía -- el pendiente real ya no es $12.000.
+    const abonoExtra = repo.crearMovimiento({ cuentaId: ids.R007, fecha: '2026-08-01', tipo: 'Abono', exigible: 1, monto: -5000 });
+    repo.crearImputacion({ abonoId: abonoExtra, cargoId: ids.cargoDic2024R007Id, monto: 5000 });
+
+    assert.throws(() => ejecutarPaso9b({ dbService: ctx.dbService }), /R007.*se esperaba/s);
   } finally {
     cerrarDbTemporal(ctx);
   }

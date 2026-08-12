@@ -128,6 +128,22 @@
 //    corrección 11 (reemplaza el marcador sintético "Estado inicial al migrar a cartera", no hay
 //    historial real que preservar).
 //
+// 13. R007: el crédito de apertura ($92.000) se mostraba disponible completo, pero el recibo
+//    físico 1773 (16-mar-2024) documenta que la tesorería ya lo aplicó ese día: "CUOTA DE
+//    SOSTENIMIENTO DE ENERO A DICIEMBRE 2024 (TENÍA SALDO A FAVOR DE $92.000)", pagó $100.000 en
+//    efectivo -- $100.000 + $92.000 = $192.000, el año completo. El sistema imputó el efectivo
+//    por FIFO cronológico (ene-jun completo + parte de jul) y dejó el crédito sin tocar; el hueco
+//    real de 2024 (jul-dic) se terminó cerrando recién con el pago de 2026, dejando diciembre
+//    2024 con $12.000 todavía pendientes. Investigado el 2026-08-11/12 (auditoría de entrega):
+//    verificado que poner el crédito completo en $0 rompe la conciliación de R007 en exactamente
+//    $92.000 (saldoSistema no cambia, pero el target sí, porque paso11-conciliacion.js suma
+//    saldoCreditoDisponible al target -- ver su comentario, líneas 34-42). La versión que sí
+//    mantiene la conciliación en $0: redimir del crédito exactamente lo que hace falta para
+//    cerrar el hueco real todavía abierto (diciembre 2024, $12.000) y dejar el resto ($80.000)
+//    como saldo a favor genuino -- mismo mecanismo que CarteraService.redimirCredito (un Abono
+//    exigible que imputa contra el cargo, más una fila 'Aplicado' en cuenta_creditos), fechado
+//    16-mar-2024 para reflejar cuándo pasó en la realidad, no cuándo se corrió esta corrección.
+//
 // Idempotente: antes de insertar, borra los CargoMensual existentes de la cuenta en los años
 // que va a recrear (2024-2026 completos para las 4 de tarifa; solo 2024 para S03311; feb-jul
 // 2026 para S058), así que re-ejecutar da el mismo resultado sin duplicar ni acumular montos
@@ -135,7 +151,10 @@
 // activo. Las correcciones 4 a 9 se detectan por si el movimiento/campo que tocan ya quedó en el
 // estado corregido (ver cada bloque), así que repetir la corrida no duplica imputaciones ni
 // revierte nada. Las correcciones 11 y 12 se detectan por si la vigencia abierta de cuenta_estados
-// ya es exactamente la esperada (mismo estado, misma fecha_inicio).
+// ya es exactamente la esperada (mismo estado, misma fecha_inicio). La corrección 13 se detecta
+// por el pendiente real del cargo de diciembre 2024 de R007: $0 significa que ya corrió (o algo
+// más lo cerró), $12.000 significa que hay que aplicarla, cualquier otro valor es un estado
+// inesperado y la corrección se detiene con un error en vez de adivinar cuánto redimir.
 const { normalizarCodigo } = require('./normalizar');
 const { primerDiaDelMes } = require('../../src/services/cartera/periodos');
 const { distribuir, MODOS } = require('../../src/services/cartera/imputacion');
@@ -244,6 +263,24 @@ const OBSERVACION_INACTIVA_S063 =
 
 const INACTIVA_FUSIONADA_S063 = { codigoCuenta: 'S063', fechaInicio: '2026-06-27' };
 
+const OBSERVACION_REDENCION_R007 =
+  'Redime $12.000 del credito de apertura contra el hueco real de diciembre 2024, ' +
+  'reconstruyendo lo que la tesoreria hizo el 16-mar-2024 segun el recibo 1773: "CUOTA DE ' +
+  'SOSTENIMIENTO DE ENERO A DICIEMBRE 2024 (TENIA SALDO A FAVOR DE $92.000)" -- pago $100.000 ' +
+  'en efectivo + $92.000 de credito = $192.000, el año 2024 completo. El sistema solo aplico el ' +
+  'efectivo por FIFO cronologico y dejo el credito sin tocar; el hueco real se termino cerrando ' +
+  'con el pago de 2026, dejando diciembre 2024 con $12.000 pendientes y el credito completo ' +
+  'mostrandose disponible pese a que ya se habia usado. Deja $80.000 como saldo a favor genuino. ' +
+  'Verificado 2026-08-12: la conciliacion contra CARTERA.xlsx sigue en $0 (paso11-conciliacion.js).';
+
+const REDENCION_R007 = {
+  codigoCuenta: 'R007',
+  anio: 2024,
+  mes: 12,
+  montoARedimir: 12000,
+  fecha: '2024-03-16'
+};
+
 function borrarCargoMensualDelAnio(db, cuentaId, anio) {
   return db.prepare("DELETE FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=?")
     .run(cuentaId, anio).changes;
@@ -347,6 +384,7 @@ function ejecutarPaso9b({ dbService }) {
   let correccionS058 = null;
   const suspensionesSinCartera = [];
   let inactivaS063 = null;
+  let redencionR007 = null;
 
   const transaccion = db.transaction(() => {
     // 1. S03311: causar 2024 completo a 10.000
@@ -656,6 +694,40 @@ function ejecutarPaso9b({ dbService }) {
 
       inactivaS063 = { corregido: true };
     }
+
+    // 13. R007: redimir $12.000 del crédito de apertura contra el hueco real de diciembre 2024.
+    const cuentaR007 = idPorCodigo.get(normalizarCodigo(REDENCION_R007.codigoCuenta));
+    if (cuentaR007 === undefined) throw new Error('R007: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+    const cargoDic2024R007 = db.prepare(
+      `SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?`
+    ).get(cuentaR007, REDENCION_R007.anio, REDENCION_R007.mes);
+    if (!cargoDic2024R007) throw new Error('R007: no tiene CargoMensual de diciembre 2024 -- ¿corrieron los pasos 9/10?');
+
+    const cubiertoDic2024R007 = db.prepare(
+      `SELECT COALESCE(SUM(monto),0) AS total FROM cartera_imputaciones WHERE cargo_id=?`
+    ).get(cargoDic2024R007.id).total;
+    const pendienteDic2024R007 = redondear(cargoDic2024R007.monto - cubiertoDic2024R007);
+
+    if (!esMayor(pendienteDic2024R007, 0)) {
+      redencionR007 = { yaCorregido: true };
+    } else if (Math.abs(pendienteDic2024R007 - REDENCION_R007.montoARedimir) < 1) {
+      const abonoId = repo.crearMovimiento({
+        cuentaId: cuentaR007, fecha: REDENCION_R007.fecha, tipo: 'Abono', exigible: 1,
+        monto: -REDENCION_R007.montoARedimir, observaciones: OBSERVACION_REDENCION_R007
+      });
+      repo.crearImputacion({ abonoId, cargoId: cargoDic2024R007.id, monto: REDENCION_R007.montoARedimir });
+      const creditoId = repo.crearCredito({
+        cuentaId: cuentaR007, tipo: 'Aplicado', monto: REDENCION_R007.montoARedimir, fecha: REDENCION_R007.fecha,
+        abonoMovimientoId: abonoId, observaciones: OBSERVACION_REDENCION_R007
+      });
+      redencionR007 = { yaCorregido: false, abonoId, creditoId, monto: REDENCION_R007.montoARedimir };
+    } else {
+      throw new Error(
+        `R007: se esperaba que diciembre 2024 tuviera $${REDENCION_R007.montoARedimir} pendientes ` +
+        `antes de esta corrección, tiene $${pendienteDic2024R007} -- revisar antes de aplicar a ciegas`
+      );
+    }
   });
   transaccion();
 
@@ -663,7 +735,7 @@ function ejecutarPaso9b({ dbService }) {
     s03311Creados, tarifaCorregida, propietarioS0244,
     reasignacion2137, correccion2384, reimputacion2384, recalculoS010,
     correccionAperturaS044, correccionPeriodo2229, reimputacion2229,
-    correccionS058, suspensionesSinCartera, inactivaS063
+    correccionS058, suspensionesSinCartera, inactivaS063, redencionR007
   };
 }
 
@@ -672,5 +744,5 @@ module.exports = {
   REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
   CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229, OBSERVACION_APERTURA_S044, reimputarAbono,
   CAUSACION_S058, OBSERVACION_CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, OBSERVACION_SUSPENSION_SIN_CARTERA,
-  INACTIVA_FUSIONADA_S063, OBSERVACION_INACTIVA_S063
+  INACTIVA_FUSIONADA_S063, OBSERVACION_INACTIVA_S063, REDENCION_R007, OBSERVACION_REDENCION_R007
 };
