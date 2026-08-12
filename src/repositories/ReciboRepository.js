@@ -108,6 +108,29 @@ class ReciboRepository {
     `).run(metodoPago, motivo, id);
   }
 
+  // cuenta_creditos es un pool por CUENTA, no un saldo rastreado por recibo: cuando
+  // CarteraService.redimirCredito consume saldo a favor, la fila 'Aplicado' que genera no queda
+  // ligada a qué crédito 'Abono' puntual la originó (no hay ese vínculo en el esquema). Por eso
+  // esto no intenta decidir "¿el crédito DE ESTE recibo fue el que se redimió?" -- pregunta que
+  // el propio modelo de datos no puede responder -- sino si borrar el crédito de este recibo
+  // dejaría el saldo AGREGADO de la cuenta en negativo, que es el invariante real que hay que
+  // proteger. Usado por ReciboService.anular para bloquear con un mensaje claro en vez de dejar
+  // una corrupción silenciosa (ver auditoría de entrega, hallazgo 5).
+  getImpactoCreditoAlAnular(reciboId, cuentaId) {
+    const { creditoDelRecibo } = this.db.prepare(`
+      SELECT COALESCE(SUM(monto), 0) AS creditoDelRecibo
+      FROM cuenta_creditos
+      WHERE tipo = 'Abono' AND recibo_detalle_id IN (SELECT id FROM recibo_detalles WHERE recibo_id = ?)
+    `).get(reciboId);
+
+    const { saldoActual } = this.db.prepare(`
+      SELECT COALESCE(SUM(CASE WHEN tipo = 'Abono' THEN monto ELSE -monto END), 0) AS saldoActual
+      FROM cuenta_creditos WHERE cuenta_id = ?
+    `).get(cuentaId);
+
+    return { creditoDelRecibo, saldoActual, saldoTrasAnular: saldoActual - creditoDelRecibo };
+  }
+
   // Anular un recibo libera los meses/abonos/conexión que cubría, para que se puedan volver
   // a cobrar, pero conserva el recibo y su detalle como constancia de que existió y se anuló.
   anular(id, motivo) {

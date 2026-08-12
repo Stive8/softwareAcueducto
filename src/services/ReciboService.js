@@ -1,5 +1,6 @@
 const ReciboRepository = require('../repositories/ReciboRepository');
 const AsientoContableService = require('./AsientoContableService');
+const { esMayor } = require('./cartera/dinero');
 
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -63,6 +64,20 @@ class ReciboService {
     if (!recibo) throw new Error('Recibo no encontrado');
     if (recibo.estado === 'Anulado') throw new Error('El recibo ya está anulado');
     if (!motivoAnulacion || !motivoAnulacion.trim()) throw new Error('Debe indicar el motivo de la anulación');
+
+    // Si este recibo generó saldo a favor (sobrante) y parte de ese saldo ya fue redimido contra
+    // deuda (CarteraService.redimirCredito), borrar el crédito de este recibo sin más dejaría el
+    // saldo a favor de la cuenta en negativo -- corrupción silenciosa (ver
+    // ReciboRepository.getImpactoCreditoAlAnular). Se bloquea en vez de intentar revertir la
+    // redención: cuenta_creditos es un pool por cuenta, no hay forma de saber con certeza qué
+    // redención vino de qué crédito puntual si la cuenta tuvo más de uno.
+    const impacto = this.repository.getImpactoCreditoAlAnular(id, recibo.cuenta_id);
+    if (esMayor(0, impacto.saldoTrasAnular)) {
+      throw new Error(
+        'No se puede anular este recibo: parte del saldo a favor que generó ya fue aplicado a otra deuda de esta cuenta. ' +
+        'Anularlo dejaría el saldo a favor en negativo. Consulte con un administrador antes de continuar.'
+      );
+    }
 
     return this.repository.transaccion(() => {
       this.repository.anular(id, motivoAnulacion);
