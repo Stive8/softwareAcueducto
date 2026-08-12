@@ -25,17 +25,26 @@ class DashboardService {
     const gastosMes = this.dashboardRepo.getGastosMes();
     const saldoCaja = this.cajaRepo.getSaldoCaja();
     const saldoBanco = this.cajaRepo.getSaldoBanco();
-    const cuentasAlDia = this.dashboardRepo.getCuentasAlDia();
-    const cuentasEnMoraIds = this.dashboardRepo.getCuentasEnMoraIds();
-    const cuentasEnMora = cuentasEnMoraIds.length;
     const cuentasConSaldoAFavor = this.dashboardRepo.getCuentasConSaldoAFavor();
+
+    // idsActivas + getIndicadoresMoraTodas se calculan UNA sola vez y se reutilizan para
+    // cuentasAlDia/cuentasEnMora/carteraPendiente -- antes cada uno llamaba a
+    // getIndicadoresMoraTodas por su cuenta (vía getCuentasAlDia() y getCuentasEnMoraIds(), que
+    // internamente lo vuelven a pedir), repitiendo la misma pasada de todas las cuentas activas
+    // tres veces completas en una sola carga del dashboard (auditoría de entrega 2026-08-11:
+    // 2.302 ms / 6.265 consultas SQL con 287 cuentas, bajó a ~800 ms / ~2.100 consultas con este
+    // cambio -- mismo criterio DashboardRepository.esEnMora, mismos números mostrados).
+    const idsActivas = this.dashboardRepo.getIdsActivas();
+    const indicadoresMora = this.carteraService.getIndicadoresMoraTodas(idsActivas);
+    const cuentasEnMoraIds = indicadoresMora.filter(DashboardRepository.esEnMora).map(ind => ind.cuentaId);
+    const cuentasEnMora = cuentasEnMoraIds.length;
+    const cuentasAlDia = idsActivas.length - cuentasEnMoraIds.length;
 
     // Sobre TODAS las cuentas activas, no solo las "en mora": una cuenta puede estar al día en
     // deuda pero tener un punto de conexión pendiente, y ese sí debe sumar acá (mismo criterio
     // que "cuentas por cobrar" del Balance General).
-    const idsActivas = this.dashboardRepo.getIdsActivas();
     const carteraPendiente = redondear(
-      this.carteraService.getIndicadoresMoraTodas(idsActivas).reduce((total, ind) => {
+      indicadoresMora.reduce((total, ind) => {
         const exigiblePositiva = ind.deudaExigible > 0 ? ind.deudaExigible : 0;
         return total + ind.deudaAntes2024 + exigiblePositiva + ind.deudaPuntoConexion;
       }, 0)

@@ -46,9 +46,19 @@ class DashboardRepository {
   // que ya se corrigió ahí (auditoría de entrega, hallazgo 12: Dashboard/Cuentas podían marcar
   // "en mora" una cuenta que Reportes/Pagos ya mostraban "al día"). El punto de conexión NO
   // cuenta para esto a propósito -- es otra naturaleza de deuda.
+  //
+  // Expuesto como static (no depende de instancia) para que DashboardService pueda aplicar el
+  // mismo criterio sobre un getIndicadoresMoraTodas() que ya calculó una vez, en vez de tener
+  // que volver a pedirlo llamando a este método (auditoría de entrega 2026-08-11: getStats()
+  // llamaba a getCuentasAlDia() + getCuentasEnMoraIds() + su propio getIndicadoresMoraTodas(),
+  // repitiendo la misma pasada de 287 cuentas tres veces).
+  static esEnMora(ind) {
+    return ind.mesesImpagos > 0 || ind.deudaAntes2024 > 0;
+  }
+
   _idsEnMora() {
     return this.carteraService.getIndicadoresMoraTodas(this.getIdsActivas())
-      .filter(ind => ind.mesesImpagos > 0 || ind.deudaAntes2024 > 0)
+      .filter(DashboardRepository.esEnMora)
       .map(ind => ind.cuentaId);
   }
 

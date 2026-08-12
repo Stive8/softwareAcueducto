@@ -350,7 +350,12 @@ class CarteraService {
   // solo si la cuenta estaba Activa en ese mes, igual que asegurarCausacion. Si no hay tarifa
   // vigente para un mes que lo necesita, el mes se salta pero queda registrado en
   // mesesSinTarifa y se deja un console.warn: no puede pasar desapercibido.
-  calcularAPagar(cuentaId, cubiertoHasta) {
+  // cargosConCobertura (opcional): si el caller ya pidió getCargosConCobertura(cuentaId, 1)
+  // para otra cosa (getEstadoCartera necesita el mismo dato para calcularCubiertoHasta), se lo
+  // pasa acá para no volver a pedirlo -- misma consulta, mismos resultados, sin ida y vuelta
+  // extra a la base (auditoría de entrega 2026-08-11: era una consulta redundante de las ~7 por
+  // cuenta que hace getEstadoCartera). Si no se pasa, se calcula igual que siempre.
+  calcularAPagar(cuentaId, cubiertoHasta, cargosConCobertura = null) {
     const ahora = new Date();
     const periodoActualCod = codificarPeriodo(ahora.getFullYear(), ahora.getMonth() + 1);
 
@@ -365,7 +370,7 @@ class CarteraService {
     }
 
     const coberturaPorMes = new Map(
-      this.repository.getCargosConCobertura(cuentaId, 1).map(c => [`${c.anio}-${c.mes}`, c])
+      (cargosConCobertura || this.repository.getCargosConCobertura(cuentaId, 1)).map(c => [`${c.anio}-${c.mes}`, c])
     );
 
     const meses = [];
@@ -415,9 +420,10 @@ class CarteraService {
   // resta de esa cifra; cada uno tiene su propia acción (abonar, redimir) en vez de mezclarse.
   getEstadoCartera(cuentaId) {
     const { deudaExigible, saldoOpaco } = this.repository.getSaldos(cuentaId);
-    const cubiertoHasta = calcularCubiertoHasta(this.repository.getCargosConCobertura(cuentaId, 1));
+    const cargosConCobertura = this.repository.getCargosConCobertura(cuentaId, 1);
+    const cubiertoHasta = calcularCubiertoHasta(cargosConCobertura);
     const totalCobrarHoy = deudaExigible > 0 ? deudaExigible : 0;
-    const { meses: mesesAPagar, total: aPagar, mesesSinTarifa } = this.calcularAPagar(cuentaId, cubiertoHasta);
+    const { meses: mesesAPagar, total: aPagar, mesesSinTarifa } = this.calcularAPagar(cuentaId, cubiertoHasta, cargosConCobertura);
 
     const deudaPuntoConexion = redondear(
       this.nuevoPuntoRepository.findByCuentaId(cuentaId)
