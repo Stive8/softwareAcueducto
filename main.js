@@ -144,7 +144,11 @@ const CANALES_SIN_SESION = new Set([
 const CANALES_IDEMPOTENTES = new Set([
   'asientos:crearManual', 'gastos:create', 'caja:registrarConsignacion',
   'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento', 'caja:regularizarSaldos',
-  'caja:registrarRetiro', 'cartera:redimirCredito'
+  'caja:registrarRetiro', 'cartera:redimirCredito',
+  // Ambos crean un documento financiero real (un cargo de conexión con su valor, o un abono
+  // con recibo propio) y no tenían protección -- mismo riesgo de doble clic que el resto de
+  // esta lista (auditoría de entrega, hallazgo 8).
+  'nuevospuntos:create', 'nuevospuntos:registrarAbono'
 ]);
 
 // opId -> Promise, mientras la operación sigue en curso (protege contra dos IPC casi

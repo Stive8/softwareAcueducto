@@ -546,14 +546,14 @@ const Pagos = {
     App.openModal(content);
     App.attachMoneyInput(document.getElementById('valor_total_conexion'));
 
-    document.getElementById('conexionForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('conexionForm'), async () => {
       const datos = {
         cuentaId,
         valorTotal: App.parseMoneyValue(document.getElementById('valor_total_conexion').value),
         fechaRegistro: document.getElementById('fecha_registro_conexion').value,
-        observaciones: document.getElementById('observaciones_conexion').value.trim()
+        observaciones: document.getElementById('observaciones_conexion').value.trim(),
+        opId
       };
 
       const errorDiv = document.getElementById('formError');
@@ -631,15 +631,15 @@ const Pagos = {
     App.openModal(content);
     App.attachMoneyInput(document.getElementById('monto_abono_conexion'));
 
-    document.getElementById('abonoConexionForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('abonoConexionForm'), async () => {
       const payload = {
         nuevoPuntoId,
         monto: App.parseMoneyValue(document.getElementById('monto_abono_conexion').value),
         fechaAbono: document.getElementById('fecha_abono_conexion').value,
         metodoPago: document.getElementById('metodo_pago_conexion').value,
-        observaciones: document.getElementById('observaciones_abono_conexion').value.trim()
+        observaciones: document.getElementById('observaciones_abono_conexion').value.trim(),
+        opId
       };
 
       const errorDiv = document.getElementById('formError');
