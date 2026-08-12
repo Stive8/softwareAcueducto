@@ -1,5 +1,4 @@
 const CarteraService = require('../services/CarteraService');
-const { codificarPeriodo } = require('../services/cartera/periodos');
 
 class DashboardRepository {
   constructor(dbService) {
@@ -31,12 +30,6 @@ class DashboardRepository {
     return result.total;
   }
 
-  // Código de período comparable: año*12 + (mes-1), igual a la codificación usada en PagoService
-  getPeriodoActualCodigo() {
-    const ahora = new Date();
-    return ahora.getFullYear() * 12 + ahora.getMonth();
-  }
-
   // Ids de todas las cuentas activas -- también la usa DashboardService para calcular
   // carteraPendiente sobre todas las cuentas, no solo las "en mora" (una cuenta puede estar al
   // día en deuda y aun así tener un punto de conexión pendiente).
@@ -44,19 +37,18 @@ class DashboardRepository {
     return this.db.prepare(`SELECT id FROM cuentas WHERE estado = 'Activo'`).all().map(r => r.id);
   }
 
-  // "En mora" = debe algo en 2024+ (cubiertoHasta no llega al mes actual) O tiene deuda
-  // anterior al corte pendiente, aunque esté al día en lo corriente -- mismo criterio que
-  // ReporteService.procesarEstadoCuentas (ver
-  // docs/superpowers/specs/2026-08-10-fase2-reportes-dashboard-design.md). El punto de conexión
-  // NO cuenta para esto a propósito -- es otra naturaleza de deuda. Antes se leía de
-  // pago_periodos (MAX de mes pagado, sin importar huecos); ahora de cubiertoHasta.
+  // "En mora" = tiene meses realmente impagos en 2024+ (mesesImpagos, no el rango completo
+  // desde cubiertoHasta -- una cuenta puede tener un hueco viejo aislado y estar al día en todo
+  // lo posterior, caso real R007) O tiene deuda anterior al corte pendiente, aunque esté al día
+  // en lo corriente. Mismo criterio que ReporteService.procesarEstadoCuentas y
+  // PagoService.getCuentasConEstado -- antes este archivo usaba el rango contra cubiertoHasta
+  // (codificarPeriodo(cubiertoHasta) < periodoActual), que sobrecontaba mora en el mismo caso
+  // que ya se corrigió ahí (auditoría de entrega, hallazgo 12: Dashboard/Cuentas podían marcar
+  // "en mora" una cuenta que Reportes/Pagos ya mostraban "al día"). El punto de conexión NO
+  // cuenta para esto a propósito -- es otra naturaleza de deuda.
   _idsEnMora() {
-    const periodoActual = this.getPeriodoActualCodigo();
     return this.carteraService.getIndicadoresMoraTodas(this.getIdsActivas())
-      .filter(ind => {
-        const cubiertoCod = ind.cubiertoHasta ? codificarPeriodo(ind.cubiertoHasta.anio, ind.cubiertoHasta.mes) : -1;
-        return cubiertoCod < periodoActual || ind.deudaAntes2024 > 0;
-      })
+      .filter(ind => ind.mesesImpagos > 0 || ind.deudaAntes2024 > 0)
       .map(ind => ind.cuentaId);
   }
 
