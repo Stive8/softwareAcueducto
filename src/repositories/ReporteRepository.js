@@ -327,17 +327,16 @@ class ReporteRepository {
     const saldoCaja = this.cajaRepository.getSaldoCaja();
     const saldoBanco = this.cajaRepository.getSaldoBanco();
 
-    // En mora = debe algo en 2024+ (cubiertoHasta no llega al mes actual) O tiene deuda
-    // anterior a 2024 pendiente, aunque esté al día en lo corriente -- mismo criterio que
-    // procesarEstadoCuentas/reporteCuentasEnMora (ver
-    // docs/superpowers/specs/2026-08-10-fase2-reportes-dashboard-design.md). El punto de
-    // conexión NO cuenta para esto a propósito.
-    const periodoActualCod = anio * 12 + (mes - 1);
+    // En mora = tiene meses realmente impagos en 2024+ (mesesImpagos, no el rango completo
+    // desde cubiertoHasta) O tiene deuda anterior al corte pendiente, aunque esté al día en lo
+    // corriente -- mismo criterio unificado que procesarEstadoCuentas/reporteCuentasEnMora y
+    // DashboardRepository._idsEnMora (auditoría de entrega 2026-08-11/12, hallazgo 6: este
+    // método seguía con el rango contra cubiertoHasta, una tercera fórmula de "en mora" que
+    // podía divergir de las otras dos y mostrar un número distinto en el dashboard de
+    // Contabilidad). El punto de conexión NO cuenta para esto a propósito.
     const idsActivas = this.db.prepare(`SELECT id FROM cuentas WHERE estado = 'Activo'`).all().map(r => r.id);
-    const cuentasMora = this.carteraService.getIndicadoresMoraTodas(idsActivas).filter(ind => {
-      const cubiertoCod = ind.cubiertoHasta ? codificarPeriodo(ind.cubiertoHasta.anio, ind.cubiertoHasta.mes) : -1;
-      return cubiertoCod < periodoActualCod || ind.deudaAntes2024 > 0;
-    }).length;
+    const cuentasMora = this.carteraService.getIndicadoresMoraTodas(idsActivas)
+      .filter(ind => ind.mesesImpagos > 0 || ind.deudaAntes2024 > 0).length;
 
     const periodoActual = this.db.prepare(`
       SELECT * FROM periodos_contables WHERE anio = ? AND mes = ?

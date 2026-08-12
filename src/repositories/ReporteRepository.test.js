@@ -299,6 +299,49 @@ test('getDashboardContable: cuentasMora cuenta cuentas con deuda 2024+ O deuda a
   }
 });
 
+test('getDashboardContable: cuentasMora usa mesesImpagos, no el rango contra cubiertoHasta (auditoría de entrega, hallazgo 6 -- tercer sitio con formula propia)', () => {
+  // Antes, getDashboardContable calculaba "en mora" con el rango contra cubiertoHasta
+  // (cubiertoCod < periodoActualCod), el mismo criterio que ya se había corregido en
+  // DashboardRepository._idsEnMora. Una cuenta cuyo último cargo quedó pagado hace tiempo, y a
+  // la que después dejó de proyectársele deuda nueva porque su categoría no tiene tarifa
+  // vigente más allá de esa fecha (mesesSinTarifa), quedaba contada "en mora" para siempre acá
+  // -- mientras que Reportes y la tabla de Pagos, que ya usaban mesesImpagos, la mostraban "al
+  // día". El dashboard de Contabilidad podía mostrar un número de cuentas en mora distinto al
+  // del dashboard general y al de Reportes, para la misma cuenta.
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuenta(db, 'T010');
+    db.prepare(`INSERT INTO categorias (nombre) VALUES ('Categoria sin tarifa vigente T010')`).run();
+    const categoriaId = db.prepare(`SELECT id FROM categorias WHERE nombre = 'Categoria sin tarifa vigente T010'`).get().id;
+    // La tarifa solo cubre enero-marzo 2024 -- nada la reemplaza después.
+    db.prepare(`
+      INSERT INTO categoria_tarifas (categoria_id, tarifa_sostenimiento, fecha_vigencia_desde, fecha_vigencia_hasta)
+      VALUES (?, 10000, '2024-01-01', '2024-03-31')
+    `).run(categoriaId);
+    asignarCategoria(db, cuentaId, categoriaId, '2024-01-01');
+
+    const repo = new CarteraRepository(ctx.dbService);
+    for (const mes of [1, 2, 3]) {
+      const cargo = repo.crearMovimiento({
+        cuentaId, fecha: `2024-0${mes}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes
+      });
+      const abonoId = repo.crearMovimiento({ cuentaId, fecha: `2024-0${mes}-01`, tipo: 'Abono', exigible: 1, monto: -10000 });
+      repo.crearImputacion({ abonoId, cargoId: cargo, monto: 10000 });
+    }
+    // Abril 2024 en adelante: sin tarifa vigente, nunca se causa ningún CargoMensual nuevo.
+
+    const reporteRepo = new ReporteRepository(ctx.dbService);
+    const r = reporteRepo.getDashboardContable();
+    const dashRepoEquivalente = new (require('./DashboardRepository'))(ctx.dbService);
+
+    assert.equal(r.cuentasMora, dashRepoEquivalente.getCuentasEnMoraIds().length, 'debe coincidir con el conteo del dashboard general (mismo criterio unificado)');
+    assert.ok(!dashRepoEquivalente.getCuentasEnMoraIds().includes(cuentaId), 'T010 no debe contar como en mora: sin meses realmente impagos');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('getCuentasPorCobrarEstimado: desglosa deudaAntes2024, deudaExigible y deudaPuntoConexion', () => {
   const ctx = crearDbTemporal();
   try {
