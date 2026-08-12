@@ -9,7 +9,8 @@
     "rebuild": "electron-rebuild -f -w better-sqlite3",
     "icon": "node scripts/generate-icon.js",
     "dist": "npm run rebuild && electron-builder --win",
-    "test": "node scripts/test.js"
+    "test": "node scripts/test.js",
+    "conciliacion": "node scripts/conciliacion.js"
   },
   "keywords": [],
   "author": "",

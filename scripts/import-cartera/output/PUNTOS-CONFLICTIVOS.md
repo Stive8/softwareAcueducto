@@ -4,16 +4,16 @@ Este documento es para la junta y la administración. No tiene lenguaje técnico
 referencias internas del sistema — solo qué pasa con cada cuenta, cuánta plata hay de
 por medio, por qué se decidió así, y qué falta decidir.
 
-De las 295 cuentas que se pudieron comparar contra el Excel de CARTERA, 282 quedaron
-cuadradas al peso. Las otras 11 cuentas del sistema no tienen fila en ese Excel, así que
-no hay contra qué compararlas. Este documento cubre las que no cuadran, y las decisiones
-que quedaron pendientes.
+De las 295 cuentas que se pudieron comparar contra el Excel de CARTERA, 281 quedaron
+cuadradas al peso (actualizado 2026-08-13, ver nota al final de esta sección). Las otras
+11 cuentas del sistema no tienen fila en ese Excel, así que no hay contra qué compararlas.
+Este documento cubre las que no cuadran, y las decisiones que quedaron pendientes.
 
 ---
 
 ## 1. Cuentas cuyo saldo no coincide con el Excel, y por qué
 
-Trece cuentas quedan con una diferencia frente al Excel de CARTERA. Ninguna se "ajustó a
+Catorce cuentas quedan con una diferencia frente al Excel de CARTERA. Ninguna se "ajustó a
 la fuerza" para que cuadrara — cada una tiene una explicación verificada, y se deja
 registrada así, con la diferencia visible, en vez de forzar el número.
 
@@ -66,6 +66,21 @@ plata.
 | Cuenta | Diferencia | Qué pasó |
 |---|---|---|
 | S048 | $192.000 | El Excel asumió un tercer pago anual que nunca se hizo. |
+
+### 1.3b Otro pago real que el Excel de CARTERA nunca registró (agregado 2026-08-13)
+
+El recibo 2246 de R0942 documenta una transferencia de $180.000 el 19 de junio de 2025
+("TRANSFERENCIA 19/06/2025 - $180,000 - SALDO A FAVOR 4,000"), pero tanto el Excel de
+CARTERA como la carga inicial del sistema lo registraron por $176.000. Verificado contra
+el talonario físico: los $4.000 son plata real que la asociación recibió y que ninguno de
+los dos sistemas contaba. Se agregó como saldo a favor disponible para R0942 (ver
+`scripts/import-cartera/paso9b-correcciones.js`, corrección 15) — mismo tipo de diferencia
+que S010 en la sección 1.2, encontrada más tarde porque no había ningún indicio hasta que
+se revisaron uno por uno los recibos que mencionan "saldo a favor" en el talonario.
+
+| Cuenta | Diferencia | Qué pasó |
+|---|---|---|
+| R0942 | −$4.000 | Transferencia de $180.000 registrada por $176.000; el Excel tampoco lo contó. |
 
 ### 1.4 Pagó tarde, y el recibo dice a qué meses viejos corresponde
 
@@ -210,6 +225,16 @@ el tratamiento acordado: los $155.000 de ese tramo son justamente la cifra que l
 necesita ver para decidir si castiga esta cartera. Si la junta decide congelarla, se hace
 con acta, no retroactivamente en el código.
 
+**Corrección 2026-08-13: las 7 cuentas de esta sección estuvieron dobladas por un error
+temporal.** Un comando suelto corrido el 2026-08-11 contra la base real les agregó, a cada
+una, un segundo cargo mensual paralelo -- de modo que en vez de $5.000/mes (la tarifa
+vieja, correcta según la decisión de la sección 1.5) se les estaba cobrando $10.000/mes,
+el doble. La tabla de arriba ($3.918.000 en total) ya refleja el número correcto, después
+de revertir ese error. La categoría de las 7 (Finca, $10.000 vigente) nunca estuvo mal --
+lo que estaba mal era el histórico causado, no a quién pertenecen. Corregido y versionado
+en `scripts/import-cartera/paso9b-correcciones.js`, corrección 14, para que quede
+reproducible y no vuelva a perderse el rastro de qué se cambió y por qué.
+
 ---
 
 ## 4. Oportunidades detectadas
@@ -239,6 +264,17 @@ con acta, no retroactivamente en el código.
 - **32 recibos que sí se cobraron pero nunca se anotaron en la planilla.** Existen en el
   talonario físico, por un total de **$2.978.000**, pero no estaban en ningún archivo
   digital. Ya se cargaron al sistema; antes solo existían en papel.
+
+- **R0831 — $8.000 que el sistema tenía aplicados al lugar equivocado (2026-08-13).** El
+  recibo 2407 (transferencia de $120.000 para enero-julio 2026, 7 meses x $16.000)
+  declaraba explícitamente "SALDO A FAVOR 8,000". El sistema sí cobró los $120.000
+  completos, pero usó el sobrante para tapar un hueco viejo sin relación (mayo y junio de
+  2025) en vez de dejarlo disponible como pedía el recibo. No cambia la conciliación (la
+  plata ya estaba contada, solo mal ubicada), pero si esta persona reclama su saldo a
+  favor en el mostrador, antes no aparecía. Corregido, versionado en
+  `paso9b-correcciones.js` corrección 16 -- reabre $8.000 de deuda real en mayo/junio 2025
+  (que de todas formas ya estaba en la cartera exigible total, solo contada distinto) y
+  los deja como crédito disponible, tal como pedía el recibo.
 
 ---
 

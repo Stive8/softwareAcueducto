@@ -144,6 +144,42 @@
 //    exigible que imputa contra el cargo, más una fila 'Aplicado' en cuenta_creditos), fechado
 //    16-mar-2024 para reflejar cuándo pasó en la realidad, no cuándo se corrió esta corrección.
 //
+// 14. Limpieza: 198 filas AjusteCategoria erróneas encontradas el 2026-08-12 en la base real,
+//    creadas todas en el mismo segundo (2026-08-11 18:38:03) por un comando suelto que nunca
+//    quedó versionado -- exactamente el problema que esta corrección viene a prevenir hacia
+//    adelante. Afectan a las 7 cuentas suspendidas de PUNTOS-CONFLICTIVOS.md sección 3 (R002,
+//    R0501, R0971, S004, S009, S0141, S0441). Confunden CATEGORÍA con CAUSACIÓN: la sección 1.5
+//    dice que estas 7 comparten la tarifa vieja de las 4 que sí se corrigieron (C021/R080/R091/
+//    S0244) pero que "no se les subió la tarifa" -- decisión de negocio, no un olvido. Su
+//    categoría ya era Finca ($10.000, vigente) desde la carga inicial -- eso está bien y no se
+//    toca. Pero el CargoMensual histórico (2024-2026) ya estaba correcto a $5.000/mes desde el
+//    paso 9 (2026-08-02); las 198 filas de AjusteCategoria, con observación "...causados a
+//    $5.000... en vez de $10.000 (tarifa Finca vigente)", duplicaron ese cargo en vez de
+//    corregir nada: CargoMensual $5.000 + AjusteCategoria $5.000 = $10.000/mes cobrados, el
+//    doble. Se verificó antes de aplicar que ninguna cartera_imputaciones referencia esas 198
+//    filas (cero pagos reales tocan la deuda inflada), así que se pueden borrar sin revertir
+//    ningún abono. Efecto esperado: la conciliación (paso11) vuelve a cuadrar exacto en las 6
+//    cuentas con fila en el Excel (venían con +$155.000 c/u) y la cartera incobrable de la
+//    sección 3 vuelve a $3.918.000 (venía en $4.908.000, $990.000 de más).
+//
+// 15. R0942, recibo 2246: la transferencia real fue de $180.000 (texto del recibo: "TRANSFERENCIA
+//    19/06/2025 - $180,000 - SALDO A FAVOR 4,000"), pero el recibo se cargó al sistema por
+//    $176.000 -- los $4.000 no quedaron en ninguna parte, ni como deuda pagada ni como crédito.
+//    Verificado contra el talonario físico (2026-08-13): es plata real que la asociación
+//    recibió y el sistema no reconoce. Se crea como saldo a favor disponible, con la fecha de
+//    la transferencia (no la del recibo) y ligado al mismo recibo_detalle del abono real.
+//
+// 16. R0831, recibo 2407: transferencia de $120.000 para "ENERO A JULIO 2026" (7 meses ×
+//    $16.000 = $112.000), con "SALDO A FAVOR 8,000" explícito en el texto. El sistema sí
+//    registró los $120.000 completos, pero el FIFO de respaldo (tras cubrir ene-jul 2026) usó
+//    el sobrante para tapar un hueco viejo sin relación (mayo y junio de 2025, $4.000 cada uno)
+//    en vez de dejarlo como crédito -- exactamente lo que el recibo pedía. Se deshacen esas dos
+//    imputaciones puntuales (mayo y junio de 2025 vuelven a su estado real: $4.000 y $16.000
+//    pendientes) y los $8.000 se registran como saldo a favor disponible. La deuda exigible de
+//    la cuenta sube $8.000 (refleja el hueco real) y el saldo a favor sube $8.000 en el mismo
+//    movimiento -- la plata es la misma, solo se reubica de donde el FIFO la puso a donde el
+//    recibo decía que fuera.
+//
 // Idempotente: antes de insertar, borra los CargoMensual existentes de la cuenta en los años
 // que va a recrear (2024-2026 completos para las 4 de tarifa; solo 2024 para S03311; feb-jul
 // 2026 para S058), así que re-ejecutar da el mismo resultado sin duplicar ni acumular montos
@@ -154,7 +190,11 @@
 // ya es exactamente la esperada (mismo estado, misma fecha_inicio). La corrección 13 se detecta
 // por el pendiente real del cargo de diciembre 2024 de R007: $0 significa que ya corrió (o algo
 // más lo cerró), $12.000 significa que hay que aplicarla, cualquier otro valor es un estado
-// inesperado y la corrección se detiene con un error en vez de adivinar cuánto redimir.
+// inesperado y la corrección se detiene con un error en vez de adivinar cuánto redimir. La 14 se
+// detecta por si sigue habiendo AjusteCategoria con ese texto exacto (si no hay ninguna, ya
+// corrió o nunca existió -- no hace nada). Las 15 y 16 se detectan por si ya existe un crédito
+// en cuenta_creditos ligado al mismo abono_movimiento_id -- mismo mecanismo que cualquier otro
+// crédito de este archivo.
 const { normalizarCodigo } = require('./normalizar');
 const { primerDiaDelMes } = require('../../src/services/cartera/periodos');
 const { distribuir, MODOS } = require('../../src/services/cartera/imputacion');
@@ -281,6 +321,45 @@ const REDENCION_R007 = {
   fecha: '2024-03-16'
 };
 
+const FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS = 'Corrección: meses desde 2024-01 causados a $5.000';
+const CUENTAS_SUSPENDIDAS_SIN_RECAUSAR = ['R002', 'R0501', 'R0971', 'S004', 'S009', 'S0141', 'S0441'];
+
+const OBSERVACION_CREDITO_R0942 =
+  'Saldo a favor no registrado: el recibo 2246 documenta una transferencia de $180.000 el ' +
+  '19-jun-2025 ("CUOTA DE SOSTENIMIENTO ABRIL 2025 A FEBRERO 2026 (TRANSFERENCIA 19/06/2025 - ' +
+  '$180,000 - SALDO A FAVOR 4,000)"), pero el recibo se cargó al sistema por $176.000 -- los ' +
+  '$4.000 no quedaban en ninguna parte. Verificado contra el talonario físico 2026-08-13: plata ' +
+  'real que la asociación recibió y el sistema no reconocía.';
+
+// numeroRecibo resuelve el abono/recibo_detalle en vivo (getReciboDetalle/getAbonoPorDetalle),
+// igual que las correcciones 4-9 -- nunca un id interno fijo, que no sobrevive a una corrida
+// distinta del loader (autoincrement depende del orden de inserción de todo el dataset).
+const CREDITO_R0942 = {
+  codigoCuenta: 'R0942',
+  numeroRecibo: 2246,
+  monto: 4000,
+  fecha: '2025-06-19'
+};
+
+const OBSERVACION_CREDITO_R0831 =
+  'Saldo a favor no registrado: el recibo 2407 documenta una transferencia de $120.000 el ' +
+  '30-ene-2026 para "ENERO A JULIO 2026 ... - SALDO A FAVOR 8,000" (7 meses x $16.000 = ' +
+  '$112.000, sobran $8.000). El sistema imputó los $120.000 completos, pero el FIFO de respaldo ' +
+  'uso el sobrante para tapar un hueco viejo sin relación (mayo y junio de 2025) en vez de ' +
+  'dejarlo como crédito. Se deshacen esas dos imputaciones puntuales y los $8.000 quedan como ' +
+  'saldo a favor disponible, tal como pedía el recibo.';
+
+const CREDITO_R0831 = {
+  codigoCuenta: 'R0831',
+  numeroRecibo: 2407,
+  monto: 8000,
+  fecha: '2026-01-30',
+  imputacionesADeshacer: [
+    { anio: 2025, mes: 5, monto: 4000 },
+    { anio: 2025, mes: 6, monto: 4000 }
+  ]
+};
+
 function borrarCargoMensualDelAnio(db, cuentaId, anio) {
   return db.prepare("DELETE FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=?")
     .run(cuentaId, anio).changes;
@@ -385,6 +464,9 @@ function ejecutarPaso9b({ dbService }) {
   const suspensionesSinCartera = [];
   let inactivaS063 = null;
   let redencionR007 = null;
+  const limpiezaSuspendidas = [];
+  let creditoR0942 = null;
+  let creditoR0831 = null;
 
   const transaccion = db.transaction(() => {
     // 1. S03311: causar 2024 completo a 10.000
@@ -728,6 +810,115 @@ function ejecutarPaso9b({ dbService }) {
         `antes de esta corrección, tiene $${pendienteDic2024R007} -- revisar antes de aplicar a ciegas`
       );
     }
+
+    // 14. Limpieza de las 7 suspendidas: borrar el AjusteCategoria erróneo que dobló su
+    // causación. Se detecta por el texto exacto de la observación -- si ya no hay ninguna fila
+    // así para una cuenta, no hace nada con ella.
+    for (const codigo of CUENTAS_SUSPENDIDAS_SIN_RECAUSAR) {
+      const cuentaId = idPorCodigo.get(normalizarCodigo(codigo));
+      if (cuentaId === undefined) throw new Error(`${codigo}: no existe en la base -- ¿corrieron los pasos 1-2?`);
+
+      const erroneas = db.prepare(
+        `SELECT id FROM cartera_movimientos
+         WHERE cuenta_id=? AND tipo='AjusteCategoria' AND mes IS NOT NULL AND observaciones LIKE ?`
+      ).all(cuentaId, `%${FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS}%`);
+
+      if (erroneas.length === 0) {
+        limpiezaSuspendidas.push({ codigo, borradas: 0 });
+        continue;
+      }
+
+      const ids = erroneas.map(e => e.id);
+      const placeholders = ids.map(() => '?').join(',');
+      const referenciadas = db.prepare(
+        `SELECT COUNT(*) n FROM cartera_imputaciones WHERE cargo_id IN (${placeholders})`
+      ).get(...ids).n;
+      if (referenciadas > 0) {
+        throw new Error(
+          `${codigo}: ${referenciadas} imputación(es) reales sobre el AjusteCategoria erróneo -- ` +
+          `revisar antes de borrar a ciegas`
+        );
+      }
+
+      db.prepare(`DELETE FROM cartera_movimientos WHERE id IN (${placeholders})`).run(...ids);
+      limpiezaSuspendidas.push({ codigo, borradas: ids.length });
+    }
+
+    // 15. R0942: crear el saldo a favor de $4.000 que el recibo 2246 documenta pero que nunca
+    // se registró en ninguna parte. Se detecta por si ya existe un crédito ligado a este mismo
+    // abono.
+    const cuentaR0942 = idPorCodigo.get(normalizarCodigo(CREDITO_R0942.codigoCuenta));
+    if (cuentaR0942 === undefined) throw new Error('R0942: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+    const { detalleId: detalle2246Id } = getReciboDetalle(db, CREDITO_R0942.numeroRecibo);
+    const abono2246 = getAbonoPorDetalle(db, detalle2246Id);
+    if (!abono2246) throw new Error(`Recibo ${CREDITO_R0942.numeroRecibo}: no tiene Abono asociado -- ¿corrió el paso 10?`);
+
+    const creditoExistenteR0942 = db.prepare(
+      `SELECT id FROM cuenta_creditos WHERE cuenta_id=? AND abono_movimiento_id=?`
+    ).get(cuentaR0942, abono2246.id);
+
+    if (creditoExistenteR0942) {
+      creditoR0942 = { yaCorregido: true };
+    } else {
+      const creditoId = repo.crearCredito({
+        cuentaId: cuentaR0942, tipo: 'Abono', monto: CREDITO_R0942.monto, fecha: CREDITO_R0942.fecha,
+        reciboDetalleId: detalle2246Id, abonoMovimientoId: abono2246.id,
+        observaciones: OBSERVACION_CREDITO_R0942
+      });
+      creditoR0942 = { yaCorregido: false, creditoId, monto: CREDITO_R0942.monto };
+    }
+
+    // 16. R0831: deshacer las dos imputaciones de mayo/junio 2025 que absorbieron el sobrante
+    // del recibo 2407 y registrar los $8.000 como saldo a favor. Se detecta por si ya existe un
+    // crédito ligado a este abono (si ya corrió, las imputaciones ya deberían estar deshechas).
+    const cuentaR0831 = idPorCodigo.get(normalizarCodigo(CREDITO_R0831.codigoCuenta));
+    if (cuentaR0831 === undefined) throw new Error('R0831: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+    const { detalleId: detalle2407Id } = getReciboDetalle(db, CREDITO_R0831.numeroRecibo);
+    const abono2407 = getAbonoPorDetalle(db, detalle2407Id);
+    if (!abono2407) throw new Error(`Recibo ${CREDITO_R0831.numeroRecibo}: no tiene Abono asociado -- ¿corrió el paso 10?`);
+
+    const creditoExistenteR0831 = db.prepare(
+      `SELECT id FROM cuenta_creditos WHERE cuenta_id=? AND abono_movimiento_id=?`
+    ).get(cuentaR0831, abono2407.id);
+
+    if (creditoExistenteR0831) {
+      creditoR0831 = { yaCorregido: true };
+    } else {
+      let deshechas = 0;
+      for (const item of CREDITO_R0831.imputacionesADeshacer) {
+        const cargo = db.prepare(
+          `SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?`
+        ).get(cuentaR0831, item.anio, item.mes);
+        if (!cargo) throw new Error(`R0831: no existe el CargoMensual de ${item.anio}-${item.mes}`);
+
+        const imputacion = db.prepare(
+          `SELECT id, monto FROM cartera_imputaciones WHERE abono_id=? AND cargo_id=?`
+        ).get(abono2407.id, cargo.id);
+        if (!imputacion) {
+          throw new Error(
+            `R0831: se esperaba una imputación del abono del recibo ${CREDITO_R0831.numeroRecibo} contra ` +
+            `${item.anio}-${item.mes} -- no existe, revisar antes de aplicar a ciegas`
+          );
+        }
+        if (Math.abs(imputacion.monto - item.monto) >= 1) {
+          throw new Error(
+            `R0831: la imputación de ${item.anio}-${item.mes} es de $${imputacion.monto}, se esperaba ` +
+            `$${item.monto} -- revisar antes de aplicar a ciegas`
+          );
+        }
+        db.prepare(`DELETE FROM cartera_imputaciones WHERE id=?`).run(imputacion.id);
+        deshechas++;
+      }
+
+      const creditoId = repo.crearCredito({
+        cuentaId: cuentaR0831, tipo: 'Abono', monto: CREDITO_R0831.monto, fecha: CREDITO_R0831.fecha,
+        reciboDetalleId: detalle2407Id, abonoMovimientoId: abono2407.id,
+        observaciones: OBSERVACION_CREDITO_R0831
+      });
+      creditoR0831 = { yaCorregido: false, creditoId, monto: CREDITO_R0831.monto, imputacionesDeshechas: deshechas };
+    }
   });
   transaccion();
 
@@ -735,7 +926,8 @@ function ejecutarPaso9b({ dbService }) {
     s03311Creados, tarifaCorregida, propietarioS0244,
     reasignacion2137, correccion2384, reimputacion2384, recalculoS010,
     correccionAperturaS044, correccionPeriodo2229, reimputacion2229,
-    correccionS058, suspensionesSinCartera, inactivaS063, redencionR007
+    correccionS058, suspensionesSinCartera, inactivaS063, redencionR007,
+    limpiezaSuspendidas, creditoR0942, creditoR0831
   };
 }
 
@@ -744,5 +936,7 @@ module.exports = {
   REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
   CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229, OBSERVACION_APERTURA_S044, reimputarAbono,
   CAUSACION_S058, OBSERVACION_CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, OBSERVACION_SUSPENSION_SIN_CARTERA,
-  INACTIVA_FUSIONADA_S063, OBSERVACION_INACTIVA_S063, REDENCION_R007, OBSERVACION_REDENCION_R007
+  INACTIVA_FUSIONADA_S063, OBSERVACION_INACTIVA_S063, REDENCION_R007, OBSERVACION_REDENCION_R007,
+  CUENTAS_SUSPENDIDAS_SIN_RECAUSAR, FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS,
+  CREDITO_R0942, OBSERVACION_CREDITO_R0942, CREDITO_R0831, OBSERVACION_CREDITO_R0831
 };
