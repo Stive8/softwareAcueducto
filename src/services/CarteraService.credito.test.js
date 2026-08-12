@@ -203,6 +203,158 @@ test('calcularAPagar no incluye meses en que la cuenta no estaba Activa', () => 
   }
 });
 
+// Los tres tests siguientes cubren el ajuste 2026-08-11: redimirCredito causa el mes en curso
+// antes de redimir (mismo patrón que PagoService.registrarPagoSostenimiento), porque
+// calcularAPagar ya lo cuenta como deuda aunque cartera_movimientos todavía no tenga el cargo
+// real -- caso real R007 (ver CarteraService.js, comentario en redimirCredito).
+
+test('redimirCredito causa el mes en curso antes de redimir, si el crédito alcanza para cubrirlo (caso real R007)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    db.prepare(`INSERT INTO cuentas (codigo, direccion, estado) VALUES ('T004', 'Vereda Test', 'Activo')`).run();
+    const cuentaId = db.prepare(`SELECT id FROM cuentas WHERE codigo = 'T004'`).get().id;
+    db.prepare(`INSERT INTO categorias (nombre) VALUES ('Finca-T004')`).run();
+    const catId = db.prepare(`SELECT id FROM categorias WHERE nombre = 'Finca-T004'`).get().id;
+    db.prepare(`INSERT INTO categoria_tarifas (categoria_id, tarifa_sostenimiento, fecha_vigencia_desde)
+                VALUES (?, 10000, '2020-01-01')`).run(catId);
+    db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio)
+                VALUES (?, ?, '2020-01-01')`).run(cuentaId, catId);
+    new CuentaEstadoRepository(ctx.dbService)
+      .sembrarVigenciaInicial({ cuentaId, estado: 'Activo', fechaInicio: '2020-01-01' });
+
+    const service = new CarteraService(ctx.dbService);
+    const hoy = new Date();
+    const mesAnteriorDate = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    const anioAnterior = mesAnteriorDate.getFullYear();
+    const mesAnterior = mesAnteriorDate.getMonth() + 1;
+
+    // Deuda vieja ya causada (mes anterior), como el dic-2024 de R007.
+    service.repository.crearMovimiento({
+      cuentaId, fecha: `${anioAnterior}-${String(mesAnterior).padStart(2, '0')}-01`,
+      tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: anioAnterior, mes: mesAnterior
+    });
+    // Crédito suficiente para el mes viejo (10.000) + el mes en curso, todavía sin causar (10.000).
+    service.registrarAbono({
+      cuentaId, fecha: `${anioAnterior}-${String(mesAnterior).padStart(2, '0')}-20`,
+      monto: 20000, modo: MODOS.ANTICIPO
+    });
+
+    const antes = service.getEstadoCartera(cuentaId);
+    assert.equal(antes.aPagar, 20000, 'mes anterior (causado) + mes en curso (proyectado) = 20.000, como R007');
+    assert.equal(antes.saldoCreditoDisponible, 20000);
+
+    const r = service.redimirCredito({ cuentaId, fecha: hoy.toISOString().split('T')[0], monto: 20000 });
+    assert.equal(r.aplicado, 20000);
+    assert.equal(r.saldoRestante, 0);
+
+    const despues = service.getEstadoCartera(cuentaId);
+    assert.equal(despues.aPagar, 0, 'el mes en curso quedó causado Y redimido, no solo el mes viejo');
+    assert.equal(despues.saldoCreditoDisponible, 0);
+    assert.deepEqual(despues.cubiertoHasta, { anio: hoy.getFullYear(), mes: hoy.getMonth() + 1 });
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('redimirCredito NO causa el mes en curso si la cuenta está suspendida ese mes', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    db.prepare(`INSERT INTO cuentas (codigo, direccion, estado) VALUES ('T005', 'Vereda Test', 'Suspendido')`).run();
+    const cuentaId = db.prepare(`SELECT id FROM cuentas WHERE codigo = 'T005'`).get().id;
+    db.prepare(`INSERT INTO categorias (nombre) VALUES ('Finca-T005')`).run();
+    const catId = db.prepare(`SELECT id FROM categorias WHERE nombre = 'Finca-T005'`).get().id;
+    db.prepare(`INSERT INTO categoria_tarifas (categoria_id, tarifa_sostenimiento, fecha_vigencia_desde)
+                VALUES (?, 10000, '2020-01-01')`).run(catId);
+    db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio)
+                VALUES (?, ?, '2020-01-01')`).run(cuentaId, catId);
+
+    const estadoRepo = new CuentaEstadoRepository(ctx.dbService);
+    const hoy = new Date();
+    const inicioMesActual = `${hoy.getFullYear()}-${String(hoy.getMonth() + 1).padStart(2, '0')}-01`;
+    estadoRepo.sembrarVigenciaInicial({ cuentaId, estado: 'Activo', fechaInicio: '2020-01-01' });
+    // Igual que las 11 cuentas suspendidas reales (fecha_inicio 2026-08-01): suspendida desde
+    // el primer día del mes en curso.
+    estadoRepo.cambiarEstado({ cuentaId, estado: 'Suspendido', fechaInicio: inicioMesActual, motivo: 'test' });
+
+    const service = new CarteraService(ctx.dbService);
+    const mesAnteriorDate = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    const anioAnterior = mesAnteriorDate.getFullYear();
+    const mesAnterior = mesAnteriorDate.getMonth() + 1;
+
+    // Deuda vieja de cuando SÍ estaba activa, ya causada -- el crédito debe poder redimirse
+    // contra ella igual, la suspensión no bloquea eso.
+    service.repository.crearMovimiento({
+      cuentaId, fecha: `${anioAnterior}-${String(mesAnterior).padStart(2, '0')}-01`,
+      tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: anioAnterior, mes: mesAnterior
+    });
+    service.registrarAbono({
+      cuentaId, fecha: `${anioAnterior}-${String(mesAnterior).padStart(2, '0')}-20`,
+      monto: 10000, modo: MODOS.ANTICIPO
+    });
+
+    service.redimirCredito({ cuentaId, fecha: hoy.toISOString().split('T')[0], monto: 10000 });
+
+    const cargoMesActual = db.prepare(`
+      SELECT COUNT(*) c FROM cartera_movimientos
+      WHERE cuenta_id = ? AND tipo = 'CargoMensual' AND anio = ? AND mes = ?
+    `).get(cuentaId, hoy.getFullYear(), hoy.getMonth() + 1);
+    assert.equal(cargoMesActual.c, 0, 'la cuenta está suspendida este mes: redimir no debe generar un cargo nuevo');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('redimirCredito llamado dos veces seguidas no duplica el cargo del mes en curso', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    db.prepare(`INSERT INTO cuentas (codigo, direccion, estado) VALUES ('T006', 'Vereda Test', 'Activo')`).run();
+    const cuentaId = db.prepare(`SELECT id FROM cuentas WHERE codigo = 'T006'`).get().id;
+    db.prepare(`INSERT INTO categorias (nombre) VALUES ('Finca-T006')`).run();
+    const catId = db.prepare(`SELECT id FROM categorias WHERE nombre = 'Finca-T006'`).get().id;
+    db.prepare(`INSERT INTO categoria_tarifas (categoria_id, tarifa_sostenimiento, fecha_vigencia_desde)
+                VALUES (?, 10000, '2020-01-01')`).run(catId);
+    db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio)
+                VALUES (?, ?, '2020-01-01')`).run(cuentaId, catId);
+    new CuentaEstadoRepository(ctx.dbService)
+      .sembrarVigenciaInicial({ cuentaId, estado: 'Activo', fechaInicio: '2020-01-01' });
+
+    const service = new CarteraService(ctx.dbService);
+    const hoy = new Date();
+    const mesAnteriorDate = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    const anioAnterior = mesAnteriorDate.getFullYear();
+    const mesAnterior = mesAnteriorDate.getMonth() + 1;
+
+    service.repository.crearMovimiento({
+      cuentaId, fecha: `${anioAnterior}-${String(mesAnterior).padStart(2, '0')}-01`,
+      tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: anioAnterior, mes: mesAnterior
+    });
+    // 20.000 de crédito repartidos en dos redenciones de 10.000: la primera cubre el mes
+    // viejo y de paso causa el mes en curso (sin alcanzar a redimirlo); la segunda redime el
+    // mes en curso que la primera ya causó -- asegurarCausacion debe verlo como ya hecho.
+    service.registrarAbono({
+      cuentaId, fecha: `${anioAnterior}-${String(mesAnterior).padStart(2, '0')}-20`,
+      monto: 20000, modo: MODOS.ANTICIPO
+    });
+
+    service.redimirCredito({ cuentaId, fecha: hoy.toISOString().split('T')[0], monto: 10000 });
+    service.redimirCredito({ cuentaId, fecha: hoy.toISOString().split('T')[0], monto: 10000 });
+
+    const cargosMesActual = db.prepare(`
+      SELECT COUNT(*) c FROM cartera_movimientos
+      WHERE cuenta_id = ? AND tipo = 'CargoMensual' AND anio = ? AND mes = ?
+    `).get(cuentaId, hoy.getFullYear(), hoy.getMonth() + 1);
+    assert.equal(cargosMesActual.c, 1, 'redimir dos veces seguidas no debe duplicar el cargo del mes en curso');
+
+    const despues = service.getEstadoCartera(cuentaId);
+    assert.equal(despues.aPagar, 0, 'entre las dos redenciones, el mes viejo y el mes en curso quedaron cubiertos');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('calcularAPagar no cobra dos veces un mes que un FIFO fuera de orden ya cubrió después del hueco', () => {
   // Reproduce el caso real de R007: un abono cubre un mes viejo solo a medias (queda un
   // hueco), y OTRO abono posterior, por FIFO, salta ese hueco pendiente y cubre por completo

@@ -31,17 +31,23 @@ class CarteraService {
   // (el pago es consecuencia, no causa). Prioridad:
   //   1. Primer CargoMensual en cartera_movimientos -- es la fuente de verdad de cuándo se
   //      empezó a causar sostenimiento, exista o no un pago encima.
-  //   2. Si no hay cargos causados todavía: el período más antiguo en pago_periodos (modelo
-  //      viejo). Es una señal más precisa que la fecha de emisión del recibo: un recibo puede
-  //      emitirse mucho después del período que cubre (pago atrasado/retroactivo pagado todo
-  //      junto, ej. PagoService.registrarPagoSostenimiento cobrando en abril tres meses de
-  //      enero-marzo), pero el período elegido sigue siendo el mes real desde el que la cuenta
-  //      se factura.
+  //   2. Si no hay cargos causados todavía: el período más antiguo en pago_periodos (archivo
+  //      histórico de la migración, ver README -- única lectura de esa tabla que queda en el
+  //      flujo activo, a propósito). Es una señal más precisa que la fecha de emisión del
+  //      recibo: un recibo puede emitirse mucho después del período que cubre (pago atrasado/
+  //      retroactivo pagado todo junto, ej. PagoService.registrarPagoSostenimiento cobrando en
+  //      abril tres meses de enero-marzo), pero el período elegido sigue siendo el mes real
+  //      desde el que la cuenta se factura.
   //   3. Si tampoco hay pago_periodos: primer recibo (aproximación -- casi toda cuenta con
   //      historial real ha pagado alguna vez, pero conceptualmente es un sustituto; hay recibos
   //      reales, ej. abonos a deuda o a punto de conexión, que nunca se atribuyen a un mes
   //      concreto y por eso no aparecen en pago_periodos). Excluye los recibos anulados: un
-  //      recibo anulado nunca representó un cobro real.
+  //      recibo anulado nunca representó un cobro real. A propósito NO se usa
+  //      cuenta_categorias.fecha_inicio como fallback intermedio acá: una categoría puede
+  //      asignarse administrativamente mucho antes de que la cuenta factura de verdad (caso
+  //      real: categoría de 2020, primer recibo real de 2024) -- usarla correría la ancla hacia
+  //      atrás y generaría años de mora que nunca existió (verificado 2026-08-11 contra 22
+  //      cuentas reales que dependen de esta prioridad o la siguiente).
   //   4. Si no hay cargos, ni pago_periodos, ni recibos (cuenta recién dada de alta, sin nada
   //      facturado aún): fecha_creacion de la cuenta. Nota: en cuentas migradas desde el
   //      talonario físico esto es la fecha del lote de importación, no una fecha de alta real
@@ -83,16 +89,33 @@ class CarteraService {
   //
   // No admite ningún parámetro para saltarse el bloqueo de períodos contables: la carga
   // inicial (que sí necesita escribir en el pasado) va por el script de migración, no por acá.
-  asegurarCausacion(cuentaId, hastaAnio, hastaMes) {
+  //
+  // desdeMinimo (opcional) es una cota inferior explícita, para cuando el LLAMADOR ya sabe con
+  // certeza que hay que causar desde ahí -- caso real: PagoService.registrarPagoSostenimiento
+  // cobrando el primer pago retroactivo de una cuenta nueva (ej. cobra en abril tres meses de
+  // enero-marzo). getFechaInicioFacturacion no puede adivinar eso todavía: en ese momento la
+  // cuenta no tiene cargo, ni pago_periodos, ni ningún recibo ANTERIOR a este mismo pago, así
+  // que caía en fecha_creacion o en el propio recibo que se está creando (fechado en abril, no
+  // en enero) -- la ancla quedaba DESPUÉS de los meses que había que cobrar y no causaba nada
+  // (caso real de prueba, 2026-08-11). No se resuelve ampliando la prioridad de
+  // getFechaInicioFacturacion (ver su comentario) porque esa función sirve a más llamadores para
+  // los que una cota más temprana sería incorrecta -- acá el llamador ya validó (vía
+  // construirPeriodos) que esos meses son cobrables, así que puede pedir la cota con seguridad.
+  asegurarCausacion(cuentaId, hastaAnio, hastaMes, desdeMinimo = null) {
     const omitidos = [];
     const ancla = this.getFechaInicioFacturacion(cuentaId);
-    if (!ancla) {
+    if (!ancla && !desdeMinimo) {
       omitidos.push({ anio: null, mes: null, motivo: 'La cuenta no tiene recibos: sin ancla de facturación no se puede causar' });
       return { creados: 0, omitidos };
     }
 
-    const inicio = anioMesDeFecha(ancla);
-    const desdeCod = codificarPeriodo(inicio.anio, inicio.mes);
+    let desdeCod = ancla
+      ? codificarPeriodo(anioMesDeFecha(ancla).anio, anioMesDeFecha(ancla).mes)
+      : Infinity;
+    if (desdeMinimo) {
+      const desdeMinimoCod = codificarPeriodo(desdeMinimo.anio, desdeMinimo.mes);
+      if (desdeMinimoCod < desdeCod) desdeCod = desdeMinimoCod;
+    }
     const hastaCod = codificarPeriodo(hastaAnio, hastaMes);
     const yaCausados = this.repository.getMesesCausados(cuentaId);
 
@@ -208,6 +231,21 @@ class CarteraService {
     if (modo === MODOS.ABONO_SALDO_OPACO || modo === MODOS.ANTICIPO) {
       throw new Error('El crédito solo se redime contra deuda exigible: use AbonoDeudaFIFO o MesesEspecificos');
     }
+
+    // Causa el mes en curso antes de redimir. calcularAPagar/getIndicadoresMoraTodas ya lo
+    // cuentan como deuda (cifra principal, desglose y reporte de mora), pero hasta que alguien
+    // registra un pago o redime crédito contra él, cartera_movimientos no tiene el cargo real
+    // -- mismo patrón que PagoService.registrarPagoSostenimiento (línea ~289). Sin esto, redimir
+    // el saldo a favor completo dejaba el mes en curso "a pagar" pese a que el sistema entero ya
+    // lo mostraba como deuda: correcto por dentro, confuso en mostrador (caso real R007,
+    // 2026-08-11). asegurarCausacion ya es idempotente por (cuenta, año, mes) y ya respeta
+    // cuenta_estados (omite meses Suspendida/Inactiva, ver estadoEnMes) -- no hace falta
+    // duplicar ninguna de esas dos garantías acá. A diferencia de registrarPagoSostenimiento,
+    // acá NO se lanza error si el mes queda omitido (ej. cuenta suspendida): no hay ningún
+    // período específico que el operador haya prometido cubrir, así que se sigue de largo y se
+    // redime lo que sí exista.
+    const ahora = new Date();
+    this.asegurarCausacion(cuentaId, ahora.getFullYear(), ahora.getMonth() + 1);
 
     const disponible = this.repository.getSaldoCreditoDisponible(cuentaId);
     if (esMayor(monto, disponible)) {

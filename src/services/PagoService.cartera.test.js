@@ -217,7 +217,14 @@ test('registrarPagoSostenimiento con saldo a favor aplica esa porción también 
   }
 });
 
-test('registrarPagoSostenimiento lanza si la porción de crédito no puede imputarse completa contra los cargos elegidos', () => {
+// Hasta el 2026-08-11 este test esperaba que registrarPagoSostenimiento LANZARA en este
+// escenario -- era el bug real (14 cuentas/15 meses reales con este patrón, ver caso R007):
+// construirPeriodos cobraba la tarifa completa de enero (10.000) sin saber que el motor de
+// cartera ya tenía ese cargo cubierto a medias (3.000), así que el crédito/efectivo del modelo
+// viejo siempre sobraba contra el pendiente real del nuevo. El fix (construirPeriodos ahora usa
+// getCargosConCobertura) corrige la causa: el subtotal ya sale del pendiente real, así que este
+// mismo escenario ahora concilia perfecto y el pago se registra sin problema.
+test('registrarPagoSostenimiento cobra el pendiente real (no la tarifa completa) cuando un mes ya está causado con abono parcial', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -227,8 +234,7 @@ test('registrarPagoSostenimiento lanza si la porción de crédito no puede imput
 
     // Siembra directo en el motor nuevo los 2 cargos que este recibo va a pedir (mismo patrón
     // que CarteraService.aplicarCredito.test.js) y deja el primero ya parcialmente pagado
-    // (3.000) por fuera de este recibo -- así cargosDeEstePago tiene menos pendiente real
-    // (17.000) que lo que el modelo viejo va a creer que vale el subtotal (20.000).
+    // (3.000) por fuera de este recibo -- así el pendiente real de enero es 7.000, no 10.000.
     const cargo1 = carteraService.repository.crearMovimiento({
       cuentaId, fecha: '2026-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 1
     });
@@ -240,23 +246,23 @@ test('registrarPagoSostenimiento lanza si la porción de crédito no puede imput
       modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: [cargo1]
     });
 
-    // 15.000 de saldo a favor: junto con los 5.000 en efectivo (20.000 subtotal del modelo
-    // viejo - 15.000 crédito) suman el subtotal completo. La porción en efectivo (5.000) se
-    // imputa completa contra los 17.000 reales pendientes, dejando 12.000 -- el crédito
-    // (15.000) sobra 3.000 sin poder aplicarse.
     db.prepare(
       `INSERT INTO cuenta_creditos (cuenta_id, tipo, monto, fecha) VALUES (?, 'Abono', 15000, '2026-01-01')`
     ).run(cuentaId);
 
-    assert.throws(
-      () => pagoService.registrarPagoSostenimiento({
-        cuentaId, anioInicio: 2026, mesInicio: 1, cantidadMeses: 2,
-        fechaPago: '2026-04-01', metodoPago: 'Efectivo', usarSaldoAFavor: true
-      }),
-      /porción de saldo a favor/
-    );
+    // Subtotal real: 7.000 (enero, pendiente) + 10.000 (febrero, sin causar todavía) = 17.000.
+    // Crédito disponible (15.000) alcanza y sobra: total a cobrar en efectivo = 2.000.
+    const r = pagoService.registrarPagoSostenimiento({
+      cuentaId, anioInicio: 2026, mesInicio: 1, cantidadMeses: 2,
+      fechaPago: '2026-04-01', metodoPago: 'Efectivo', usarSaldoAFavor: true
+    });
 
-    assert.equal(db.prepare(`SELECT COUNT(*) n FROM recibos`).get().n, 0, 'la transacción completa debe revertir, igual que con el sobrante en efectivo');
+    assert.equal(r.total, 2000, '17.000 de subtotal real - 15.000 de crédito aplicado');
+    assert.equal(r.creditoAplicado, 15000);
+    assert.equal(carteraService.repository.getSaldoCreditoDisponible(cuentaId), 0);
+
+    const { deudaExigible } = carteraService.repository.getSaldos(cuentaId);
+    assert.equal(deudaExigible, 0, 'enero y febrero quedaron cubiertos del todo entre lo previo, el efectivo y el crédito');
   } finally {
     cerrarDbTemporal(ctx);
   }

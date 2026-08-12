@@ -109,7 +109,15 @@ class PagoService {
     const siguiente = siguienteCartera || anioMesDeFecha(cuenta.fecha_creacion);
 
     const saldoAFavor = this.repository.getSaldoCredito(cuentaId);
-    const { totalPagado, totalMesesPagados } = this.repository.getResumenPagos(cuentaId);
+    // "Total Pagado"/"Meses Cubiertos" ahora salen de cartera (getCargosConCobertura), no de
+    // pago_periodos (barrido 2026-08-11, ver README). Cambia el alcance: antes cubría todo el
+    // historial desde el primer pago (podía llegar a 2017); ahora es lo aplicado desde 2024, que
+    // es hasta donde cartera_movimientos trackea mes a mes -- antes de 2024 es un bucket opaco
+    // sin detalle por mes (AperturaOpaca), igual que ya trata el resto del sistema post-corte.
+    // No es pérdida de información nueva: es el mismo recorte que ya aplica todo lo demás.
+    const cargosConCobertura = this.carteraService.repository.getCargosConCobertura(cuentaId, 1);
+    const totalPagado = redondear(cargosConCobertura.reduce((s, c) => s + Math.min(c.cubierto, c.monto), 0));
+    const totalMesesPagados = cargosConCobertura.filter(c => redondear(c.monto - c.cubierto) <= 0).length;
 
     // mesesMora/estadoMora/saldoPendienteEstimado ya NO salen del rango contra alDiaHasta (ese
     // concepto es correcto solo para "próximo período sugerido", arriba, no para "cuánto debe" --
@@ -151,17 +159,45 @@ class PagoService {
     const periodos = [];
     let cursor = { anio: anioInicio, mes: mesInicio };
 
+    // Cobertura real de los meses que el motor de cartera ya causó (mismo cálculo que
+    // CarteraService.calcularAPagar -- getCargosConCobertura). Si un mes ya tiene un
+    // CargoMensual, se cobra lo que REALMENTE falta (monto - cubierto), no la tarifa a ciegas:
+    // un abono FIFO anterior puede haber cubierto ese mes solo a medias porque saltó a cubrir
+    // uno más nuevo primero (caso real R007: diciembre 2024 solo debía $12.000 de $16.000, los
+    // otros $4.000 ya estaban abonados). Cobrar la tarifa completa ahí sería cobrar dos veces
+    // una parte que la cuenta ya pagó, y además el espejo hacia cartera_movimientos rechazaba
+    // el pago entero (ver el guard de "sobrante" en registrarPagoSostenimiento). Para un mes que
+    // el motor de cartera todavía no causó, sigue igual que siempre: tarifa vigente.
+    //
+    // "¿Ya está pagado?" también sale de acá (pendiente <= 0), no de pago_periodos (barrido
+    // 2026-08-11, ver README): pago_periodos podía decir "pagado" mientras cartera todavía
+    // tenía saldo pendiente real -- la app se contradecía a sí misma en pantalla (caso real:
+    // 6 cuentas donde el panel de cartera mostraba el mes como pendiente y el registro de pago
+    // lo rechazaba por "ya pagado"). cartera_movimientos es la única fuente ahora.
+    const coberturaPorMes = new Map(
+      this.carteraService.repository.getCargosConCobertura(cuentaId, 1).map(c => [`${c.anio}-${c.mes}`, c])
+    );
+
     for (let i = 0; i < cantidadMeses; i++) {
-      if (this.repository.existePeriodoPagado(cuentaId, cursor.anio, cursor.mes)) {
-        throw new Error(`El período ${this.formatPeriodo(cursor.anio, cursor.mes)} ya fue pagado`);
+      const cobertura = coberturaPorMes.get(`${cursor.anio}-${cursor.mes}`);
+      let valor;
+      let parcial = false;
+      if (cobertura) {
+        const pendiente = redondear(cobertura.monto - cobertura.cubierto);
+        if (pendiente <= 0) {
+          throw new Error(`El período ${this.formatPeriodo(cursor.anio, cursor.mes)} ya fue pagado`);
+        }
+        valor = pendiente;
+        parcial = esMayor(cobertura.cubierto, 0);
+      } else {
+        const tarifa = this.repository.getCategoriaTarifaParaMes(cuentaId, cursor.anio, cursor.mes);
+        if (!tarifa) {
+          throw new Error(`No hay categoría o tarifa de sostenimiento configurada para ${this.formatPeriodo(cursor.anio, cursor.mes)}`);
+        }
+        valor = tarifa.tarifa_sostenimiento;
       }
 
-      const tarifa = this.repository.getCategoriaTarifaParaMes(cuentaId, cursor.anio, cursor.mes);
-      if (!tarifa) {
-        throw new Error(`No hay categoría o tarifa de sostenimiento configurada para ${this.formatPeriodo(cursor.anio, cursor.mes)}`);
-      }
-
-      periodos.push({ anio: cursor.anio, mes: cursor.mes, valor: tarifa.tarifa_sostenimiento });
+      periodos.push({ anio: cursor.anio, mes: cursor.mes, valor, parcial });
       cursor = this.sumarMeses(cursor.anio, cursor.mes, 1);
     }
 
@@ -274,9 +310,15 @@ class PagoService {
       for (const grupo of grupos) {
         const primero = grupo.periodos[0];
         const ultimo = grupo.periodos[grupo.periodos.length - 1];
-        const concepto = grupo.periodos.length > 1
+        // Un mes con abono parcial previo (ver construirPeriodos) siempre cae en su propio
+        // grupo -- agruparPeriodos solo junta meses de igual valor, y un mes parcial tiene un
+        // valor distinto al de un mes de tarifa completa vecino. La nota deja constancia en el
+        // recibo físico de que ese monto es el saldo pendiente, no la cuota completa del mes.
+        const esParcial = grupo.periodos.some(p => p.parcial);
+        const concepto = (grupo.periodos.length > 1
           ? `Sostenimiento ${this.formatPeriodo(primero.anio, primero.mes)} - ${this.formatPeriodo(ultimo.anio, ultimo.mes)}`
-          : `Sostenimiento ${this.formatPeriodo(primero.anio, primero.mes)}`;
+          : `Sostenimiento ${this.formatPeriodo(primero.anio, primero.mes)}`)
+          + (esParcial ? ' (saldo pendiente del mes)' : '');
 
         const detalleId = this.repository.crearReciboDetalle({
           reciboId,
@@ -286,18 +328,24 @@ class PagoService {
           valor: grupo.valor
         });
         if (primerDetalleId === null) primerDetalleId = detalleId;
-
-        for (const periodo of grupo.periodos) {
-          this.repository.crearPeriodoPago(cuentaId, periodo.anio, periodo.mes, periodo.valor, detalleId, fechaPago);
-        }
       }
 
       // Espejo en el motor de cartera nuevo: causar los meses que falten y abonarlos con la
       // porción en efectivo de este pago. MesesEspecificos (no FIFO) porque el operador ya
       // decidió, con anioInicio/mesInicio/cantidadMeses, exactamente qué meses cubre este recibo
       // -- igual criterio que ya usa paso10-imputacion.js para los recibos con período declarado.
+      //
+      // Se pasa periodos[0] como cota inferior explícita (desdeMinimo): construirPeriodos ya
+      // validó que hay tarifa para todos estos meses, así que se sabe con certeza que hay que
+      // causar desde ahí. Necesario para el primer pago retroactivo de una cuenta nueva -- sin
+      // esto, getFechaInicioFacturacion podía anclar en el propio recibo que se está creando
+      // (fechado hoy, no en el mes más viejo que se está cobrando) y no causar nada.
+      const primerPeriodo = periodos[0];
       const ultimoPeriodo = periodos[periodos.length - 1];
-      const resultadoCausacion = this.carteraService.asegurarCausacion(cuentaId, ultimoPeriodo.anio, ultimoPeriodo.mes);
+      const resultadoCausacion = this.carteraService.asegurarCausacion(
+        cuentaId, ultimoPeriodo.anio, ultimoPeriodo.mes,
+        { anio: primerPeriodo.anio, mes: primerPeriodo.mes }
+      );
       if (resultadoCausacion.omitidos.length > 0) {
         throw new Error(
           'No se pudo causar en el motor de cartera: ' +

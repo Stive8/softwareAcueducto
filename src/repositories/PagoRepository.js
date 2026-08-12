@@ -41,22 +41,6 @@ class PagoRepository {
     `).get(cuentaId, primerDia, primerDia, primerDia, primerDia);
   }
 
-  existePeriodoPagado(cuentaId, anio, mes) {
-    const row = this.db.prepare(`
-      SELECT id FROM pago_periodos WHERE cuenta_id = ? AND anio = ? AND mes = ?
-    `).get(cuentaId, anio, mes);
-    return !!row;
-  }
-
-  getUltimoPeriodoPagado(cuentaId) {
-    return this.db.prepare(`
-      SELECT anio, mes FROM pago_periodos
-      WHERE cuenta_id = ?
-      ORDER BY (anio * 12 + mes) DESC
-      LIMIT 1
-    `).get(cuentaId);
-  }
-
   // Fecha real desde la cual la cuenta debe sostenimiento: el inicio de su PRIMERA categoría
   // asignada (que puede ser muy anterior a fecha_creacion, ej. una cuenta preexistente cargada
   // hoy pero que paga desde 2023). Nunca usar fecha_creacion para esto, o se pierde la mora real.
@@ -67,21 +51,9 @@ class PagoRepository {
     return row?.fecha;
   }
 
-  getMesesPagados(cuentaId) {
-    return this.db.prepare(`
-      SELECT pp.anio, pp.mes, pp.valor, pp.fecha_pago, pp.recibo_detalle_id,
-             rd.recibo_id, r.numero_recibo
-      FROM pago_periodos pp
-      LEFT JOIN recibo_detalles rd ON rd.id = pp.recibo_detalle_id
-      LEFT JOIN recibos r ON r.id = rd.recibo_id
-      WHERE pp.cuenta_id = ?
-      ORDER BY pp.anio DESC, pp.mes DESC
-    `).all(cuentaId);
-  }
-
   // Historial agrupado por recibo: cada fila ya es un grupo de meses consecutivos pagados juntos
-  // (periodo_desde/periodo_hasta), con un solo valor, fecha y número de recibo — en vez de repetir
-  // la misma info mes por mes como hace getMesesPagados. Se excluyen recibos anulados.
+  // (periodo_desde/periodo_hasta), con un solo valor, fecha y número de recibo.  Se excluyen
+  // recibos anulados.
   getHistorialRecibosSostenimiento(cuentaId) {
     return this.db.prepare(`
       SELECT rd.id as recibo_detalle_id, rd.periodo_desde, rd.periodo_hasta, rd.valor,
@@ -91,23 +63,6 @@ class PagoRepository {
       WHERE r.cuenta_id = ? AND rd.periodo_desde IS NOT NULL AND r.estado != 'Anulado'
       ORDER BY r.fecha_recibo DESC, rd.id DESC
     `).all(cuentaId);
-  }
-
-  crearPeriodoPago(cuentaId, anio, mes, valor, reciboDetalleId, fechaPago) {
-    const result = this.db.prepare(`
-      INSERT INTO pago_periodos (cuenta_id, anio, mes, valor, recibo_detalle_id, fecha_pago)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(cuentaId, anio, mes, valor, reciboDetalleId, fechaPago);
-    return result.lastInsertRowid;
-  }
-
-  // Total histórico pagado en sostenimiento y cantidad de meses/períodos cubiertos por esos pagos
-  getResumenPagos(cuentaId) {
-    return this.db.prepare(`
-      SELECT COALESCE(SUM(valor), 0) as totalPagado, COUNT(*) as totalMesesPagados
-      FROM pago_periodos
-      WHERE cuenta_id = ?
-    `).get(cuentaId);
   }
 
   getSaldoCredito(cuentaId) {

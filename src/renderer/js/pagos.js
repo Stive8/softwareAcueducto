@@ -320,11 +320,57 @@ const Pagos = {
     return `${desde} - ${this.formatMes(ultimo.anio, ultimo.mes)}, ${meses.length} meses`;
   },
 
-  // Cartera (nuevo modelo) -- SOLO LECTURA. La cifra principal ("a pagar") responde solo
-  // "¿cuánto paga hoy por su cuota corriente?"; deuda anterior al corte, punto de conexión y
-  // saldo a favor son avisos aparte que NUNCA se suman ni restan de esa cifra (cambio de diseño
-  // 2026-08-04, ver CarteraService.getEstadoCartera). Los botones de cada aviso todavía no
-  // escriben nada -- se conectan en la siguiente etapa (registrar pagos contra el modelo nuevo).
+  // true si la lista de {anio, mes} (ya viene ordenada de CarteraService.calcularAPagar) es
+  // una secuencia continua, sin huecos.
+  sonMesesConsecutivos(meses) {
+    for (let i = 1; i < meses.length; i++) {
+      const codigoAnterior = meses[i - 1].anio * 12 + meses[i - 1].mes;
+      const codigoActual = meses[i].anio * 12 + meses[i].mes;
+      if (codigoActual !== codigoAnterior + 1) return false;
+    }
+    return true;
+  },
+
+  // "ene 2024 – ago 2026" (mismo año: "ene – ago 2026"), sin marcar el mes en curso -- para
+  // un rango continuo no hace falta distinguirlo, a diferencia de la lista mes a mes.
+  formatRangoMesesAPagar(meses) {
+    const primero = meses[0];
+    const ultimo = meses[meses.length - 1];
+    const desde = primero.anio === ultimo.anio ? this.MESES_ABREV[primero.mes - 1] : this.formatMes(primero.anio, primero.mes);
+    return `${desde} – ${this.formatMes(ultimo.anio, ultimo.mes)}`;
+  },
+
+  // Desglose de "a pagar": la lista mes a mes solo aporta cuando hay huecos en la mora (caso
+  // real R007: dic 2024 y ago 2026 sueltos, responde "¿por qué 2 meses?"). Si los meses
+  // pendientes son continuos (caso real C021: 32 meses seguidos de $10.000 cada uno) la lista
+  // es puro ruido repetido -- el rango dice lo mismo en una línea.
+  renderDesgloseAPagar(meses) {
+    if (!meses || meses.length <= 1) return '';
+    if (this.sonMesesConsecutivos(meses)) {
+      return `<div style="margin-top: 6px; font-size: 0.875rem; color: #475569;">${this.formatRangoMesesAPagar(meses)}</div>`;
+    }
+    return `
+      <ul style="margin: 8px 0 0 0; padding-left: 18px; font-size: 0.8125rem; color: #475569;">
+        ${meses.map(m => `
+          <li>${this.formatMes(m.anio, m.mes)}${m.causado ? ' (pendiente)' : ''} — $${this.formatNumber(m.valor)}</li>
+        `).join('')}
+      </ul>
+    `;
+  },
+
+  // Cartera (nuevo modelo) -- SOLO LECTURA salvo "Usar" (redimirCredito, conectado 2026-08-10).
+  // La cifra principal ("a pagar") responde solo "¿cuánto paga hoy por su cuota corriente?";
+  // deuda anterior al corte y saldo a favor son avisos aparte que NUNCA se suman ni restan de
+  // esa cifra (cambio de diseño 2026-08-04, ver CarteraService.getEstadoCartera).
+  //
+  // "Abonar" deuda anterior al corte NO se conecta: a diferencia de redimirCredito (reasigna
+  // plata que la cuenta ya tiene guardada), esto sería plata nueva entrando y necesita su
+  // propio flujo de cobro (método de pago, recibo) -- ver README §"Funcionalidad pendiente
+  // conocida". El aviso se deja visible sin botón: informa, no promete una acción que no existe.
+  //
+  // "Abonar" punto de conexión NO se muestra acá: ya existe un botón que hace exactamente eso
+  // ("Abonar Conexión", ver renderConexionDetalle más arriba en esta misma pantalla) -- repetirlo
+  // acá era un botón muerto duplicando uno que sí funciona.
   renderCarteraDetalle(estadoViejo, carteraEstado, carteraDetalle, motivoDiferencia) {
     if (!carteraEstado) {
       return `
@@ -335,6 +381,7 @@ const Pagos = {
       `;
     }
 
+    const cuentaId = estadoViejo.cuentaId;
     const movimientos = carteraDetalle ? carteraDetalle.movimientos : [];
     const puntosConexion = carteraDetalle ? carteraDetalle.puntosConexion : [];
 
@@ -347,11 +394,8 @@ const Pagos = {
       AperturaOpaca: 'Apertura (antes de 2024)'
     };
 
-    const avisos = [
-      { label: 'Deuda anterior al corte (2024)', valor: carteraEstado.deudaAntes2024, accion: 'Abonar' },
-      { label: 'Punto de conexión pendiente', valor: carteraEstado.deudaPuntoConexion, accion: 'Abonar' },
-      { label: 'Saldo a favor disponible', valor: carteraEstado.saldoCreditoDisponible, accion: 'Usar' }
-    ].filter(a => a.valor > 0);
+    const deudaAntes2024 = carteraEstado.deudaAntes2024 > 0 ? carteraEstado.deudaAntes2024 : 0;
+    const saldoAFavorUsable = carteraEstado.saldoCreditoDisponible > 0 ? carteraEstado.saldoCreditoDisponible : 0;
 
     return `
       <div class="detail-section">
@@ -380,25 +424,26 @@ const Pagos = {
             A pagar${carteraEstado.mesesAPagar.length > 0 ? ` (${carteraEstado.mesesAPagar.length} ${carteraEstado.mesesAPagar.length === 1 ? 'mes pendiente' : 'meses pendientes'})` : ''}
           </div>
           <div style="font-size: 1.5rem; font-weight: bold;">$${this.formatNumber(carteraEstado.aPagar)}</div>
-          ${carteraEstado.mesesAPagar.length > 1 ? `
-            <ul style="margin: 8px 0 0 0; padding-left: 18px; font-size: 0.8125rem; color: #475569;">
-              ${carteraEstado.mesesAPagar.map(m => `
-                <li>${this.formatMes(m.anio, m.mes)}${m.causado ? ' (pendiente)' : ''} — $${this.formatNumber(m.valor)}</li>
-              `).join('')}
-            </ul>
-          ` : ''}
+          ${this.renderDesgloseAPagar(carteraEstado.mesesAPagar)}
         </div>
 
-        ${avisos.length > 0 ? `
+        ${deudaAntes2024 > 0 || saldoAFavorUsable > 0 ? `
           <div style="margin-bottom: 16px;">
-            ${avisos.map(a => `
+            ${deudaAntes2024 > 0 ? `
               <div style="display: flex; align-items: center; justify-content: space-between;
                 background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px;
                 padding: 10px 12px; margin-bottom: 8px;">
-                <span>⚠ ${a.label}: <strong>$${this.formatNumber(a.valor)}</strong></span>
-                <button class="btn btn-secondary" disabled title="Se conecta en la siguiente etapa">${a.accion}</button>
+                <span>⚠ Deuda anterior al corte (2024): <strong>$${this.formatNumber(deudaAntes2024)}</strong></span>
               </div>
-            `).join('')}
+            ` : ''}
+            ${saldoAFavorUsable > 0 ? `
+              <div style="display: flex; align-items: center; justify-content: space-between;
+                background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px;
+                padding: 10px 12px; margin-bottom: 8px;">
+                <span>⚠ Saldo a favor disponible: <strong>$${this.formatNumber(saldoAFavorUsable)}</strong></span>
+                <button class="btn btn-success btn-icon" onclick="App.closeModal(); Pagos.showRedimirCreditoModal(${cuentaId})">Usar</button>
+              </div>
+            ` : ''}
           </div>
         ` : ''}
 
@@ -613,6 +658,116 @@ const Pagos = {
     });
   },
 
+  // Redime saldo a favor ya existente contra deuda exigible por FIFO (CarteraService.
+  // redimirCredito, conectado 2026-08-10). No genera recibo -- no es plata nueva entrando, es
+  // reasignar la que la cuenta ya tiene guardada en cuenta_creditos.
+  async showRedimirCreditoModal(cuentaId) {
+    const response = await window.api.cartera.getEstadoCartera(cuentaId);
+    if (!response.success) {
+      App.toast('Error al cargar el saldo a favor: ' + response.error, 'error');
+      return;
+    }
+    const disponible = response.data.saldoCreditoDisponible;
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const content = `
+      <div class="modal-header"><h2>Usar Saldo a Favor</h2></div>
+
+      <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
+          <strong>Saldo a Favor Disponible:</strong> $${this.formatNumber(disponible)}
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="redimirCreditoForm">
+        <div class="form-group">
+          <label for="monto_redimir">Monto a Redimir <span style="color: #ef4444;">*</span></label>
+          <div class="input-currency">
+            <span class="currency-symbol">$</span>
+            <input type="text" inputmode="numeric" id="monto_redimir" name="monto_redimir" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="fecha_redimir">Fecha <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_redimir" name="fecha_redimir" value="${hoy}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="observaciones_redimir">Observaciones</label>
+          <textarea id="observaciones_redimir" name="observaciones_redimir"></textarea>
+        </div>
+
+        <p id="previewRedimir" style="font-size: 0.8125rem; color: #64748b; margin: -8px 0 16px 0;"></p>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Redimir Crédito</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+
+    const montoInput = document.getElementById('monto_redimir');
+    App.attachMoneyInput(montoInput);
+    montoInput.value = App.formatMoneyValue(disponible);
+
+    const previewEl = document.getElementById('previewRedimir');
+    const actualizarPreview = () => {
+      const monto = App.parseMoneyValue(montoInput.value);
+      previewEl.textContent = monto > 0
+        ? `Se aplicarán $${this.formatNumber(monto)} a los meses más antiguos pendientes.`
+        : '';
+    };
+    montoInput.addEventListener('input', actualizarPreview);
+    actualizarPreview();
+
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('redimirCreditoForm'), async () => {
+      const errorDiv = document.getElementById('formError');
+      errorDiv.innerHTML = '';
+
+      const payload = {
+        cuentaId,
+        monto: App.parseMoneyValue(montoInput.value),
+        fecha: document.getElementById('fecha_redimir').value,
+        observaciones: document.getElementById('observaciones_redimir').value.trim() || null,
+        opId
+      };
+
+      try {
+        const resp = await window.api.cartera.redimirCredito(payload);
+        if (resp.success) {
+          App.closeModal();
+          App.toast(`Crédito redimido: $${this.formatNumber(resp.data.aplicado)} aplicados a deuda pendiente. Saldo a favor restante: $${this.formatNumber(resp.data.saldoRestante)}.`);
+          this.showDetalleModal(cuentaId);
+          this.loadCuentas();
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${this.mensajeErrorRedimirCredito(resp.error)}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al redimir el crédito</div>`;
+      }
+    });
+  },
+
+  // Traduce los 2 errores conocidos de CarteraService.redimirCredito a lenguaje claro para
+  // quien opera la caja; cualquier otro error se muestra tal cual (ya viene en español desde
+  // el servicio).
+  mensajeErrorRedimirCredito(error) {
+    if (/no hay .* de crédito disponible/i.test(error)) {
+      return 'El monto ingresado supera el saldo a favor disponible de la cuenta.';
+    }
+    if (/no hay deuda exigible pendiente/i.test(error)) {
+      return 'Esta cuenta no tiene deuda pendiente contra la cual aplicar el crédito.';
+    }
+    return error;
+  },
+
   showCancelarConexionModal(nuevoPuntoId, cuentaId) {
     const content = `
       <div class="modal-header"><h2>Cancelar Cargo de Conexión</h2></div>
@@ -708,6 +863,15 @@ const Pagos = {
           <small style="color: #64748b; font-size: 0.875rem;">Puede aportar uno o varios meses, incluso de años distintos, atrasados, actuales o por adelantado.</small>
         </div>
 
+        ${estado.saldoAFavor > 0 ? `
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
+              <input type="checkbox" id="usar_saldo_favor">
+              Aplicar saldo a favor disponible ($${this.formatNumber(estado.saldoAFavor)})
+            </label>
+          </div>
+        ` : ''}
+
         <div class="form-group">
           <button type="button" class="btn btn-secondary" id="btnSimular">Calcular Total</button>
         </div>
@@ -766,6 +930,13 @@ const Pagos = {
       await this.simularPago(cuentaId);
     });
 
+    // Marcar/desmarcar cambia el total a cobrar -- recalcula en el acto en vez de esperar a
+    // que alguien vuelva a apretar "Calcular Total" y se lleve una sorpresa al confirmar.
+    const usarSaldoFavorInput = document.getElementById('usar_saldo_favor');
+    if (usarSaldoFavorInput) {
+      usarSaldoFavorInput.addEventListener('change', () => this.simularPago(cuentaId));
+    }
+
     const opId = crypto.randomUUID();
     App.protegerEnvioDoble(document.getElementById('sostenimientoForm'), () => this.registrarPago(cuentaId, conexionPendiente, opId));
   },
@@ -774,13 +945,15 @@ const Pagos = {
     const mesInicio = parseInt(document.getElementById('mes_inicio').value, 10);
     const anioInicio = parseInt(document.getElementById('anio_inicio').value, 10);
     const cantidadMeses = parseInt(document.getElementById('cantidad_meses').value, 10);
+    const usarSaldoFavorInput = document.getElementById('usar_saldo_favor');
+    const usarSaldoAFavor = usarSaldoFavorInput ? usarSaldoFavorInput.checked : false;
     const resultadoDiv = document.getElementById('simulacionResultado');
     const errorDiv = document.getElementById('formError');
 
     errorDiv.innerHTML = '';
 
     try {
-      const response = await window.api.pagos.simularPago(cuentaId, anioInicio, mesInicio, cantidadMeses);
+      const response = await window.api.pagos.simularPago(cuentaId, anioInicio, mesInicio, cantidadMeses, usarSaldoAFavor);
 
       if (!response.success) {
         resultadoDiv.innerHTML = '';
@@ -795,6 +968,11 @@ const Pagos = {
           <p style="margin: 0 0 8px 0; font-size: 0.875rem;"><strong>Subtotal sostenimiento:</strong> $${this.formatNumber(sim.subtotal)}</p>
           ${sim.creditoAplicado > 0 ? `<p style="margin: 0 0 8px 0; font-size: 0.875rem; color: #059669;"><strong>Saldo a favor aplicado:</strong> -$${this.formatNumber(sim.creditoAplicado)}</p>` : ''}
           <p style="margin: 0; font-size: 1.1rem;"><strong>Total a cobrar: $${this.formatNumber(sim.totalACobrar)}</strong></p>
+          ${sim.totalACobrar === 0 && sim.creditoAplicado > 0 ? `
+            <p style="margin: 8px 0 0 0; font-size: 0.8125rem; color: #059669;">
+              Cubierto por completo con el saldo a favor -- no se recibe dinero en este pago.
+            </p>
+          ` : ''}
         </div>
       `;
     } catch (error) {
@@ -814,10 +992,13 @@ const Pagos = {
 
     const abonoConexionInput = document.getElementById('abono_conexion');
     const abonoConexion = abonoConexionInput ? App.parseMoneyValue(abonoConexionInput.value) : 0;
+    const usarSaldoFavorInput = document.getElementById('usar_saldo_favor');
+    const usarSaldoAFavor = usarSaldoFavorInput ? usarSaldoFavorInput.checked : false;
 
     try {
       const response = await window.api.pagos.registrarPagoSostenimiento({
         cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones,
+        usarSaldoAFavor,
         nuevoPuntoId: abonoConexion > 0 && conexionPendiente ? conexionPendiente.id : null,
         abonoConexion,
         opId

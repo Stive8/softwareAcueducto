@@ -144,7 +144,7 @@ const CANALES_SIN_SESION = new Set([
 const CANALES_IDEMPOTENTES = new Set([
   'asientos:crearManual', 'gastos:create', 'caja:registrarConsignacion',
   'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento', 'caja:regularizarSaldos',
-  'caja:registrarRetiro'
+  'caja:registrarRetiro', 'cartera:redimirCredito'
 ]);
 
 // opId -> Promise, mientras la operación sigue en curso (protege contra dos IPC casi
@@ -1164,6 +1164,18 @@ function setupIpcHandlers() {
   envolverHandle('cartera:getIndicadoresBulk', async () => {
     try {
       return { success: true, data: carteraService.getIndicadoresBulk() };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Primera escritura conectada del modelo nuevo de cartera: redime saldo a favor ya
+  // existente (cuenta_creditos) contra deuda exigible por FIFO. No genera recibo -- no es
+  // plata nueva, es reasignar la que la cuenta ya tiene guardada. El resto de las escrituras
+  // (recategorizar, suspender, reactivar, ajustarDeuda, reclasificarAbono) sigue sin conectar.
+  envolverHandle('cartera:redimirCredito', async (event, payload) => {
+    try {
+      return { success: true, data: carteraService.redimirCredito({ ...payload, usuarioId: sesionActual.id }) };
     } catch (error) {
       return { success: false, error: error.message };
     }

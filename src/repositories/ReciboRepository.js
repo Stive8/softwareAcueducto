@@ -116,6 +116,13 @@ class ReciboRepository {
     if (detalleIds.length > 0) {
       const placeholders = detalleIds.map(() => '?').join(',');
 
+      // Único lugar del flujo activo, aparte de la excepción documentada en
+      // CarteraService.getFechaInicioFacturacion, que todavía menciona pago_periodos (barrido
+      // 2026-08-11) -- a propósito: es limpieza de escritura, no una lectura que alimente ningún
+      // cálculo. Nada escribe filas nuevas en pago_periodos desde esa fecha (PagoRepository ya no
+      // tiene crearPeriodoPago), así que para cualquier recibo nuevo este DELETE no encuentra nada
+      // y no hace nada. Se deja para que anular un recibo VIEJO (con filas reales de la
+      // importación histórica) siga limpiando su rastro ahí también, sin necesidad especial.
       this.db.prepare(`DELETE FROM pago_periodos WHERE recibo_detalle_id IN (${placeholders})`).run(...detalleIds);
       this.db.prepare(`DELETE FROM cuenta_creditos WHERE recibo_detalle_id IN (${placeholders})`).run(...detalleIds);
 
