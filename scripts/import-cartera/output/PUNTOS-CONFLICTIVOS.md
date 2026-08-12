@@ -265,16 +265,24 @@ reproducible y no vuelva a perderse el rastro de qué se cambió y por qué.
   talonario físico, por un total de **$2.978.000**, pero no estaban en ningún archivo
   digital. Ya se cargaron al sistema; antes solo existían en papel.
 
-- **R0831 — $8.000 que el sistema tenía aplicados al lugar equivocado (2026-08-13).** El
-  recibo 2407 (transferencia de $120.000 para enero-julio 2026, 7 meses x $16.000)
-  declaraba explícitamente "SALDO A FAVOR 8,000". El sistema sí cobró los $120.000
-  completos, pero usó el sobrante para tapar un hueco viejo sin relación (mayo y junio de
-  2025) en vez de dejarlo disponible como pedía el recibo. No cambia la conciliación (la
-  plata ya estaba contada, solo mal ubicada), pero si esta persona reclama su saldo a
-  favor en el mostrador, antes no aparecía. Corregido, versionado en
-  `paso9b-correcciones.js` corrección 16 -- reabre $8.000 de deuda real en mayo/junio 2025
-  (que de todas formas ya estaba en la cartera exigible total, solo contada distinto) y
-  los deja como crédito disponible, tal como pedía el recibo.
+- **R0831 — la pantalla mostraba $108.000 de saldo a favor y "En mora (7)"; la cifra real
+  era $8.000 y al día (corregido 2026-08-14, reemplaza la corrección más chica del
+  2026-08-13).** La causa raíz era el recibo 2159 ($100.000, 29-mar-2025, "ABONO A
+  DEUDA", sin período declarado): el sistema nunca corre el pago automático (FIFO) sobre
+  un recibo sin período — regla que existe para no repetir el caso de S010 (sección 1.4),
+  donde un período mal transcrito habría aplicado la plata a los meses equivocados. Pero
+  acá el texto "ABONO A DEUDA" sí es una instrucción clara de pagar deuda, así que ese
+  100.000 se quedó completo como crédito sin aplicar, y dejó sin pagar el tramo más viejo
+  de la cuenta. Los dos recibos posteriores (2311 y 2407) se imputaron en cascada sobre
+  esa base equivocada: 2311 ($412.000, "hasta diciembre 2025") terminó pagando de más
+  hacia 2026 por el mecanismo de arrastre, dejando al recibo 2407 ($120.000, enero-julio
+  2026, con "SALDO A FAVOR 8,000" explícito en el texto) sin nada real contra qué
+  aplicarse — de ahí el saldo a favor inflado y el "En mora (7)" que no correspondía.
+  Corregido recalculando los tres recibos juntos, en orden cronológico, con el mismo
+  fundamento textual documentado ("ABONO A DEUDA" como excepción puntual, no una regla
+  general). Resultado verificado contra el talonario: deuda anterior al corte $0, deuda
+  exigible $0, al día hasta julio 2026, saldo a favor $8.000 — exactamente lo que el
+  recibo 2407 declaraba. Versionado en `paso9b-correcciones.js`, corrección 16.
 
 ---
 

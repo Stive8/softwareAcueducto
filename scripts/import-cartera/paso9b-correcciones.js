@@ -169,16 +169,24 @@
 //    recibió y el sistema no reconoce. Se crea como saldo a favor disponible, con la fecha de
 //    la transferencia (no la del recibo) y ligado al mismo recibo_detalle del abono real.
 //
-// 16. R0831, recibo 2407: transferencia de $120.000 para "ENERO A JULIO 2026" (7 meses ×
-//    $16.000 = $112.000), con "SALDO A FAVOR 8,000" explícito en el texto. El sistema sí
-//    registró los $120.000 completos, pero el FIFO de respaldo (tras cubrir ene-jul 2026) usó
-//    el sobrante para tapar un hueco viejo sin relación (mayo y junio de 2025, $4.000 cada uno)
-//    en vez de dejarlo como crédito -- exactamente lo que el recibo pedía. Se deshacen esas dos
-//    imputaciones puntuales (mayo y junio de 2025 vuelven a su estado real: $4.000 y $16.000
-//    pendientes) y los $8.000 se registran como saldo a favor disponible. La deuda exigible de
-//    la cuenta sube $8.000 (refleja el hueco real) y el saldo a favor sube $8.000 en el mismo
-//    movimiento -- la plata es la misma, solo se reubica de donde el FIFO la puso a donde el
-//    recibo decía que fuera.
+// 16. R0831: recibos 2159, 2311 y 2407 recalculados juntos, en orden cronológico (2026-08-14,
+//    reemplaza la versión del 2026-08-13 que solo atacaba el síntoma). La causa real no era el
+//    recibo 2407: era el 2159 ($100.000, 29-mar-2025, concepto "ABONO A DEUDA", sin período
+//    declarado). El diseño de paso10 nunca corre FIFO sin período (para no repetir el caso
+//    S010/recibo 1825, donde el período era una transcripción errada) -- pero "ABONO A DEUDA"
+//    SÍ es una instrucción explícita de pagar deuda, a diferencia de ese caso. Al quedar
+//    convertido íntegro en crédito, dejó sin pagar el tramo más viejo de la cuenta, y los dos
+//    abonos posteriores (2311 y 2407) se imputaron en cascada contra esa base equivocada --
+//    2311 ($412.000, "HASTA DICIEMBRE 2025") terminó pagando de más hacia 2026 por FIFO,
+//    dejando a 2407 sin nada real contra qué imputarse. La corrección anterior (deshacer 2
+//    imputaciones puntuales de mayo/junio 2025) tapaba el síntoma en 2407 sin tocar la causa.
+//    Ahora se recalculan los tres, en orden: 2159 SÍ corre FIFO pese a no tener período (forzado
+//    explícitamente, únicamente para este caso), contra el pool COMBINADO (apertura opaca +
+//    exigible, la más vieja primero -- alcanza para cerrar completo el opaco de $128.000 más
+//    parte de 2024); 2311 y 2407 se reimputan después con su período declarado, igual que
+//    siempre. Resultado verificado contra el talonario: deudaAntes2024 $0, deudaExigible $0,
+//    cubiertoHasta julio 2026, saldoCreditoDisponible $8.000 -- exactamente el sobrante que el
+//    recibo 2407 declaraba, ni un peso más ni menos.
 //
 // Idempotente: antes de insertar, borra los CargoMensual existentes de la cuenta en los años
 // que va a recrear (2024-2026 completos para las 4 de tarifa; solo 2024 para S03311; feb-jul
@@ -192,9 +200,12 @@
 // más lo cerró), $12.000 significa que hay que aplicarla, cualquier otro valor es un estado
 // inesperado y la corrección se detiene con un error en vez de adivinar cuánto redimir. La 14 se
 // detecta por si sigue habiendo AjusteCategoria con ese texto exacto (si no hay ninguna, ya
-// corrió o nunca existió -- no hace nada). Las 15 y 16 se detectan por si ya existe un crédito
-// en cuenta_creditos ligado al mismo abono_movimiento_id -- mismo mecanismo que cualquier otro
-// crédito de este archivo.
+// corrió o nunca existió -- no hace nada). La 15 se detecta por si ya existe un crédito en
+// cuenta_creditos ligado al mismo abono_movimiento_id -- mismo mecanismo que cualquier otro
+// crédito de este archivo. La 16 se detecta por si el abono del recibo 2159 ya tiene alguna
+// imputación real (en el estado original siempre tiene cero, porque quedó convertido íntegro
+// en crédito) -- si ya tiene, deshace todo (imputaciones y créditos) de los tres abonos
+// involucrados y los recalcula desde cero, así que repetir la corrida no duplica nada.
 const { normalizarCodigo } = require('./normalizar');
 const { primerDiaDelMes } = require('../../src/services/cartera/periodos');
 const { distribuir, MODOS } = require('../../src/services/cartera/imputacion');
@@ -341,22 +352,26 @@ const CREDITO_R0942 = {
   fecha: '2025-06-19'
 };
 
-const OBSERVACION_CREDITO_R0831 =
-  'Saldo a favor no registrado: el recibo 2407 documenta una transferencia de $120.000 el ' +
-  '30-ene-2026 para "ENERO A JULIO 2026 ... - SALDO A FAVOR 8,000" (7 meses x $16.000 = ' +
-  '$112.000, sobran $8.000). El sistema imputó los $120.000 completos, pero el FIFO de respaldo ' +
-  'uso el sobrante para tapar un hueco viejo sin relación (mayo y junio de 2025) en vez de ' +
-  'dejarlo como crédito. Se deshacen esas dos imputaciones puntuales y los $8.000 quedan como ' +
-  'saldo a favor disponible, tal como pedía el recibo.';
+// R0831: recibo 2159 ($100.000, "ABONO A DEUDA", sin período) fuerza FIFO contra el pool
+// combinado (apertura opaca + exigible) pese a no declarar período -- única excepción de este
+// archivo a la regla general de reimputarAbono ("sin período, el FIFO nunca corre"), porque acá
+// el texto SÍ es una instrucción explícita de pagar deuda (a diferencia de S010/recibo 1825,
+// donde el período era un error de transcripción). 2311 y 2407 se reimputan después con su
+// período declarado, en orden cronológico real.
+const OBSERVACION_RECALCULO_R0831 =
+  'Recalculado 2026-08-14 junto con los recibos 2311 y 2407, en orden cronológico: "ABONO A ' +
+  'DEUDA" (sin período declarado) es una instrucción explícita de pagar deuda -- a diferencia ' +
+  'del caso S010/recibo 1825 (período con error de transcripción), acá sí corresponde correr ' +
+  'FIFO contra el pool combinado (apertura opaca + exigible, la más vieja primero) pese a no ' +
+  'tener período. Resultado verificado contra el talonario: cierra completo el saldo opaco de ' +
+  '$128.000 y deja el resto contra 2024+.';
 
-const CREDITO_R0831 = {
-  codigoCuenta: 'R0831',
-  numeroRecibo: 2407,
-  monto: 8000,
-  fecha: '2026-01-30',
-  imputacionesADeshacer: [
-    { anio: 2025, mes: 5, monto: 4000 },
-    { anio: 2025, mes: 6, monto: 4000 }
+const RECALCULO_R0831 = {
+  cuentaCodigo: 'R0831',
+  abonosOrdenCronologico: [
+    { numeroRecibo: 2159, periodoDesde: null, periodoHasta: null, forzarFifoSinPeriodo: true },
+    { numeroRecibo: 2311, periodoDesde: '2025-12', periodoHasta: '2025-12' },
+    { numeroRecibo: 2407, periodoDesde: '2026-01', periodoHasta: '2026-07' }
   ]
 };
 
@@ -396,12 +411,18 @@ function cargosPendientesCombinados(db, cuentaId) {
 // como saldo a favor implícito en el Abono. Se recorta su monto a lo realmente imputado y el
 // sobrante pasa a cuenta_creditos como 'Abono' sin aplicar.
 //
-// Sin período declarado, el FIFO NUNCA corre (mismo cambio 2026-08-04 que paso10-imputacion.js):
-// el monto entero pasa a crédito. Es el caso exacto del recibo 1825 de S010 ($90.000, "abono
-// libre" por decisión de esta misma corrección): al no tener período, antes caía igual al FIFO
-// general y la plata se aplicaba sola contra los meses de 2026 -- restaurando en la práctica el
-// comportamiento que este cambio de diseño existe para evitar.
-function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, periodoHasta }) {
+// Sin período declarado, el FIFO NUNCA corre por defecto (mismo cambio 2026-08-04 que
+// paso10-imputacion.js): el monto entero pasa a crédito. Es el caso exacto del recibo 1825 de
+// S010 ($90.000, "abono libre" por decisión de esta misma corrección): al no tener período,
+// antes caía igual al FIFO general y la plata se aplicaba sola contra los meses de 2026 --
+// restaurando en la práctica el comportamiento que este cambio de diseño existe para evitar.
+//
+// forzarFifoSinPeriodo (default false) es la única excepción: para un abono sin período cuyo
+// propio texto SÍ es una instrucción explícita de pagar deuda (ver R0831/recibo 2159, "ABONO A
+// DEUDA" -- a diferencia del 1825 de arriba, que era un error de transcripción, no una
+// instrucción). Nunca activarlo por defecto: cada uso es una decisión caso por caso, con su
+// propia evidencia documentada en el bloque que llama a esta función.
+function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, periodoHasta, forzarFifoSinPeriodo = false }) {
   let restante = monto;
   let periodoImputados = 0;
   let fifoImputados = 0;
@@ -413,14 +434,14 @@ function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, peri
     for (const imp of imputaciones) repo.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
     periodoImputados = imputaciones.length;
     restante = sobrante;
+  }
 
-    if (esMayor(restante, 0)) {
-      const cargosFifo = cargosPendientesCombinados(db, cuentaId);
-      const { imputaciones: impFifo, sobrante: sobranteFifo } = distribuir({ modo: MODOS.ABONO_DEUDA_FIFO, cargos: cargosFifo, monto: restante });
-      for (const imp of impFifo) repo.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
-      fifoImputados = impFifo.length;
-      restante = sobranteFifo;
-    }
+  if (esMayor(restante, 0) && (meses.length > 0 || forzarFifoSinPeriodo)) {
+    const cargosFifo = cargosPendientesCombinados(db, cuentaId);
+    const { imputaciones: impFifo, sobrante: sobranteFifo } = distribuir({ modo: MODOS.ABONO_DEUDA_FIFO, cargos: cargosFifo, monto: restante });
+    for (const imp of impFifo) repo.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
+    fifoImputados = impFifo.length;
+    restante = sobranteFifo;
   }
 
   let creditoId = null;
@@ -466,7 +487,7 @@ function ejecutarPaso9b({ dbService }) {
   let redencionR007 = null;
   const limpiezaSuspendidas = [];
   let creditoR0942 = null;
-  let creditoR0831 = null;
+  let recalculoR0831 = null;
 
   const transaccion = db.transaction(() => {
     // 1. S03311: causar 2024 completo a 10.000
@@ -869,55 +890,58 @@ function ejecutarPaso9b({ dbService }) {
       creditoR0942 = { yaCorregido: false, creditoId, monto: CREDITO_R0942.monto };
     }
 
-    // 16. R0831: deshacer las dos imputaciones de mayo/junio 2025 que absorbieron el sobrante
-    // del recibo 2407 y registrar los $8.000 como saldo a favor. Se detecta por si ya existe un
-    // crédito ligado a este abono (si ya corrió, las imputaciones ya deberían estar deshechas).
-    const cuentaR0831 = idPorCodigo.get(normalizarCodigo(CREDITO_R0831.codigoCuenta));
+    // 16. R0831: recalcular 2159, 2311 y 2407 juntos, en orden cronológico. Se detecta por si
+    // el recibo 2159 ya tiene alguna imputación real -- en el estado original (y en la versión
+    // anterior de esta corrección, que nunca tocó 2159) siempre tiene cero, porque quedó
+    // convertido íntegro en crédito desde la carga inicial.
+    const cuentaR0831 = idPorCodigo.get(normalizarCodigo(RECALCULO_R0831.cuentaCodigo));
     if (cuentaR0831 === undefined) throw new Error('R0831: no existe en la base -- ¿corrieron los pasos 1-2?');
 
-    const { detalleId: detalle2407Id } = getReciboDetalle(db, CREDITO_R0831.numeroRecibo);
-    const abono2407 = getAbonoPorDetalle(db, detalle2407Id);
-    if (!abono2407) throw new Error(`Recibo ${CREDITO_R0831.numeroRecibo}: no tiene Abono asociado -- ¿corrió el paso 10?`);
+    const { detalleId: detalle2159Id } = getReciboDetalle(db, RECALCULO_R0831.abonosOrdenCronologico[0].numeroRecibo);
+    const abono2159 = getAbonoPorDetalle(db, detalle2159Id);
+    if (!abono2159) throw new Error('Recibo 2159: no tiene Abono asociado -- ¿corrió el paso 10?');
 
-    const creditoExistenteR0831 = db.prepare(
-      `SELECT id FROM cuenta_creditos WHERE cuenta_id=? AND abono_movimiento_id=?`
-    ).get(cuentaR0831, abono2407.id);
+    const imputado2159 = db.prepare(
+      `SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE abono_id=?`
+    ).get(abono2159.id).s;
 
-    if (creditoExistenteR0831) {
-      creditoR0831 = { yaCorregido: true };
+    if (imputado2159 > 0) {
+      recalculoR0831 = { yaCorregido: true };
     } else {
-      let deshechas = 0;
-      for (const item of CREDITO_R0831.imputacionesADeshacer) {
-        const cargo = db.prepare(
-          `SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?`
-        ).get(cuentaR0831, item.anio, item.mes);
-        if (!cargo) throw new Error(`R0831: no existe el CargoMensual de ${item.anio}-${item.mes}`);
+      // Deshace lo que haya (créditos e imputaciones) de los tres abonos, incluida cualquier
+      // fila que haya dejado la versión anterior de esta corrección (crédito ligado al abono
+      // del recibo 2407), y restaura cada abono a su monto original antes de recalcular.
+      const abonos = RECALCULO_R0831.abonosOrdenCronologico.map(item => {
+        const { detalleId } = getReciboDetalle(db, item.numeroRecibo);
+        const abono = getAbonoPorDetalle(db, detalleId);
+        if (!abono) throw new Error(`Recibo ${item.numeroRecibo}: no tiene Abono asociado -- ¿corrió el paso 10?`);
+        return { ...item, detalleId, abonoId: abono.id };
+      });
 
-        const imputacion = db.prepare(
-          `SELECT id, monto FROM cartera_imputaciones WHERE abono_id=? AND cargo_id=?`
-        ).get(abono2407.id, cargo.id);
-        if (!imputacion) {
-          throw new Error(
-            `R0831: se esperaba una imputación del abono del recibo ${CREDITO_R0831.numeroRecibo} contra ` +
-            `${item.anio}-${item.mes} -- no existe, revisar antes de aplicar a ciegas`
-          );
-        }
-        if (Math.abs(imputacion.monto - item.monto) >= 1) {
-          throw new Error(
-            `R0831: la imputación de ${item.anio}-${item.mes} es de $${imputacion.monto}, se esperaba ` +
-            `$${item.monto} -- revisar antes de aplicar a ciegas`
-          );
-        }
-        db.prepare(`DELETE FROM cartera_imputaciones WHERE id=?`).run(imputacion.id);
-        deshechas++;
+      for (const a of abonos) {
+        db.prepare('DELETE FROM cartera_imputaciones WHERE abono_id=?').run(a.abonoId);
+        db.prepare('DELETE FROM cuenta_creditos WHERE abono_movimiento_id=? OR recibo_detalle_id=?').run(a.abonoId, a.detalleId);
+        const recibo = db.prepare(
+          `SELECT r.total FROM recibos r JOIN recibo_detalles rd ON rd.recibo_id=r.id WHERE rd.id=?`
+        ).get(a.detalleId);
+        repo.actualizarMontoMovimiento(a.abonoId, -recibo.total);
       }
 
-      const creditoId = repo.crearCredito({
-        cuentaId: cuentaR0831, tipo: 'Abono', monto: CREDITO_R0831.monto, fecha: CREDITO_R0831.fecha,
-        reciboDetalleId: detalle2407Id, abonoMovimientoId: abono2407.id,
-        observaciones: OBSERVACION_CREDITO_R0831
-      });
-      creditoR0831 = { yaCorregido: false, creditoId, monto: CREDITO_R0831.monto, imputacionesDeshechas: deshechas };
+      const resultados = [];
+      for (const a of abonos) {
+        const montoOriginal = -db.prepare('SELECT monto FROM cartera_movimientos WHERE id=?').get(a.abonoId).monto;
+        const r = reimputarAbono(db, repo, {
+          abonoId: a.abonoId, cuentaId: cuentaR0831, monto: montoOriginal,
+          periodoDesde: a.periodoDesde, periodoHasta: a.periodoHasta,
+          forzarFifoSinPeriodo: a.forzarFifoSinPeriodo || false
+        });
+        if (r.creditoId) {
+          db.prepare('UPDATE cuenta_creditos SET observaciones=? WHERE id=?').run(OBSERVACION_RECALCULO_R0831, r.creditoId);
+        }
+        resultados.push({ numeroRecibo: a.numeroRecibo, abonoId: a.abonoId, ...r });
+      }
+
+      recalculoR0831 = { yaCorregido: false, abonos: resultados };
     }
   });
   transaccion();
@@ -927,7 +951,7 @@ function ejecutarPaso9b({ dbService }) {
     reasignacion2137, correccion2384, reimputacion2384, recalculoS010,
     correccionAperturaS044, correccionPeriodo2229, reimputacion2229,
     correccionS058, suspensionesSinCartera, inactivaS063, redencionR007,
-    limpiezaSuspendidas, creditoR0942, creditoR0831
+    limpiezaSuspendidas, creditoR0942, recalculoR0831
   };
 }
 
@@ -938,5 +962,5 @@ module.exports = {
   CAUSACION_S058, OBSERVACION_CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, OBSERVACION_SUSPENSION_SIN_CARTERA,
   INACTIVA_FUSIONADA_S063, OBSERVACION_INACTIVA_S063, REDENCION_R007, OBSERVACION_REDENCION_R007,
   CUENTAS_SUSPENDIDAS_SIN_RECAUSAR, FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS,
-  CREDITO_R0942, OBSERVACION_CREDITO_R0942, CREDITO_R0831, OBSERVACION_CREDITO_R0831
+  CREDITO_R0942, OBSERVACION_CREDITO_R0942, RECALCULO_R0831, OBSERVACION_RECALCULO_R0831
 };

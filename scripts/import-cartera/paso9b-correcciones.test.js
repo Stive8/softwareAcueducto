@@ -8,7 +8,7 @@ const {
   CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229,
   CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, INACTIVA_FUSIONADA_S063, REDENCION_R007,
   CUENTAS_SUSPENDIDAS_SIN_RECAUSAR, FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS,
-  CREDITO_R0942, CREDITO_R0831
+  CREDITO_R0942, RECALCULO_R0831, reimputarAbono
 } = require('./paso9b-correcciones');
 
 function sembrarCuenta(db, codigo) {
@@ -242,32 +242,68 @@ function sembrarTodas(db) {
   for (const c of cargosR0942) repo.crearImputacion({ abonoId: abono2246Id, cargoId: c.id, monto: 16000 });
   ids.abono2246Id = abono2246Id;
 
-  // --- R0831, recibo 2407 (corrección 16): transferencia de $120.000 para "enero a julio
-  // 2026" (7 x 16.000 = 112.000, saldo a favor 8.000 según el recibo). Reproduce el estado
-  // real encontrado en producción: el FIFO de respaldo, tras cubrir ene-jul 2026, usó el
-  // sobrante para tapar mayo ($4.000) y junio ($4.000) de 2025 en vez de dejarlo como crédito.
+  // --- R0831, recibos 2159/2311/2407 (corrección 16): reproduce el estado real de producción
+  // ANTES de cualquier corrección -- apertura opaca $32.000 + 31 meses de CargoMensual a
+  // $4.000 (Jan-2024 a jul-2026, mismos 31 meses que la cuenta real a $16.000, escalado ÷4
+  // para que la prueba sea manejable). Recibo 2159 ($25.000, "ABONO A DEUDA", sin período)
+  // queda íntegro como crédito -- reimputarAbono nunca corre FIFO sin período. Recibos 2311
+  // ($103.000, período declarado = solo diciembre-2025) y 2407 ($30.000, período ene-jul 2026)
+  // se imputan tal como los dejó el paso10 real: 2311 cubre su mes declarado más un sobrante
+  // por FIFO que, al no estar 2159 pagado, alcanza a cubrir ene-jul 2026 también -- dejando a
+  // 2407 sin nada real contra qué imputarse, íntegro como crédito.
   ids.R0831 = sembrarCuenta(db, 'R0831');
-  for (const mes of [5, 6]) {
-    repo.crearMovimiento({ cuentaId: ids.R0831, fecha: `2025-0${mes}-01`, tipo: 'CargoMensual', exigible: 1, monto: 16000, anio: 2025, mes });
+  const aperturaR0831Id = repo.crearMovimiento({ cuentaId: ids.R0831, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 32000 });
+  for (let cod = 2024 * 12; cod <= 2026 * 12 + 6; cod++) {
+    const anio = Math.floor(cod / 12), mes = (cod % 12) + 1;
+    repo.crearMovimiento({ cuentaId: ids.R0831, fecha: `${anio}-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 4000, anio, mes });
   }
-  for (let mes = 1; mes <= 7; mes++) {
-    repo.crearMovimiento({ cuentaId: ids.R0831, fecha: `2026-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 16000, anio: 2026, mes });
-  }
+
+  const r2159 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 2159, cuentaId: ids.R0831, fecha: '2025-03-29', valor: 25000, concepto: 'ABONO A DEUDA'
+  });
+  const abono2159Id = repo.crearMovimiento({
+    cuentaId: ids.R0831, fecha: '2025-03-29', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: r2159.detalleId
+  });
+  repo.crearCredito({
+    cuentaId: ids.R0831, tipo: 'Abono', monto: 25000, fecha: '2025-03-29',
+    reciboDetalleId: r2159.detalleId, observaciones: 'Sobrante de imputación del recibo 2159: crédito no aplicado'
+  });
+  ids.abono2159Id = abono2159Id;
+  ids.detalle2159Id = r2159.detalleId;
+  ids.aperturaR0831Id = aperturaR0831Id;
+
+  const r2311 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 2311, cuentaId: ids.R0831, fecha: '2025-10-25', valor: 103000,
+    concepto: 'CUOTA DE SOSTENIMIENTO HASTA DICIEMBRE 2025 (TRANSFERENCIA 13/10/2025)',
+    periodoDesde: 'Diciembre 2025', periodoHasta: 'Diciembre 2025'
+  });
+  const abono2311Id = repo.crearMovimiento({
+    cuentaId: ids.R0831, fecha: '2025-10-13', tipo: 'Abono', exigible: 1, monto: -103000, reciboDetalleId: r2311.detalleId
+  });
+  // Con 2159 sin pagar nada, el FIFO de 2311 (período dic-2025 + sobrante) alcanza a cubrir la
+  // apertura, ene-2024 a nov-2025 y ene-jul 2026 -- 1 (apertura) + 23 (meses 2024/2025) + 7
+  // (2026) = 31 tramos x 4.000 = 124.000... pero 2311 solo trae 103.000: cubre apertura (32.000
+  // real: 8x4.000) + los primeros meses hasta agotarse. Se reproduce vía reimputarAbono real
+  // (mismo mecanismo que usa la corrección) para no tener que hacer la cuenta a mano.
+  reimputarAbono(db, repo, {
+    abonoId: abono2311Id, cuentaId: ids.R0831, monto: 103000, periodoDesde: '2025-12', periodoHasta: '2025-12'
+  });
+  ids.abono2311Id = abono2311Id;
+  ids.detalle2311Id = r2311.detalleId;
+
   const r2407 = sembrarRecibo(db, propietarioId, {
-    numeroRecibo: CREDITO_R0831.numeroRecibo, cuentaId: ids.R0831, fecha: '2026-02-07',
-    valor: 120000, concepto: 'CUOTA DE SOSTENIMIENTO ENERO A JULIO 2026 (TRANSFERENCIA 30/01/026 $120,000) - SALDO A FAVOR 8,000',
+    numeroRecibo: 2407, cuentaId: ids.R0831, fecha: '2026-02-07', valor: 30000,
+    concepto: 'CUOTA DE SOSTENIMIENTO ENERO A JULIO 2026 (TRANSFERENCIA 30/01/026 $30,000) - SALDO A FAVOR 2,000',
     periodoDesde: 'Enero 2026', periodoHasta: 'Julio 2026'
   });
   const abono2407Id = repo.crearMovimiento({
-    cuentaId: ids.R0831, fecha: '2026-01-30', tipo: 'Abono', exigible: 1, monto: -120000, reciboDetalleId: r2407.detalleId
+    cuentaId: ids.R0831, fecha: '2026-01-30', tipo: 'Abono', exigible: 1, monto: -30000, reciboDetalleId: r2407.detalleId
   });
-  const cargoMayo2025R0831 = db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND anio=2025 AND mes=5`).get(ids.R0831);
-  const cargoJunio2025R0831 = db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND anio=2025 AND mes=6`).get(ids.R0831);
-  repo.crearImputacion({ abonoId: abono2407Id, cargoId: cargoMayo2025R0831.id, monto: 4000 });
-  repo.crearImputacion({ abonoId: abono2407Id, cargoId: cargoJunio2025R0831.id, monto: 4000 });
-  const cargos2026R0831 = db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND anio=2026 ORDER BY mes`).all(ids.R0831);
-  for (const c of cargos2026R0831) repo.crearImputacion({ abonoId: abono2407Id, cargoId: c.id, monto: 16000 });
+  reimputarAbono(db, repo, {
+    abonoId: abono2407Id, cuentaId: ids.R0831, monto: 30000, periodoDesde: '2026-01', periodoHasta: '2026-07'
+  });
   ids.abono2407Id = abono2407Id;
+  ids.detalle2407Id = r2407.detalleId;
 
   return ids;
 }
@@ -1050,63 +1086,62 @@ test('paso9b: R0942 -- idempotente, correr dos veces no duplica el crédito', ()
   }
 });
 
-test('paso9b: R0831 -- deshace las imputaciones de mayo/junio 2025 y deja $8.000 como saldo a favor', () => {
+test('paso9b: R0831 -- recalcula 2159/2311/2407 en orden cronológico: apertura y exigible en $0, $2.000 de saldo a favor', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
     const ids = sembrarTodas(db);
     const repo = new CarteraRepository(ctx.dbService);
+    const CarteraService = require('../../src/services/CarteraService');
+    const service = new CarteraService(ctx.dbService);
+
+    // precondición: reproduce el bug real -- 2159 sin ninguna imputación, íntegro en crédito.
+    const imputado2159Antes = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE abono_id=?`).get(ids.abono2159Id).s;
+    assert.equal(imputado2159Antes, 0);
 
     const r = ejecutarPaso9b({ dbService: ctx.dbService });
 
-    assert.equal(r.creditoR0831.yaCorregido, false);
-    assert.equal(r.creditoR0831.imputacionesDeshechas, 2);
-    assert.equal(repo.getSaldoCreditoDisponible(ids.R0831), 8000);
+    assert.equal(r.recalculoR0831.yaCorregido, false);
 
-    // mayo y junio de 2025 vuelven a estar pendientes -- la deuda exigible sube $8.000
-    const cargoMayo = db.prepare(`SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND anio=2025 AND mes=5`).get(ids.R0831);
-    const cargoJunio = db.prepare(`SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND anio=2025 AND mes=6`).get(ids.R0831);
-    const cubiertoMayo = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE cargo_id=?`).get(cargoMayo.id).s;
-    const cubiertoJunio = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE cargo_id=?`).get(cargoJunio.id).s;
-    assert.equal(cubiertoMayo, 0);
-    assert.equal(cubiertoJunio, 0);
+    // 2159 ($25.000, "ABONO A DEUDA") ahora sí corre FIFO contra el pool combinado -- cierra
+    // la apertura opaca completa (32.000/4.000 = 8 meses equivalentes) más lo que alcance de
+    // 2024+.
+    const imputado2159Despues = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE abono_id=?`).get(ids.abono2159Id).s;
+    assert.equal(imputado2159Despues, 25000, 'los 25.000 de "ABONO A DEUDA" ahora sí se imputan, no quedan en crédito');
 
-    // enero-julio 2026 (el período que el recibo sí declaraba) sigue cubierto completo
-    const cargos2026 = db.prepare(`SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND anio=2026`).all(ids.R0831);
-    for (const c of cargos2026) {
-      const cubierto = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE cargo_id=?`).get(c.id).s;
-      assert.equal(cubierto, 16000, `${c.id}: enero-julio 2026 debe seguir cubierto completo`);
-    }
+    const estado = service.getEstadoCartera(ids.R0831);
+    assert.equal(estado.deudaAntes2024, 0, 'la apertura opaca queda cerrada completa');
+    assert.equal(estado.deudaExigible, 0, 'ene-2024 a jul-2026 quedan totalmente cubiertos');
+    assert.deepEqual(estado.cubiertoHasta, { anio: 2026, mes: 7 });
+    assert.equal(estado.saldoCreditoDisponible, 2000, 'exactamente el sobrante que declaraba el recibo 2407 (30.000 - 7x4.000), ni un peso más');
 
-    const { deudaExigible } = repo.getSaldos(ids.R0831);
-    assert.equal(deudaExigible, 32000, 'mayo (16.000) + junio (16.000) vuelven a estar pendientes');
-
-    const credito = db.prepare(`SELECT * FROM cuenta_creditos WHERE cuenta_id=?`).get(ids.R0831);
-    assert.equal(credito.monto, 8000);
-    assert.equal(credito.fecha, '2026-01-30');
-    assert.equal(credito.abono_movimiento_id, ids.abono2407Id);
-    assert.match(credito.observaciones, /recibo 2407/);
+    // el crédito original de 2159 (el bug) ya no existe
+    const creditoViejo2159 = db.prepare(`SELECT id FROM cuenta_creditos WHERE recibo_detalle_id=?`).get(ids.detalle2159Id);
+    assert.equal(creditoViejo2159, undefined);
   } finally {
     cerrarDbTemporal(ctx);
   }
 });
 
-test('paso9b: R0831 -- idempotente, correr dos veces no vuelve a deshacer imputaciones ni duplica el crédito', () => {
+test('paso9b: R0831 -- idempotente, correr dos veces no vuelve a recalcular ni duplica créditos', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
     const ids = sembrarTodas(db);
-    const repo = new CarteraRepository(ctx.dbService);
+    const CarteraService = require('../../src/services/CarteraService');
+    const service = new CarteraService(ctx.dbService);
 
     ejecutarPaso9b({ dbService: ctx.dbService });
     const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
 
-    assert.equal(r2.creditoR0831.yaCorregido, true);
+    assert.equal(r2.recalculoR0831.yaCorregido, true);
     const creditos = db.prepare(`SELECT COUNT(*) n FROM cuenta_creditos WHERE cuenta_id=?`).get(ids.R0831).n;
-    assert.equal(creditos, 1);
-    assert.equal(repo.getSaldoCreditoDisponible(ids.R0831), 8000);
-    const { deudaExigible } = repo.getSaldos(ids.R0831);
-    assert.equal(deudaExigible, 32000, 'no debe volver a deshacer nada que ya esté deshecho');
+    assert.equal(creditos, 1, 'la segunda corrida no debe duplicar ni agregar créditos');
+
+    const estado = service.getEstadoCartera(ids.R0831);
+    assert.equal(estado.deudaAntes2024, 0);
+    assert.equal(estado.deudaExigible, 0);
+    assert.equal(estado.saldoCreditoDisponible, 2000, 'no debe cambiar en la segunda corrida');
   } finally {
     cerrarDbTemporal(ctx);
   }
