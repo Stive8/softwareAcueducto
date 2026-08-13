@@ -41,6 +41,24 @@
 //    término, 68 cuentas sin ninguna otra diferencia real aparecían con diferencia == su propio
 //    saldoCreditoDisponible, al peso, las 68.
 //
+// IMPORTANTE (2026-08-14): el término de crédito (punto 4) y el de punto pendiente (punto 2,
+// ramas que usan saldoPendientePunto) NO se leen en vivo -- se leen de
+// cuenta.conciliacion.snapshot_captura, una foto tomada una sola vez por
+// capturar-snapshot-conciliacion.js. Antes se leían en vivo (getEstadoCartera/nuevos_puntos) y
+// eso rompía la conciliación de cualquier cuenta donde alguien redimiera un crédito o pagara un
+// punto de conexión DESPUÉS de la carga: esa plata ya existía al momento de la carga, así que
+// reclasificarla (de "disponible" a "aplicada") no cambia el total, pero sí bajaba el término
+// sin que saldoSistema bajara con él -- descuadraba por el monto exacto de lo reclasificado
+// (verificado con R005 y R0031 sobre copias aisladas). Una fórmula sin estado (derivar del JSON
+// en cada corrida) no sirve tampoco: no distingue una redención que YA es parte de corregir la
+// carga (ej. la corrección 13 de R007, aplicada antes de este snapshot) de una redención futura
+// por la app -- por eso es una foto capturada una vez, no una fórmula. Si una cuenta no tiene
+// snapshot_captura, esta función falla explícito en vez de caer de vuelta a leer en vivo.
+//
+// saldoSistema (arriba) SÍ se sigue leyendo en vivo, a propósito: es el lado que se está
+// verificando, no el objetivo -- si dejara de leerse en vivo, este chequeo nunca detectaría que
+// alguien tocó cartera_movimientos después de la carga.
+//
 // diferencia = saldoSistema − target. Un valor de 0 (con tolerancia < 1000) significa que la
 // diferencia está completamente explicada por lo de arriba.
 const { normalizarCodigo } = require('./normalizar');
@@ -55,9 +73,6 @@ function calcularConciliacion({ dbService, cuentasJson, recibosJson }) {
 
   const idPorCodigo = new Map(
     db.prepare('SELECT id, codigo FROM cuentas').all().map(c => [normalizarCodigo(c.codigo), c.id])
-  );
-  const saldoPendientePuntoPorCuentaId = new Map(
-    db.prepare('SELECT cuenta_id, saldo_pendiente FROM nuevos_puntos').all().map(p => [p.cuenta_id, p.saldo_pendiente])
   );
 
   const pendienteDeCargaPorCodigo = new Map();
@@ -83,6 +98,14 @@ function calcularConciliacion({ dbService, cuentasJson, recibosJson }) {
       continue;
     }
 
+    const snapshot = conc.snapshot_captura;
+    if (!snapshot) {
+      throw new Error(
+        `${cuenta.codigo}: sin conciliacion.snapshot_captura -- correr primero ` +
+        `capturar-snapshot-conciliacion.js`
+      );
+    }
+
     const estado = service.getEstadoCartera(cuentaId);
     const saldoSistema = redondear(estado.deudaAntes2024 + estado.deudaMesesDesde2024);
 
@@ -91,7 +114,7 @@ function calcularConciliacion({ dbService, cuentasJson, recibosJson }) {
     const cuadraExacto = conc.cuadra_exacto;
     const tarifa2026 = (cuenta.plan_causacion && cuenta.plan_causacion['2026'] && cuenta.plan_causacion['2026'].tarifa) || 0;
     const tieneAperturaOpaca = (cuenta.apertura_opaca_2023_12_31 || 0) > 0;
-    const saldoPendientePunto = saldoPendientePuntoPorCuentaId.get(cuentaId) || 0;
+    const saldoPendientePunto = snapshot.saldo_pendiente_punto;
     const pendienteDeCarga = pendienteDeCargaPorCodigo.get(codigoNorm) || 0;
     const tieneCargoPuntoIncluido = Object.values(cuenta.plan_causacion || {})
       .some(y => y && y.cargo_punto_incluido !== null && y.cargo_punto_incluido !== undefined);
@@ -105,14 +128,14 @@ function calcularConciliacion({ dbService, cuentasJson, recibosJson }) {
       terminoPunto = -saldoPendientePunto;
     }
 
-    const target = redondear(saldoCarteraExcel2026 - 5 * tarifa2026 + terminoPunto - pendienteDeCarga + estado.saldoCreditoDisponible);
+    const target = redondear(saldoCarteraExcel2026 - 5 * tarifa2026 + terminoPunto - pendienteDeCarga + snapshot.saldo_credito_disponible);
     const diferencia = redondear(saldoSistema - target);
 
     filas.push({
       codigo: cuenta.codigo, cuentaId, saldoSistema,
       saldoCarteraExcel2026, tarifa2026, cuadraExacto, tieneAperturaOpaca,
       abonosPuntoDesde2024, saldoPendientePunto, pendienteDeCarga,
-      saldoCreditoDisponible: estado.saldoCreditoDisponible,
+      saldoCreditoDisponible: snapshot.saldo_credito_disponible,
       target, diferencia
     });
   }

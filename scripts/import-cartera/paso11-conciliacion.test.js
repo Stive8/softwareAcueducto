@@ -16,14 +16,18 @@ function sembrarPunto(db, cuentaId, { valorTotal, saldoPendiente }) {
   `).run(cuentaId, valorTotal, saldoPendiente, saldoPendiente === 0 ? 'Pagado' : 'Pendiente');
 }
 
-function cuenta(overrides = {}) {
+// snapshotCaptura: por defecto sin crédito ni punto pendiente -- los tests que necesitan un
+// valor real lo pasan explícito. Reproduce lo que capturar-snapshot-conciliacion.js hubiera
+// escrito en cuenta.conciliacion.snapshot_captura a partir del estado sembrado en la base.
+function cuenta(overrides = {}, snapshotCaptura = { saldo_credito_disponible: 0, saldo_pendiente_punto: 0 }) {
   return {
     codigo: 'R001',
     apertura_opaca_2023_12_31: null,
     plan_causacion: { '2026': { tarifa: 10000 } },
     conciliacion: {
       saldo_cartera_excel_2026: 100000, abonos_punto_desde_2024: 0,
-      saldo_sostenimiento_esperado: 100000, cuadra_exacto: true, motivo_diferencia: null
+      saldo_sostenimiento_esperado: 100000, cuadra_exacto: true, motivo_diferencia: null,
+      snapshot_captura: { fecha: '2026-08-14', nota: 'test', ...snapshotCaptura }
     },
     ...overrides
   };
@@ -67,7 +71,8 @@ test('calcularConciliacion: cuadra_exacto:false CON apertura opaca -> se suma ab
         conciliacion: {
           saldo_cartera_excel_2026: 360000, abonos_punto_desde_2024: 300000,
           saldo_sostenimiento_esperado: 660000, cuadra_exacto: false,
-          motivo_diferencia: 'CARTERA aplico los abonos al punto contra el sostenimiento sin causar el cargo del punto'
+          motivo_diferencia: 'CARTERA aplico los abonos al punto contra el sostenimiento sin causar el cargo del punto',
+          snapshot_captura: { saldo_credito_disponible: 0, saldo_pendiente_punto: 0 }
         }
       })],
       recibosJson: []
@@ -92,7 +97,14 @@ test('calcularConciliacion: el saldo a favor disponible se suma al target, igual
     repo.crearMovimiento({ cuentaId, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 90000 });
     repo.crearCredito({ cuentaId, tipo: 'Abono', monto: 40000, fecha: '2026-01-01' });
 
-    const r = calcularConciliacion({ dbService: ctx.dbService, cuentasJson: [cuenta()], recibosJson: [] });
+    // El crédito vive en la base (para que otras lecturas lo vean), pero el target lee el
+    // snapshot, no la base -- se pasa el mismo valor a mano porque acá es lo que
+    // capturar-snapshot-conciliacion.js hubiera fotografiado en ese momento.
+    const r = calcularConciliacion({
+      dbService: ctx.dbService,
+      cuentasJson: [cuenta({}, { saldo_credito_disponible: 40000, saldo_pendiente_punto: 0 })],
+      recibosJson: []
+    });
 
     assert.equal(r.filas[0].saldoCreditoDisponible, 40000);
     assert.equal(r.filas[0].target, 90000, '50000 del objetivo bruto + 40000 del crédito disponible');
@@ -119,7 +131,8 @@ test('calcularConciliacion: cuadra_exacto:false SIN apertura opaca -> se resta e
         conciliacion: {
           saldo_cartera_excel_2026: 460000, abonos_punto_desde_2024: 200000,
           saldo_sostenimiento_esperado: 660000, cuadra_exacto: false,
-          motivo_diferencia: 'CARTERA aplico los abonos al punto contra el sostenimiento sin causar el cargo del punto'
+          motivo_diferencia: 'CARTERA aplico los abonos al punto contra el sostenimiento sin causar el cargo del punto',
+          snapshot_captura: { saldo_credito_disponible: 0, saldo_pendiente_punto: 300000 }
         }
       })],
       recibosJson: []
@@ -149,7 +162,8 @@ test('calcularConciliacion: cuadra_exacto:true CON cargo_punto_incluido y saldo 
         plan_causacion: { '2025': { tarifa: 10000, cargo_punto_incluido: 500000 }, '2026': { tarifa: 10000 } },
         conciliacion: {
           saldo_cartera_excel_2026: 470000, abonos_punto_desde_2024: 200000,
-          saldo_sostenimiento_esperado: 670000, cuadra_exacto: true, motivo_diferencia: null
+          saldo_sostenimiento_esperado: 670000, cuadra_exacto: true, motivo_diferencia: null,
+          snapshot_captura: { saldo_credito_disponible: 0, saldo_pendiente_punto: 300000 }
         }
       })],
       recibosJson: []
@@ -178,7 +192,8 @@ test('calcularConciliacion: cuadra_exacto:true SIN cargo_punto_incluido no se to
         plan_causacion: { '2024': { tarifa: 10000, cargo_punto_incluido: null }, '2026': { tarifa: 10000 } },
         conciliacion: {
           saldo_cartera_excel_2026: 120000, abonos_punto_desde_2024: 0,
-          saldo_sostenimiento_esperado: 120000, cuadra_exacto: true, motivo_diferencia: null
+          saldo_sostenimiento_esperado: 120000, cuadra_exacto: true, motivo_diferencia: null,
+          snapshot_captura: { saldo_credito_disponible: 0, saldo_pendiente_punto: 300000 }
         }
       })],
       recibosJson: []
@@ -206,7 +221,8 @@ test('calcularConciliacion: cuadra_exacto:true con abonos_punto_desde_2024 infor
         codigo: 'C0041',
         conciliacion: {
           saldo_cartera_excel_2026: 120000, abonos_punto_desde_2024: 500000,
-          saldo_sostenimiento_esperado: 620000, cuadra_exacto: true, motivo_diferencia: null
+          saldo_sostenimiento_esperado: 620000, cuadra_exacto: true, motivo_diferencia: null,
+          snapshot_captura: { saldo_credito_disponible: 0, saldo_pendiente_punto: 0 }
         }
       })],
       recibosJson: []
@@ -240,6 +256,60 @@ test('calcularConciliacion: recibos "pendientes de carga" se restan del objetivo
 
     assert.equal(r.filas[0].pendienteDeCarga, 100000);
     assert.equal(r.filas[0].diferencia, 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('calcularConciliacion: falla explícito si a la cuenta le falta snapshot_captura, no cae a leer en vivo', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuenta(db, 'R001');
+    const repo = new CarteraRepository(ctx.dbService);
+    repo.crearMovimiento({ cuentaId, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 50000 });
+
+    const cuentaSinSnapshot = cuenta();
+    delete cuentaSinSnapshot.conciliacion.snapshot_captura;
+
+    assert.throws(
+      () => calcularConciliacion({ dbService: ctx.dbService, cuentasJson: [cuentaSinSnapshot], recibosJson: [] }),
+      /snapshot_captura/
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('calcularConciliacion: redimir un crédito después de la captura NO mueve la diferencia (la garantía que motivó el snapshot)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const cuentaId = sembrarCuenta(db, 'R001');
+    const repo = new CarteraRepository(ctx.dbService);
+    const CarteraService = require('../../src/services/CarteraService');
+    const { MODOS } = require('../../src/services/cartera/imputacion');
+    const service = new CarteraService(ctx.dbService);
+
+    // Crédito de $40.000 sin redimir todavía, y SIN ningún cargo pendiente ya causado contra
+    // el cual imputarlo (mismo patrón que R005: pago adelantado de meses que la carga no
+    // llegó a causar) -- capturado tal cual en el snapshot.
+    repo.crearMovimiento({ cuentaId, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 90000 });
+    repo.crearCredito({ cuentaId, tipo: 'Abono', monto: 40000, fecha: '2026-01-01' });
+
+    const cuentaJson = cuenta({}, { saldo_credito_disponible: 40000, saldo_pendiente_punto: 0 });
+
+    const antes = calcularConciliacion({ dbService: ctx.dbService, cuentasJson: [cuentaJson], recibosJson: [] });
+    assert.equal(antes.filas[0].diferencia, 0);
+
+    // Operación normal, posterior a la captura: se causa el mes futuro que el crédito estaba
+    // esperando y se redime ahí mismo -- igual que asegurarCausacion + redimirCredito sobre R005.
+    repo.crearMovimiento({ cuentaId, fecha: '2026-08-01', tipo: 'CargoMensual', exigible: 1, monto: 40000, anio: 2026, mes: 8 });
+    service.redimirCredito({ cuentaId, fecha: '2026-08-01', monto: 40000, modo: MODOS.ABONO_DEUDA_FIFO });
+
+    const despues = calcularConciliacion({ dbService: ctx.dbService, cuentasJson: [cuentaJson], recibosJson: [] });
+    assert.equal(despues.filas[0].diferencia, 0, 'la redención es una reclasificación de plata que ya existía -- no debe descuadrar nada');
+    assert.equal(despues.filas[0].saldoCreditoDisponible, 40000, 'el término sigue siendo el de la foto, no el saldo en vivo (que ahora es 0)');
   } finally {
     cerrarDbTemporal(ctx);
   }
