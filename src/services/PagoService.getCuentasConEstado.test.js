@@ -197,3 +197,32 @@ test('getCuentasConEstado: tiene_abonos distingue "nunca pagó" de "pagó, pero 
     cerrarDbTemporal(ctx);
   }
 });
+
+// El módulo de Aportes filtraba estado:'Activo' sin control desde la pantalla -- una cuenta
+// suspendida (ej. R002) quedaba invisible ahí aunque sí se pudiera consultar desde Cuentas.
+// Se agregó el mismo selector que ya tenía Cuentas (Activo/Suspendido/Inactivo/Todos); estos
+// tests fijan que PagoService/PagoRepository ya soportaban pasar cualquier estado -- lo único
+// que faltaba era la pantalla.
+test('getCuentasConEstado: una cuenta Suspendida no aparece con el estado por defecto (Activo), pero sí al pedir Suspendido o "todos"', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarCuenta(db, 'T910'); // Activo
+    db.prepare(`INSERT INTO cuentas (codigo, direccion, estado) VALUES ('T911', 'Vereda Test', 'Suspendido')`).run();
+    const pagoService = new PagoService(ctx.dbService);
+
+    const soloActivas = pagoService.getCuentasConEstado({ page: 1, limit: 50 });
+    assert.ok(soloActivas.data.some(f => f.codigo === 'T910'));
+    assert.equal(soloActivas.data.some(f => f.codigo === 'T911'), false, 'la suspendida no debe aparecer con el filtro por defecto');
+
+    const soloSuspendidas = pagoService.getCuentasConEstado({ page: 1, limit: 50, estado: 'Suspendido' });
+    assert.ok(soloSuspendidas.data.some(f => f.codigo === 'T911'));
+    assert.equal(soloSuspendidas.data.some(f => f.codigo === 'T910'), false);
+
+    const todas = pagoService.getCuentasConEstado({ page: 1, limit: 50, estado: '' });
+    assert.ok(todas.data.some(f => f.codigo === 'T910'));
+    assert.ok(todas.data.some(f => f.codigo === 'T911'), 'estado vacío ("Todos los estados") debe incluir a la suspendida');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

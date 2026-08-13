@@ -4,6 +4,7 @@ const Pagos = {
   limit: 10,
   search: '',
   filtroPago: '',
+  estado: 'Activo',
 
   // Apaga la comparación en pantalla contra el modelo viejo (bloque "Sistema actual" + los 4
   // buckets internos del detalle de cartera) para la entrega -- no se borra el código: es la
@@ -27,6 +28,12 @@ const Pagos = {
           <h2>Estado de Cuentas</h2>
           <div class="table-controls">
             <input type="text" id="searchInput" class="search-box" placeholder="Buscar por código, dirección, propietario o identificación...">
+            <select id="estadoFilter" class="filter-select">
+              <option value="Activo" ${this.estado === 'Activo' ? 'selected' : ''}>Activas</option>
+              <option value="" ${this.estado === '' ? 'selected' : ''}>Todos los estados</option>
+              <option value="Suspendido" ${this.estado === 'Suspendido' ? 'selected' : ''}>Solo suspendidas</option>
+              <option value="Inactivo" ${this.estado === 'Inactivo' ? 'selected' : ''}>Solo inactivas</option>
+            </select>
             <select id="filtroPagoSelect" class="filter-select">
               <option value="">Todas las cuentas</option>
               <option value="al_dia">Solo al día</option>
@@ -58,6 +65,12 @@ const Pagos = {
       this.currentPage = 1;
       this.loadCuentas();
     });
+
+    document.getElementById('estadoFilter').addEventListener('change', (e) => {
+      this.estado = e.target.value;
+      this.currentPage = 1;
+      this.loadCuentas();
+    });
   },
 
   async loadCuentas() {
@@ -67,7 +80,7 @@ const Pagos = {
           page: this.currentPage,
           limit: this.limit,
           search: this.search,
-          estado: 'Activo',
+          estado: this.estado,
           filtroPago: this.filtroPago
         }),
         window.api.cartera.getIndicadoresBulk()
@@ -87,7 +100,7 @@ const Pagos = {
     const tableContent = document.getElementById('tableContent');
 
     if (data.data.length === 0) {
-      tableContent.innerHTML = '<p style="padding: 24px; text-align: center; color: #64748b;">No se encontraron cuentas activas</p>';
+      tableContent.innerHTML = '<p style="padding: 24px; text-align: center; color: #64748b;">No se encontraron cuentas</p>';
       return;
     }
 
@@ -111,7 +124,10 @@ const Pagos = {
             const ind = indicadoresCartera[c.id];
             return `
             <tr>
-              <td><strong>${c.codigo}</strong></td>
+              <td>
+                <strong>${c.codigo}</strong>
+                ${c.estado !== 'Activo' ? `<span class="badge badge-${c.estado.toLowerCase()}">${c.estado}</span>` : ''}
+              </td>
               <td>${c.direccion}</td>
               <td>${c.propietario_actual || '<em>Sin asignar</em>'}</td>
               <td>${c.pagado_hasta || (c.tiene_abonos ? '<em>Ningún mes cubierto</em>' : '<em>Sin aportes</em>')}</td>
