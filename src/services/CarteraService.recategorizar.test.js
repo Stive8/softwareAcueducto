@@ -338,3 +338,50 @@ test('simularReajustarTarifaCategoria no deja la tarifa nueva ni los ajustes si 
     cerrarDbTemporal(ctx);
   }
 });
+
+// Paso 4: el aviso que se dispara en categorias.js después de categorias:crearTarifa (no
+// CarteraService.recategorizar*) -- reproduce ese camino usando CategoriaRepository.crearTarifa
+// directamente (el mismo método que usa ese IPC), para probar que simularRecategorizarLote
+// detecta el hueco sin que nadie tenga que insertar la tarifa a través de CarteraService.
+test('simularRecategorizarLote detecta el desalineamiento que deja una tarifa creada por fuera de CarteraService (categorias:crearTarifa)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const CategoriaRepository = require('../repositories/CategoriaRepository');
+    const { cuentaId, finca, service } = sembrar(ctx.dbService);
+    service.asegurarCausacion(cuentaId, 2025, 3);   // 3 meses x $10.000 ya causados
+
+    // Mismo camino que categorias:crearTarifa en main.js -- no pasa por CarteraService.
+    new CategoriaRepository(ctx.dbService).crearTarifa(finca, 12000, '2025-01-01', 'Aprobado en asamblea');
+
+    const preview = service.simularRecategorizarLote({ cuentaIds: [cuentaId], categoriaId: finca, fechaVigencia: '2025-01-01' });
+    assert.equal(preview.totalAjustado, 6000, '3 meses x $2.000 de diferencia, ya con la tarifa nueva puesta');
+    assert.equal(preview.porCuenta[0].ajustes.length, 3);
+
+    // La detección no debe haber aplicado nada todavía.
+    assert.equal(service.getEstadoCartera(cuentaId).deudaExigible, 30000);
+
+    // Aplicar (sin volver a tocar categoria_tarifas) cierra el hueco.
+    const aplicado = service.recategorizarLote({ cuentaIds: [cuentaId], categoriaId: finca, fechaVigencia: '2025-01-01' });
+    assert.equal(aplicado.totalAjustado, 6000);
+    assert.equal(service.getEstadoCartera(cuentaId).deudaExigible, 36000, '3x12000');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('simularRecategorizarLote no detecta nada si la tarifa nueva es la misma para los meses ya causados (vigencia futura, sin desalineamiento)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const CategoriaRepository = require('../repositories/CategoriaRepository');
+    const { cuentaId, finca, service } = sembrar(ctx.dbService);
+    service.asegurarCausacion(cuentaId, 2025, 3);
+
+    // Tarifa nueva vigente desde una fecha FUTURA (no retroactiva): nada ya causado cae en ese rango.
+    new CategoriaRepository(ctx.dbService).crearTarifa(finca, 12000, '2027-01-01', null);
+
+    const preview = service.simularRecategorizarLote({ cuentaIds: [cuentaId], categoriaId: finca, fechaVigencia: '2027-01-01' });
+    assert.equal(preview.totalAjustado, 0, 'nada causado todavía en 2027 -- no hay nada que avisar');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

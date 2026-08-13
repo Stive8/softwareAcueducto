@@ -109,10 +109,10 @@ const CANALES_SOLO_ADMIN = new Set([
   'impuestos:asignarAPlantilla', 'impuestos:quitarDePlantilla',
   'cloudBackup:respaldarAhora',
   'cajaMenor:asignarResponsable', 'cajaMenor:reembolsar',
-  // Ambos emiten AjusteCategoria retroactivo -- mismo nivel que asientos:crearManual y
-  // caja:regularizarSaldos: puede mover deuda real de golpe (recategorizarTarifaCategoria,
-  // sobre toda una categoría) y necesita quedar detrás del mismo permiso.
-  'cartera:recategorizar', 'cartera:reajustarTarifaCategoria'
+  // Los tres emiten AjusteCategoria retroactivo -- mismo nivel que asientos:crearManual y
+  // caja:regularizarSaldos: puede mover deuda real de golpe (sobre una cuenta o sobre toda una
+  // categoría) y necesita quedar detrás del mismo permiso.
+  'cartera:recategorizar', 'cartera:recategorizarLote', 'cartera:reajustarTarifaCategoria'
 ]);
 
 // Excepciones puntuales a "Consulta no puede escribir": acciones que, aunque cambian estado
@@ -155,7 +155,7 @@ const CANALES_IDEMPOTENTES = new Set([
   'nuevospuntos:create', 'nuevospuntos:registrarAbono',
   // Emiten AjusteCategoria real; reajustarTarifaCategoria además inserta la tarifa nueva --
   // un doble clic no debe duplicar la corrección sobre toda una categoría.
-  'cartera:recategorizar', 'cartera:reajustarTarifaCategoria'
+  'cartera:recategorizar', 'cartera:recategorizarLote', 'cartera:reajustarTarifaCategoria'
 ]);
 
 // opId -> Promise, mientras la operación sigue en curso (protege contra dos IPC casi
@@ -1199,6 +1199,30 @@ function setupIpcHandlers() {
   envolverHandle('cartera:recategorizar', async (event, payload) => {
     try {
       return { success: true, data: carteraService.recategorizar({ ...payload, usuarioId: sesionActual.id }) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Vista previa de recategorizar sobre varias cuentas CON la tarifa que ya está en la base
+  // (a diferencia de simularReajustarTarifaCategoria, que además prueba una tarifa nueva que
+  // todavía no existe) -- para el aviso que se dispara después de categorias:crearTarifa (ver
+  // Categorias.showTarifaModal): si la tarifa que se acaba de guardar dejó cargos ya causados
+  // desalineados, esto lo detecta sin insertar nada más.
+  envolverHandle('cartera:simularRecategorizarLote', async (event, payload) => {
+    try {
+      return { success: true, data: carteraService.simularRecategorizarLote(payload) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Aplica recategorizar sobre varias cuentas SIN tocar categoria_tarifas -- para cuando la
+  // tarifa ya se creó por separado (ver cartera:simularRecategorizarLote) y solo falta corregir
+  // los cargos ya causados.
+  envolverHandle('cartera:recategorizarLote', async (event, payload) => {
+    try {
+      return { success: true, data: carteraService.recategorizarLote({ ...payload, usuarioId: sesionActual.id }) };
     } catch (error) {
       return { success: false, error: error.message };
     }

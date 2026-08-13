@@ -366,18 +366,145 @@ const Categorias = {
       try {
         const response = await window.api.categorias.crearTarifa(categoriaId, tarifa, fechaVigencia, observaciones);
 
-        if (response.success) {
-          App.closeModal();
-          this.loadCategorias();
-          App.toast('Tarifa configurada con éxito');
-        } else {
+        if (!response.success) {
           const errorDiv = document.getElementById('formError');
           errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+          return;
+        }
+
+        this.loadCategorias();
+
+        // La tarifa ya quedó guardada -- lo que falta detectar es si dejó cargos YA CAUSADOS
+        // desalineados (fecha_vigencia retroactiva sobre meses que ya se cobraron a la tarifa
+        // vieja). Antes esto quedaba invisible: nada avisaba, y solo se notaba si alguien
+        // comparaba a mano contra categoria_tarifas. No se aplica solo -- se avisa y se deja
+        // decidir.
+        const cuentasResponse = await window.api.categorias.getCuentasConCategoria(categoriaId);
+        const cuentaIds = cuentasResponse.success ? cuentasResponse.data.map(c => c.id) : [];
+
+        let preview = null;
+        if (cuentaIds.length > 0) {
+          const previewResponse = await window.api.cartera.simularRecategorizarLote({
+            cuentaIds, categoriaId, fechaVigencia
+          });
+          if (previewResponse.success && previewResponse.data.totalAjustado !== 0) {
+            preview = previewResponse.data;
+          }
+        }
+
+        App.closeModal();
+
+        if (preview) {
+          this.showAvisoDesalineamiento(categoriaId, categoria, fechaVigencia, preview, cuentasResponse.data);
+        } else {
+          App.toast('Tarifa configurada con éxito');
         }
       } catch (error) {
         console.error('Error:', error);
+        // El formulario puede ya no estar en pantalla si el error salió después de cerrar el
+        // modal (ej. calculando la vista previa del aviso) -- App.toast siempre funciona,
+        // escribir en el formError de un modal que ya se cerró no.
         const errorDiv = document.getElementById('formError');
-        errorDiv.innerHTML = `<div class="error-message">Error al guardar la tarifa</div>`;
+        if (errorDiv) {
+          errorDiv.innerHTML = `<div class="error-message">Error al guardar la tarifa</div>`;
+        } else {
+          App.toast('La tarifa se guardó, pero no se pudo revisar si quedaron cargos desalineados', 'error');
+        }
+      }
+    });
+  },
+
+  // Se dispara solo después de guardar una tarifa cuya fecha de vigencia dejó cargos YA
+  // CAUSADOS a la tarifa anterior (ver el submit de showTarifaModal, que ya calculó preview
+  // con simularRecategorizarLote). Antes esto quedaba invisible -- nada avisaba que la tarifa
+  // nueva y lo ya cobrado habían quedado desalineados. No corrige solo: muestra el hueco y dos
+  // botones, ninguno silencioso.
+  showAvisoDesalineamiento(categoriaId, categoria, fechaVigencia, preview, cuentasInfo) {
+    const cuentaPorId = new Map(cuentasInfo.map(c => [c.id, c]));
+    const afectadas = preview.porCuenta.filter(p => p.ajustes.length > 0);
+    const totalMeses = afectadas.reduce((s, p) => s + p.ajustes.length, 0);
+
+    const content = `
+      <div class="modal-header">
+        <h2>⚠ La tarifa nueva dejó cargos desalineados</h2>
+      </div>
+
+      <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+          La tarifa de <strong>${categoria.nombre}</strong> vigente desde ${this.formatDate(fechaVigencia)}
+          ya se guardó. Pero <strong>${afectadas.length} cuenta(s)</strong> tienen
+          <strong>${totalMeses} mes(es)</strong> ya cobrados desde esa fecha, a la tarifa anterior
+          -- sin corregir, esos meses van a seguir mostrando el monto viejo.
+        </p>
+        <p style="margin: 8px 0 0 0; font-size: 0.875rem; color: #92400e;">
+          <strong>Diferencia total sin aplicar:</strong> $${this.formatNumber(preview.totalAjustado)}
+        </p>
+      </div>
+
+      <div style="max-height: 320px; overflow-y: auto;">
+        <table style="width: 100%;">
+          <thead>
+            <tr><th>Cuenta</th><th>Meses desalineados</th><th>Diferencia</th></tr>
+          </thead>
+          <tbody>
+            ${afectadas.map(p => {
+              const cuenta = cuentaPorId.get(p.cuentaId);
+              return `
+                <tr>
+                  <td><strong>${cuenta ? cuenta.codigo : p.cuentaId}</strong></td>
+                  <td>${p.ajustes.length}</td>
+                  <td>$${this.formatNumber(p.totalAjustado)}</td>
+                </tr>
+              `;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" id="btnDejarloAsi">Dejarlo así por ahora</button>
+        <button type="button" class="btn btn-primary" id="btnAplicarAviso">Aplicar reajuste ahora</button>
+      </div>
+    `;
+
+    App.openModal(content, 'large');
+
+    document.getElementById('btnDejarloAsi').addEventListener('click', () => {
+      App.closeModal();
+      App.toast('Tarifa configurada. Quedó pendiente el reajuste de los meses ya cobrados -- se puede aplicar después desde "Reajuste retroactivo".', 'warning');
+    });
+
+    const opId = crypto.randomUUID();
+    const boton = document.getElementById('btnAplicarAviso');
+    boton.addEventListener('click', async () => {
+      if (boton.disabled) return;
+      boton.disabled = true;
+      const textoOriginal = boton.textContent;
+      boton.textContent = 'Aplicando...';
+
+      try {
+        const cuentaIds = preview.porCuenta.map(p => p.cuentaId);
+        const observacionesAjuste = `Reajuste de tarifa de ${categoria.nombre} a la vigente desde ` +
+          `${this.formatDate(fechaVigencia)} (aviso automático tras guardar la tarifa)`;
+
+        const response = await window.api.cartera.recategorizarLote({
+          cuentaIds, categoriaId, fechaVigencia, observaciones: observacionesAjuste
+        });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadCategorias();
+          App.toast(`Reajuste aplicado: $${this.formatNumber(response.data.totalAjustado)} en ${response.data.porCuenta.filter(p => p.ajustes.length > 0).length} cuenta(s)`);
+        } else {
+          App.toast('Error al aplicar el reajuste: ' + response.error, 'error');
+          boton.disabled = false;
+          boton.textContent = textoOriginal;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        App.toast('Error al aplicar el reajuste', 'error');
+        boton.disabled = false;
+        boton.textContent = textoOriginal;
       }
     });
   },
