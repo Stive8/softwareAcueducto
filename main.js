@@ -108,7 +108,11 @@ const CANALES_SOLO_ADMIN = new Set([
   'impuestos:create', 'impuestos:update', 'impuestos:toggleActivo',
   'impuestos:asignarAPlantilla', 'impuestos:quitarDePlantilla',
   'cloudBackup:respaldarAhora',
-  'cajaMenor:asignarResponsable', 'cajaMenor:reembolsar'
+  'cajaMenor:asignarResponsable', 'cajaMenor:reembolsar',
+  // Ambos emiten AjusteCategoria retroactivo -- mismo nivel que asientos:crearManual y
+  // caja:regularizarSaldos: puede mover deuda real de golpe (recategorizarTarifaCategoria,
+  // sobre toda una categoría) y necesita quedar detrás del mismo permiso.
+  'cartera:recategorizar', 'cartera:reajustarTarifaCategoria'
 ]);
 
 // Excepciones puntuales a "Consulta no puede escribir": acciones que, aunque cambian estado
@@ -148,7 +152,10 @@ const CANALES_IDEMPOTENTES = new Set([
   // Ambos crean un documento financiero real (un cargo de conexión con su valor, o un abono
   // con recibo propio) y no tenían protección -- mismo riesgo de doble clic que el resto de
   // esta lista (auditoría de entrega, hallazgo 8).
-  'nuevospuntos:create', 'nuevospuntos:registrarAbono'
+  'nuevospuntos:create', 'nuevospuntos:registrarAbono',
+  // Emiten AjusteCategoria real; reajustarTarifaCategoria además inserta la tarifa nueva --
+  // un doble clic no debe duplicar la corrección sobre toda una categoría.
+  'cartera:recategorizar', 'cartera:reajustarTarifaCategoria'
 ]);
 
 // opId -> Promise, mientras la operación sigue en curso (protege contra dos IPC casi
@@ -1180,6 +1187,42 @@ function setupIpcHandlers() {
   envolverHandle('cartera:redimirCredito', async (event, payload) => {
     try {
       return { success: true, data: carteraService.redimirCredito({ ...payload, usuarioId: sesionActual.id }) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Cambia la categoría de UNA cuenta (ej. "esta casa en realidad tiene piscina desde tal
+  // fecha"), sin cambiar la tarifa de la categoría en sí. Para reajustar la tarifa de una
+  // categoría completa (todas sus cuentas a la vez, con efecto retroactivo), ver
+  // cartera:reajustarTarifaCategoria más abajo.
+  envolverHandle('cartera:recategorizar', async (event, payload) => {
+    try {
+      return { success: true, data: carteraService.recategorizar({ ...payload, usuarioId: sesionActual.id }) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Vista previa del reajuste de tarifa de una categoría completa: NO escribe nada -- corre la
+  // misma transacción real (crear la tarifa nueva + AjusteCategoria a cada cuenta) y la
+  // revierte a propósito, así nunca se puede desincronizar de lo que aplicar() haría de
+  // verdad. cuentaIds normalmente sale de categorias:getCuentasConCategoria(categoriaId).
+  envolverHandle('cartera:simularReajustarTarifaCategoria', async (event, payload) => {
+    try {
+      return { success: true, data: carteraService.simularReajustarTarifaCategoria(payload) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Aplica el reajuste de tarifa: crea la tarifa nueva (categoria_tarifas) y corrige con
+  // AjusteCategoria a cada cuenta de cuentaIds -- en una sola transacción. Solo Administrador:
+  // puede mover mucha plata de golpe y con efecto retroactivo, mismo nivel que
+  // asientos:crearManual/caja:regularizarSaldos (ver CANALES_SOLO_ADMIN).
+  envolverHandle('cartera:reajustarTarifaCategoria', async (event, payload) => {
+    try {
+      return { success: true, data: carteraService.reajustarTarifaCategoria({ ...payload, usuarioId: sesionActual.id }) };
     } catch (error) {
       return { success: false, error: error.message };
     }

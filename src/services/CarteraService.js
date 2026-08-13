@@ -3,6 +3,7 @@ const CuentaEstadoRepository = require('../repositories/CuentaEstadoRepository')
 const PeriodoContableRepository = require('../repositories/PeriodoContableRepository');
 const PagoRepository = require('../repositories/PagoRepository');
 const NuevoPuntoRepository = require('../repositories/NuevoPuntoRepository');
+const CategoriaRepository = require('../repositories/CategoriaRepository');
 const { codificarPeriodo, decodificarPeriodo, anioMesDeFecha, primerDiaDelMes, diaAnterior } =
   require('./cartera/periodos');
 const { MODOS, distribuir, calcularCubiertoHasta, calcularAlDiaHasta } = require('./cartera/imputacion');
@@ -25,6 +26,7 @@ class CarteraService {
     this.periodoContableRepository = new PeriodoContableRepository(dbService);
     this.pagoRepository = new PagoRepository(dbService);
     this.nuevoPuntoRepository = new NuevoPuntoRepository(dbService);
+    this.categoriaRepository = new CategoriaRepository(dbService);
   }
 
   // Ancla de facturación: cuándo EMPEZÓ A FACTURARSE la cuenta, no cuándo pagó por primera vez
@@ -691,6 +693,88 @@ class CarteraService {
         totalAjustado: redondear(ajustes.reduce((s, a) => s + a.diferencia, 0))
       };
     });
+  }
+
+  // recategorizar() sobre varias cuentas a la vez, para el caso real que motivó conectarlo a la
+  // UI: la asamblea sube la tarifa de una categoría completa, con efecto retroactivo, y hay que
+  // corregir a TODAS las cuentas de esa categoría, no una por una (ver PENDIENTE REAJUSTE 2024
+  // en los recibos de R012/S039 y otras -- hoy eso se hace a mano en la colilla). Comparte
+  // exactamente la misma lógica que simularRecategorizarLote (ver abajo): ninguna de las dos
+  // reimplementa el cálculo, así que la vista previa no se puede desincronizar de lo que
+  // realmente pasa al aplicar.
+  _recategorizarLote(cuentaIds, categoriaId, fechaVigencia, documento, observaciones, usuarioId) {
+    const porCuenta = [];
+    for (const cuentaId of cuentaIds) {
+      const r = this.recategorizar({ cuentaId, categoriaId, fechaVigencia, documento, observaciones, usuarioId });
+      porCuenta.push({ cuentaId, ...r });
+    }
+    return { porCuenta, totalAjustado: redondear(porCuenta.reduce((s, r) => s + r.totalAjustado, 0)) };
+  }
+
+  recategorizarLote({ cuentaIds, categoriaId, fechaVigencia, documento = null, observaciones = null, usuarioId = null }) {
+    if (!Array.isArray(cuentaIds) || cuentaIds.length === 0) throw new Error('Debe indicar al menos una cuenta');
+    return this.repository.transaccion(() =>
+      this._recategorizarLote(cuentaIds, categoriaId, fechaVigencia, documento, observaciones, usuarioId)
+    );
+  }
+
+  // Vista previa de recategorizarLote SIN escribir nada: corre la misma transacción real y la
+  // revierte a propósito con un error centinela antes de que termine -- nunca calcula el
+  // resultado por su cuenta con una copia de la lógica (eso es lo que se desincroniza con el
+  // tiempo). Quien llama ve exactamente qué pasaría: qué cuentas, cuántos meses cada una y por
+  // cuánto, antes de decidir si aplicar.
+  simularRecategorizarLote({ cuentaIds, categoriaId, fechaVigencia, documento = null, observaciones = null }) {
+    if (!Array.isArray(cuentaIds) || cuentaIds.length === 0) throw new Error('Debe indicar al menos una cuenta');
+    class RollbackSimulacion extends Error {}
+    let resultado;
+    try {
+      this.db.transaction(() => {
+        resultado = this._recategorizarLote(cuentaIds, categoriaId, fechaVigencia, documento, observaciones, null);
+        throw new RollbackSimulacion('simulación: se revierte siempre, nunca escribe');
+      })();
+    } catch (err) {
+      if (!(err instanceof RollbackSimulacion)) throw err;
+    }
+    return resultado;
+  }
+
+  // El flujo real completo de un reajuste de tarifa con efecto retroactivo: registrar la
+  // tarifa nueva (categoria_tarifas, ya conectado a la UI vía categorias:crearTarifa) y
+  // corregir con AjusteCategoria a todas las cuentas que ya tenían meses causados con la
+  // tarifa vieja -- las dos mitades tienen que quedar en la MISMA transacción: si se corta a
+  // mitad de camino, no puede quedar la tarifa nueva sin que los cargos ya causados se hayan
+  // corregido (ni al revés). cuentaIds normalmente sale de
+  // categorias:getCuentasConCategoria(categoriaId) (ya conectado), tomado por quien llama para
+  // que la vista previa y el aplicar miren exactamente las mismas cuentas.
+  reajustarTarifaCategoria({ categoriaId, tarifa, fechaVigencia, cuentaIds,
+    observacionesTarifa = null, documento = null, observacionesAjuste = null, usuarioId = null }) {
+    if (!Array.isArray(cuentaIds) || cuentaIds.length === 0) throw new Error('Debe indicar al menos una cuenta');
+    return this.repository.transaccion(() => {
+      this.categoriaRepository.crearTarifa(categoriaId, tarifa, fechaVigencia, observacionesTarifa);
+      const lote = this._recategorizarLote(cuentaIds, categoriaId, fechaVigencia, documento, observacionesAjuste, usuarioId);
+      return { tarifa, fechaVigencia, ...lote };
+    });
+  }
+
+  // Misma idea que simularRecategorizarLote, pero para el flujo completo (tarifa nueva +
+  // corrección): también prueba de verdad crearTarifa dentro de la transacción que se revierte,
+  // así la vista previa refleja la tarifa nueva sin que exista todavía si el usuario cancela.
+  simularReajustarTarifaCategoria({ categoriaId, tarifa, fechaVigencia, cuentaIds,
+    observacionesTarifa = null, documento = null, observacionesAjuste = null }) {
+    if (!Array.isArray(cuentaIds) || cuentaIds.length === 0) throw new Error('Debe indicar al menos una cuenta');
+    class RollbackSimulacion extends Error {}
+    let resultado;
+    try {
+      this.db.transaction(() => {
+        this.categoriaRepository.crearTarifa(categoriaId, tarifa, fechaVigencia, observacionesTarifa);
+        const lote = this._recategorizarLote(cuentaIds, categoriaId, fechaVigencia, documento, observacionesAjuste, null);
+        resultado = { tarifa, fechaVigencia, ...lote };
+        throw new RollbackSimulacion('simulación: se revierte siempre, nunca escribe');
+      })();
+    } catch (err) {
+      if (!(err instanceof RollbackSimulacion)) throw err;
+    }
+    return resultado;
   }
 
   // Suspende una cuenta a partir de una fecha que puede ser pasada, y anula los cargos ya

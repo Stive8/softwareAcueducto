@@ -82,6 +82,7 @@ const Categorias = {
                     <button class="btn btn-primary btn-icon" onclick="Categorias.showDetailModal(${cat.id})">Ver</button>
                     <button class="btn btn-secondary btn-icon" onclick="Categorias.showFormModal(${cat.id})">Editar</button>
                     <button class="btn btn-success btn-icon" onclick="Categorias.showTarifaModal(${cat.id})">Tarifa</button>
+                    <button class="btn btn-secondary btn-icon" onclick="Categorias.showReajusteModal(${cat.id})">Reajuste retroactivo</button>
                     <button class="btn btn-${cat.activo ? 'warning' : 'info'} btn-icon" onclick="Categorias.toggleActivo(${cat.id})">${cat.activo ? 'Desactivar' : 'Activar'}</button>
                   </div>
                 </td>
@@ -377,6 +378,212 @@ const Categorias = {
         console.error('Error:', error);
         const errorDiv = document.getElementById('formError');
         errorDiv.innerHTML = `<div class="error-message">Error al guardar la tarifa</div>`;
+      }
+    });
+  },
+
+  // "Tarifa" (arriba) solo registra la tarifa nueva hacia adelante -- no toca lo ya cobrado.
+  // "Reajuste retroactivo" es para el caso real de la asamblea subiendo la tarifa con efecto
+  // retroactivo (recibos "PENDIENTE REAJUSTE"): registra la tarifa nueva Y corrige, con un
+  // AjusteCategoria visible en el detalle, a TODAS las cuentas de esta categoría que ya
+  // tuvieran meses cobrados desde la fecha de vigencia. Primero muestra una vista previa (qué
+  // cuentas, cuántos meses, cuánta plata) antes de aplicar nada -- puede mover plata de varias
+  // cuentas de golpe.
+  async showReajusteModal(categoriaId) {
+    const categoriaResponse = await window.api.categorias.getById(categoriaId);
+    if (!categoriaResponse.success) {
+      App.toast('Error al cargar categoría', 'error');
+      return;
+    }
+    const categoria = categoriaResponse.data;
+
+    const tarifaVigenteResponse = await window.api.categorias.getTarifaVigente(categoriaId);
+    const tarifaVigente = tarifaVigenteResponse.success ? tarifaVigenteResponse.data : null;
+
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const content = `
+      <div class="modal-header">
+        <h2>Reajuste retroactivo de tarifa</h2>
+      </div>
+
+      <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
+          <strong>Categoría:</strong> ${categoria.nombre}
+        </p>
+        ${tarifaVigente ? `
+          <p style="margin: 8px 0 0 0; font-size: 0.875rem; color: #1e40af;">
+            <strong>Tarifa actual:</strong> $${this.formatNumber(tarifaVigente.tarifa_sostenimiento)}
+            (desde ${this.formatDate(tarifaVigente.fecha_vigencia_desde)})
+          </p>
+        ` : ''}
+        <p style="margin: 8px 0 0 0; font-size: 0.875rem; color: #1e40af;">
+          A diferencia de "Tarifa", esto además corrige (con un ajuste visible en el detalle de
+          cada cuenta, sin reescribir lo ya cobrado) a todas las cuentas de esta categoría que
+          tengan meses cobrados desde la fecha de vigencia.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="reajusteForm">
+        <div class="form-group">
+          <label for="reajuste_tarifa">Tarifa nueva <span style="color: #ef4444;">*</span></label>
+          <div class="input-currency">
+            <span class="currency-symbol">$</span>
+            <input type="text" inputmode="numeric" id="reajuste_tarifa" name="reajuste_tarifa" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="reajuste_fecha">Vigente desde <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="reajuste_fecha" name="reajuste_fecha" value="${hoy}" required>
+          <small style="color: #64748b; font-size: 0.875rem;">Puede ser una fecha pasada -- por eso es "retroactivo".</small>
+        </div>
+
+        <div class="form-group">
+          <label for="reajuste_observaciones">Acta / motivo</label>
+          <textarea id="reajuste_observaciones" name="reajuste_observaciones" placeholder="Ej: Aprobado en asamblea del 15 de marzo de 2026"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Ver cuentas afectadas</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+    App.attachMoneyInput(document.getElementById('reajuste_tarifa'));
+
+    document.getElementById('reajusteForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorDiv = document.getElementById('formError');
+      const tarifa = App.parseMoneyValue(document.getElementById('reajuste_tarifa').value);
+      const fechaVigencia = document.getElementById('reajuste_fecha').value;
+      const observaciones = document.getElementById('reajuste_observaciones').value.trim();
+
+      try {
+        const cuentasResponse = await window.api.categorias.getCuentasConCategoria(categoriaId);
+        if (!cuentasResponse.success) {
+          errorDiv.innerHTML = `<div class="error-message">${cuentasResponse.error}</div>`;
+          return;
+        }
+        const cuentaIds = cuentasResponse.data.map(c => c.id);
+        if (cuentaIds.length === 0) {
+          errorDiv.innerHTML = `<div class="error-message">Esta categoría no tiene ninguna cuenta -- no hay nada que reajustar.</div>`;
+          return;
+        }
+
+        const previewResponse = await window.api.cartera.simularReajustarTarifaCategoria({
+          categoriaId, tarifa, fechaVigencia, cuentaIds, observacionesTarifa: observaciones
+        });
+        if (!previewResponse.success) {
+          errorDiv.innerHTML = `<div class="error-message">${previewResponse.error}</div>`;
+          return;
+        }
+
+        this.showReajustePreview(categoriaId, categoria, { tarifa, fechaVigencia, observaciones },
+          previewResponse.data, cuentasResponse.data);
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al calcular la vista previa</div>`;
+      }
+    });
+  },
+
+  // Vista previa (nada se escribió todavía -- simularReajustarTarifaCategoria corre y revierte
+  // la misma transacción real) y confirmación antes de aplicar.
+  showReajustePreview(categoriaId, categoria, datos, preview, cuentasInfo) {
+    const cuentaPorId = new Map(cuentasInfo.map(c => [c.id, c]));
+    const afectadas = preview.porCuenta.filter(p => p.ajustes.length > 0);
+
+    const content = `
+      <div class="modal-header">
+        <h2>Confirmar reajuste -- ${categoria.nombre}</h2>
+      </div>
+
+      <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
+          <strong>Tarifa nueva:</strong> $${this.formatNumber(datos.tarifa)}, vigente desde ${this.formatDate(datos.fechaVigencia)}
+        </p>
+        <p style="margin: 8px 0 0 0; font-size: 0.875rem; color: #1e40af;">
+          <strong>Cuentas afectadas:</strong> ${afectadas.length} de ${preview.porCuenta.length}
+          &nbsp;|&nbsp; <strong>Total a ajustar:</strong> $${this.formatNumber(preview.totalAjustado)}
+        </p>
+      </div>
+
+      ${afectadas.length === 0 ? `
+        <p style="color: #64748b;">Ninguna cuenta tiene meses ya cobrados desde esa fecha -- no hay nada que corregir. La tarifa nueva se guarda igual, para cobrar los meses futuros.</p>
+      ` : `
+        <div style="max-height: 320px; overflow-y: auto;">
+          <table style="width: 100%;">
+            <thead>
+              <tr><th>Cuenta</th><th>Meses ajustados</th><th>Monto</th></tr>
+            </thead>
+            <tbody>
+              ${afectadas.map(p => {
+                const cuenta = cuentaPorId.get(p.cuentaId);
+                return `
+                  <tr>
+                    <td><strong>${cuenta ? cuenta.codigo : p.cuentaId}</strong></td>
+                    <td>${p.ajustes.length}</td>
+                    <td>$${this.formatNumber(p.totalAjustado)}</td>
+                  </tr>
+                `;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+      `}
+
+      <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin: 20px 0;">
+        <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+          Al confirmar, esto queda registrado como un ajuste en el detalle de cada cuenta -- no
+          modifica los cargos ya emitidos ni las imputaciones existentes.
+        </p>
+      </div>
+
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="Categorias.showReajusteModal(${categoriaId})">Volver</button>
+        <button type="button" class="btn btn-primary" id="btnConfirmarReajuste">Confirmar y aplicar</button>
+      </div>
+    `;
+
+    App.openModal(content, 'large');
+
+    const opId = crypto.randomUUID();
+    const boton = document.getElementById('btnConfirmarReajuste');
+    boton.addEventListener('click', async () => {
+      if (boton.disabled) return;
+      boton.disabled = true;
+      const textoOriginal = boton.textContent;
+      boton.textContent = 'Aplicando...';
+
+      try {
+        const cuentaIds = preview.porCuenta.map(p => p.cuentaId);
+        const observacionesAjuste = `Reajuste de tarifa de ${categoria.nombre} a $${this.formatNumber(datos.tarifa)}, ` +
+          `vigente desde ${this.formatDate(datos.fechaVigencia)}${datos.observaciones ? ' -- ' + datos.observaciones : ''}`;
+
+        const response = await window.api.cartera.reajustarTarifaCategoria({
+          categoriaId, tarifa: datos.tarifa, fechaVigencia: datos.fechaVigencia, cuentaIds,
+          observacionesTarifa: datos.observaciones, observacionesAjuste, opId
+        });
+
+        if (response.success) {
+          App.closeModal();
+          this.loadCategorias();
+          App.toast(`Reajuste aplicado: $${this.formatNumber(response.data.totalAjustado)} en ${response.data.porCuenta.filter(p => p.ajustes.length > 0).length} cuenta(s)`);
+        } else {
+          App.toast('Error al aplicar el reajuste: ' + response.error, 'error');
+          boton.disabled = false;
+          boton.textContent = textoOriginal;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        App.toast('Error al aplicar el reajuste', 'error');
+        boton.disabled = false;
+        boton.textContent = textoOriginal;
       }
     });
   },

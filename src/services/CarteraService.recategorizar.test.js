@@ -210,3 +210,131 @@ test('recategorizar valida los parámetros', () => {
     cerrarDbTemporal(ctx);
   }
 });
+
+// Agrega una segunda cuenta "Finca" (T002) a la base que ya sembró sembrar(), para probar los
+// métodos "en lote" (recategorizarLote / reajustarTarifaCategoria) con más de una cuenta.
+function agregarSegundaCuenta(dbService, finca) {
+  const db = dbService.getDb();
+  db.prepare(`INSERT INTO cuentas (codigo, direccion, estado) VALUES ('T002', 'Vereda Test 2', 'Activo')`).run();
+  const cuentaId2 = db.prepare(`SELECT id FROM cuentas WHERE codigo = 'T002'`).get().id;
+  db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio)
+              VALUES (?, ?, '2025-01-01')`).run(cuentaId2, finca);
+  db.prepare(`INSERT INTO propietarios (nombre_completo) VALUES ('Prop T002')`).run();
+  const propietarioId2 = db.prepare(`SELECT id FROM propietarios WHERE nombre_completo = 'Prop T002'`).get().id;
+  db.prepare(`INSERT INTO cuenta_propietarios (cuenta_id, propietario_id, fecha_inicio)
+              VALUES (?, ?, '2025-01-01')`).run(cuentaId2, propietarioId2);
+  db.prepare(`INSERT INTO recibos (numero_recibo, cuenta_id, propietario_id, fecha_recibo, total, metodo_pago)
+              VALUES (5002, ?, ?, '2025-01-10', 0, 'Efectivo')`).run(cuentaId2, propietarioId2);
+  new CuentaEstadoRepository(dbService)
+    .sembrarVigenciaInicial({ cuentaId: cuentaId2, estado: 'Activo', fechaInicio: '2025-01-01' });
+  return cuentaId2;
+}
+
+test('recategorizarLote aplica a varias cuentas en una sola llamada y suma el total ajustado', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const { cuentaId, finca, piscina, service } = sembrar(ctx.dbService);
+    const cuentaId2 = agregarSegundaCuenta(ctx.dbService, finca);
+    service.asegurarCausacion(cuentaId, 2025, 3);
+    service.asegurarCausacion(cuentaId2, 2025, 3);
+
+    const r = service.recategorizarLote({
+      cuentaIds: [cuentaId, cuentaId2], categoriaId: piscina, fechaVigencia: '2025-01-01', documento: 'Acta 9'
+    });
+
+    assert.equal(r.porCuenta.length, 2);
+    assert.equal(r.totalAjustado, 36000, '2 cuentas x 3 meses x $6.000');
+    assert.equal(service.getEstadoCartera(cuentaId).deudaExigible, 48000, '3x16000');
+    assert.equal(service.getEstadoCartera(cuentaId2).deudaExigible, 48000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('recategorizarLote valida que haya al menos una cuenta', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const { piscina, service } = sembrar(ctx.dbService);
+    assert.throws(() => service.recategorizarLote({ cuentaIds: [], categoriaId: piscina, fechaVigencia: '2025-01-01' }),
+      /al menos una cuenta/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('simularRecategorizarLote devuelve los mismos números que recategorizarLote pero no escribe nada', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const { cuentaId, finca, piscina, service } = sembrar(ctx.dbService);
+    const cuentaId2 = agregarSegundaCuenta(ctx.dbService, finca);
+    service.asegurarCausacion(cuentaId, 2025, 3);
+    service.asegurarCausacion(cuentaId2, 2025, 3);
+
+    const antesAjustes = db.prepare(`SELECT COUNT(*) n FROM cartera_movimientos WHERE tipo='AjusteCategoria'`).get().n;
+    const antesVigencias = db.prepare(`SELECT COUNT(*) n FROM cuenta_categorias`).get().n;
+
+    const simulado = service.simularRecategorizarLote({
+      cuentaIds: [cuentaId, cuentaId2], categoriaId: piscina, fechaVigencia: '2025-01-01'
+    });
+
+    assert.equal(simulado.totalAjustado, 36000);
+    assert.equal(simulado.porCuenta.length, 2);
+    assert.equal(db.prepare(`SELECT COUNT(*) n FROM cartera_movimientos WHERE tipo='AjusteCategoria'`).get().n, antesAjustes, 'no debe crear ningún AjusteCategoria');
+    assert.equal(db.prepare(`SELECT COUNT(*) n FROM cuenta_categorias`).get().n, antesVigencias, 'no debe tocar cuenta_categorias');
+    assert.equal(service.getEstadoCartera(cuentaId).deudaExigible, 30000, 'sigue sin ajustar (3x10000)');
+
+    const real = service.recategorizarLote({
+      cuentaIds: [cuentaId, cuentaId2], categoriaId: piscina, fechaVigencia: '2025-01-01'
+    });
+    assert.equal(real.totalAjustado, simulado.totalAjustado, 'la simulación tiene que predecir exactamente lo real');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('reajustarTarifaCategoria crea la tarifa nueva y corrige a todas las cuentas en la misma transacción', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const { cuentaId, finca, service } = sembrar(ctx.dbService);
+    const cuentaId2 = agregarSegundaCuenta(ctx.dbService, finca);
+    service.asegurarCausacion(cuentaId, 2025, 3);
+    service.asegurarCausacion(cuentaId2, 2025, 3);
+
+    const r = service.reajustarTarifaCategoria({
+      categoriaId: finca, tarifa: 12000, fechaVigencia: '2025-01-01',
+      cuentaIds: [cuentaId, cuentaId2],
+      observacionesTarifa: 'Aprobado en asamblea 2026', observacionesAjuste: 'Reajuste de tarifa Finca (asamblea 2026)'
+    });
+
+    assert.equal(r.totalAjustado, 12000, '2 cuentas x 3 meses x $2.000');
+    const tarifaVigente = db.prepare(`SELECT tarifa_sostenimiento FROM categoria_tarifas WHERE categoria_id=? AND fecha_vigencia_desde='2025-01-01'`).get(finca);
+    assert.equal(tarifaVigente.tarifa_sostenimiento, 12000);
+    assert.equal(service.getEstadoCartera(cuentaId).deudaExigible, 36000, '3x12000');
+    assert.equal(service.getEstadoCartera(cuentaId2).deudaExigible, 36000);
+    const ajuste = db.prepare(`SELECT observaciones FROM cartera_movimientos WHERE cuenta_id=? AND tipo='AjusteCategoria' LIMIT 1`).get(cuentaId);
+    assert.equal(ajuste.observaciones, 'Reajuste de tarifa Finca (asamblea 2026)');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('simularReajustarTarifaCategoria no deja la tarifa nueva ni los ajustes si se cancela', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const { cuentaId, finca, service } = sembrar(ctx.dbService);
+    service.asegurarCausacion(cuentaId, 2025, 3);
+
+    const simulado = service.simularReajustarTarifaCategoria({
+      categoriaId: finca, tarifa: 12000, fechaVigencia: '2025-01-01', cuentaIds: [cuentaId]
+    });
+
+    assert.equal(simulado.totalAjustado, 6000, '3 meses x $2.000');
+    assert.equal(db.prepare(`SELECT COUNT(*) n FROM categoria_tarifas WHERE categoria_id=? AND tarifa_sostenimiento=12000`).get(finca).n, 0, 'la tarifa nueva no debe quedar persistida');
+    assert.equal(service.getEstadoCartera(cuentaId).deudaExigible, 30000, 'sin ajustar todavía');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

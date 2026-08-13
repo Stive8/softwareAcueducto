@@ -61,7 +61,10 @@ contextBridge.exposeInMainWorld('api', {
     getDetalleCartera: (cuentaId) => ipcRenderer.invoke('cartera:getDetalleCartera', cuentaId),
     getMotivoDiferencia: (cuentaId) => ipcRenderer.invoke('cartera:getMotivoDiferencia', cuentaId),
     getIndicadoresBulk: () => ipcRenderer.invoke('cartera:getIndicadoresBulk'),
-    redimirCredito: (payload) => ipcRenderer.invoke('cartera:redimirCredito', payload)
+    redimirCredito: (payload) => ipcRenderer.invoke('cartera:redimirCredito', payload),
+    recategorizar: (payload) => ipcRenderer.invoke('cartera:recategorizar', payload),
+    simularReajustarTarifaCategoria: (payload) => ipcRenderer.invoke('cartera:simularReajustarTarifaCategoria', payload),
+    reajustarTarifaCategoria: (payload) => ipcRenderer.invoke('cartera:reajustarTarifaCategoria', payload)
   },
   recibos: {
     getAll: (params) => ipcRenderer.invoke('recibos:getAll', params),
