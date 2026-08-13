@@ -189,6 +189,33 @@ así que $200.000 de deuda real es plausible. No se corrigió — ponerla en 0 p
 deuda real de sostenimiento. Queda marcada para que alguien la revise contra el talonario
 físico.
 
+**9 pagos adelantados cuyo crédito no alcanza para cubrir el período que declaran (agregado
+2026-08-14).** El sistema detectó automáticamente 49 cuentas donde un recibo declaraba un
+período futuro (ej. "Enero a Diciembre 2026") que la carga no había causado todavía, dejando el
+tramo futuro como saldo a favor genérico en vez de un mes pagado. 40 se corrigieron solas
+(`paso9b-correcciones.js`, corrección 17): se causó el período declarado y se redimió el crédito
+contra esos meses puntuales. Las otras 9 se dejaron intactas porque el crédito disponible no
+alcanza para cubrir todo el período — señal de que parte de esa plata ya pagó otra deuda real
+(una apertura opaca u otro mes) antes de que existiera esta corrección, o de que el recibo nunca
+tuvo, en plata, lo que su texto dice cubrir. Necesitan revisión contra el talonario físico antes
+de decidir qué meses realmente cubre cada una:
+
+| Cuenta | Recibo | Disponible | Necesario | Falta |
+|---|---|---|---|---|
+| C009 | 2493 | $16.000 | $30.000 | $14.000 |
+| C019 | 2396 | (hueco entre julio y el inicio del período declarado, octubre) | | |
+| R027 | 2432 | $62.000 | $80.000 | $18.000 |
+| R048 | 2544 | $14.000 | $20.000 | $6.000 |
+| R051 | 2509 | $5.000 | $50.000 | $45.000 |
+| R103 | 2395 | $29.000 | $30.000 | $1.000 |
+| S011 | 2373 | $47.000 | $50.000 | $3.000 |
+| S014 | 2372 | $8.000 | $50.000 | $42.000 |
+| S040 | 2506 | $44.000 | $50.000 | $6.000 |
+
+C019 es un caso distinto: su recibo declara "Octubre a Diciembre 2026", pero la cuenta solo
+tiene causado hasta julio -- agosto y septiembre son un hueco sin relación con este recibo que
+la corrección automática no se anima a inventar como pagado ni como deuda a ciegas.
+
 ---
 
 ## 3. Cartera probablemente incobrable — para que la junta decida

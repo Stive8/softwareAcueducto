@@ -305,6 +305,53 @@ function sembrarTodas(db) {
   ids.abono2407Id = abono2407Id;
   ids.detalle2407Id = r2407.detalleId;
 
+  // --- R100 (corrección 17): pago adelantado -- recibo "Enero a Diciembre 2026" por 120.000,
+  // pero al momento del paso10 solo existían cargos causados hasta julio (70.000 = 7x10.000):
+  // el abono quedó recortado a lo imputado y los 50.000 de agosto-diciembre como crédito
+  // genérico, reproduciendo el estado real de las cuentas con este patrón.
+  const categoriaFincaId = db.prepare(`SELECT id FROM categorias WHERE nombre='Finca'`).get().id;
+  ids.R100 = sembrarCuenta(db, 'R100');
+  db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2024-01-01')`)
+    .run(ids.R100, categoriaFincaId);
+  for (let mes = 1; mes <= 7; mes++) {
+    repo.crearMovimiento({ cuentaId: ids.R100, fecha: `2026-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes });
+  }
+  const r100Recibo = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 9100, cuentaId: ids.R100, fecha: '2026-02-21', valor: 120000,
+    concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026',
+    periodoDesde: 'Enero 2026', periodoHasta: 'Diciembre 2026'
+  });
+  const abonoR100Id = repo.crearMovimiento({
+    cuentaId: ids.R100, fecha: '2026-02-21', tipo: 'Abono', exigible: 1, monto: -70000, reciboDetalleId: r100Recibo.detalleId
+  });
+  const cargosR100 = db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' ORDER BY mes`).all(ids.R100);
+  for (const c of cargosR100) repo.crearImputacion({ abonoId: abonoR100Id, cargoId: c.id, monto: 10000 });
+  ids.creditoR100Id = repo.crearCredito({
+    cuentaId: ids.R100, tipo: 'Abono', monto: 50000, fecha: '2026-02-21',
+    reciboDetalleId: r100Recibo.detalleId, observaciones: 'Sobrante de imputación: crédito no aplicado'
+  });
+  ids.abonoR100Id = abonoR100Id;
+  ids.detalleR100Id = r100Recibo.detalleId;
+
+  // --- S0312 con un SEGUNDO recibo de pago adelantado (además del 2137 de la corrección 4),
+  // para probar que EXCLUSIONES_PAGO_ADELANTADO lo descarta -- mismo patrón que R100 pero en
+  // una cuenta que candidatosPagoAdelantado debe saltar explícitamente.
+  db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2024-01-01')`)
+    .run(ids.S0312, categoriaFincaId);
+  const rS0312Adelantado = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 9312, cuentaId: ids.S0312, fecha: '2026-02-21', valor: 50000,
+    concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026',
+    periodoDesde: 'Enero 2026', periodoHasta: 'Diciembre 2026'
+  });
+  const abonoS0312AdelantadoId = repo.crearMovimiento({
+    cuentaId: ids.S0312, fecha: '2026-02-21', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: rS0312Adelantado.detalleId
+  });
+  ids.creditoS0312AdelantadoId = repo.crearCredito({
+    cuentaId: ids.S0312, tipo: 'Abono', monto: 50000, fecha: '2026-02-21',
+    reciboDetalleId: rS0312Adelantado.detalleId, observaciones: 'Sobrante de imputación: crédito no aplicado'
+  });
+  ids.abonoS0312AdelantadoId = abonoS0312AdelantadoId;
+
   return ids;
 }
 
@@ -1142,6 +1189,208 @@ test('paso9b: R0831 -- idempotente, correr dos veces no vuelve a recalcular ni d
     assert.equal(estado.deudaAntes2024, 0);
     assert.equal(estado.deudaExigible, 0);
     assert.equal(estado.saldoCreditoDisponible, 2000, 'no debe cambiar en la segunda corrida');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R100 (pago adelantado) -- causa agosto-diciembre 2026 y reimputa el recibo completo, sin dejar crédito', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const CarteraService = require('../../src/services/CarteraService');
+    const service = new CarteraService(ctx.dbService);
+
+    const antes = service.getEstadoCartera(ids.R100);
+    assert.deepEqual(antes.cubiertoHasta, { anio: 2026, mes: 7 });
+    assert.equal(antes.saldoCreditoDisponible, 50000);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const pagoR100 = r.pagosAdelantados.find(p => p.codigo === 'R100');
+    assert.ok(pagoR100, 'R100 debe aparecer en pagosAdelantados');
+    assert.equal(pagoR100.yaCorregido, false);
+    assert.equal(pagoR100.creados, 5, 'agosto a diciembre 2026');
+    assert.equal(pagoR100.saldoRestante, 0, 'los 120.000 alcanzan exacto para los 12 meses, sin sobrante');
+
+    const cargos = getCargos(db, ids.R100);
+    assert.equal(cargos.length, 12);
+    assert.equal(cargos.filter(c => c.anio === 2026).length, 12);
+
+    const despues = service.getEstadoCartera(ids.R100);
+    assert.deepEqual(despues.cubiertoHasta, { anio: 2026, mes: 12 }, 'pagado hasta diciembre, no julio');
+    assert.equal(despues.saldoCreditoDisponible, 0, 'sin crédito genérico -- todo quedó imputado a un mes real');
+    assert.equal(despues.deudaExigible, 0);
+
+    // El crédito original (tipo='Abono') nunca se borra -- redimirCredito agrega una fila
+    // 'Aplicado' aparte que lo neta a 0 (ya verificado arriba vía saldoCreditoDisponible).
+    const creditoViejo = db.prepare(`SELECT * FROM cuenta_creditos WHERE id=?`).get(ids.creditoR100Id);
+    assert.equal(creditoViejo.monto, 50000, 'la fila original queda intacta, sin mutar');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R100 -- idempotente, correr dos veces no vuelve a causar ni duplica nada', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const CarteraService = require('../../src/services/CarteraService');
+    const service = new CarteraService(ctx.dbService);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    // Con sobrante 0, la primera corrida no dejó ningún crédito -- R100 ya no es "candidato"
+    // (candidatosPagoAdelantado solo mira cuenta_creditos), así que ni siquiera vuelve a
+    // aparecer en pagosAdelantados. Eso es correcto: lo que importa es que la segunda corrida
+    // no duplique ni revierta nada, no que lo reporte de nuevo.
+    assert.equal(r2.pagosAdelantados.some(p => p.codigo === 'R100'), false);
+
+    const cargos = getCargos(db, ids.R100);
+    assert.equal(cargos.length, 12, 'la segunda corrida no debe duplicar cargos');
+    const estado = service.getEstadoCartera(ids.R100);
+    assert.equal(estado.saldoCreditoDisponible, 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S0312 -- EXCLUSIONES_PAGO_ADELANTADO lo descarta pese a calzar el patrón (pago mal anotado, no adelantado real)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const CarteraService = require('../../src/services/CarteraService');
+    const service = new CarteraService(ctx.dbService);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.pagosAdelantados.some(p => p.codigo === 'S0312'), false, 'S0312 nunca debe aparecer en pagosAdelantados');
+
+    // El crédito de $50.000 sembrado para esta prueba sigue intacto, sin tocar.
+    const credito = db.prepare(`SELECT monto FROM cuenta_creditos WHERE id=?`).get(ids.creditoS0312AdelantadoId);
+    assert.equal(credito.monto, 50000);
+    const cargos2026 = db.prepare(`SELECT COUNT(*) n FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=2026`).get(ids.S0312).n;
+    assert.equal(cargos2026, 0, 'no debe causar nada en S0312 -- está excluida');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: pago adelantado con sobrante real -- deja un crédito menor (no cero) y la segunda corrida no lo duplica', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const repo = new CarteraRepository({ getDb: () => db });
+    const propietarioId = sembrarPropietario(db);
+    const categoriaFincaId = db.prepare(`SELECT id FROM categorias WHERE nombre='Finca'`).get().id;
+
+    const cuentaId = sembrarCuenta(db, 'R101');
+    db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2024-01-01')`)
+      .run(cuentaId, categoriaFincaId);
+    for (let mes = 1; mes <= 7; mes++) {
+      repo.crearMovimiento({ cuentaId, fecha: `2026-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes });
+    }
+    // Recibo de 122.000 para "Enero a Diciembre 2026": los 12 meses cuestan 120.000, sobran 2.000.
+    const recibo = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9101, cuentaId, fecha: '2026-02-21', valor: 122000,
+      concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026 (SALDO A FAVOR 2.000)',
+      periodoDesde: 'Enero 2026', periodoHasta: 'Diciembre 2026'
+    });
+    const abonoId = repo.crearMovimiento({
+      cuentaId, fecha: '2026-02-21', tipo: 'Abono', exigible: 1, monto: -70000, reciboDetalleId: recibo.detalleId
+    });
+    const cargos = db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' ORDER BY mes`).all(cuentaId);
+    for (const c of cargos) repo.crearImputacion({ abonoId, cargoId: c.id, monto: 10000 });
+    repo.crearCredito({
+      cuentaId, tipo: 'Abono', monto: 52000, fecha: '2026-02-21',
+      reciboDetalleId: recibo.detalleId, observaciones: 'Sobrante de imputación: crédito no aplicado'
+    });
+
+    const r1 = ejecutarPaso9b({ dbService: ctx.dbService });
+    const pago1 = r1.pagosAdelantados.find(p => p.codigo === 'R101');
+    assert.equal(pago1.yaCorregido, false);
+    assert.equal(pago1.saldoRestante, 2000, 'los 122.000 cubren los 12 meses (120.000) y sobran 2.000 reales');
+
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+    // maxCausado de la cuenta ahora es exactamente diciembre-2026 (el mismo hasta declarado),
+    // así que candidatosPagoAdelantado ya no la trae -- no hace falta llegar al chequeo interno
+    // de "¿ya existe el CargoMensual de diciembre?" para que la segunda corrida sea inofensiva.
+    assert.equal(r2.pagosAdelantados.some(p => p.codigo === 'R101'), false);
+
+    // redimirCredito nunca borra la fila 'Abono' original -- agrega una fila 'Aplicado' aparte
+    // (mismo mecanismo que usa el operador desde la pantalla). Lo que importa es el saldo neto,
+    // no la cantidad de filas.
+    const repoVerif = new CarteraRepository({ getDb: () => db });
+    assert.equal(repoVerif.getSaldoCreditoDisponible(cuentaId), 2000, 'la segunda corrida no debe duplicar ni volver a redimir nada');
+
+    const cargosFinal = getCargos(db, cuentaId);
+    assert.equal(cargosFinal.length, 12, 'la segunda corrida no debe duplicar cargos');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: pago adelantado -- si el crédito no alcanza para cubrir el período (parte ya pagó deuda vieja real), no toca nada y lo deja en pendientesManuales', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const repo = new CarteraRepository({ getDb: () => db });
+    const propietarioId = sembrarPropietario(db);
+    const categoriaFincaId = db.prepare(`SELECT id FROM categorias WHERE nombre='Finca'`).get().id;
+
+    // Reproduce el patrón real encontrado en producción (R027 y 9 más, 2026-08-14): una
+    // apertura opaca real de 8.000 que YA está paga (por otro abono, sin relación con el
+    // recibo de pago adelantado), más el recibo "Enero a Diciembre 2026" cuyo sobrante, en
+    // vez de cubrir agosto-diciembre completo, sólo alcanza para una parte -- porque el resto
+    // ya se había ido a esa apertura antes de que existiera esta corrección.
+    const cuentaId = sembrarCuenta(db, 'R102');
+    db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2024-01-01')`)
+      .run(cuentaId, categoriaFincaId);
+    const aperturaId = repo.crearMovimiento({ cuentaId, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 8000 });
+    const abonoAperturaId = repo.crearMovimiento({ cuentaId, fecha: '2024-01-15', tipo: 'Abono', exigible: 0, monto: -8000 });
+    repo.crearImputacion({ abonoId: abonoAperturaId, cargoId: aperturaId, monto: 8000 });
+    for (let mes = 1; mes <= 7; mes++) {
+      repo.crearMovimiento({ cuentaId, fecha: `2026-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes });
+    }
+    const recibo = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9102, cuentaId, fecha: '2026-02-21', valor: 82000,
+      concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026',
+      periodoDesde: 'Enero 2026', periodoHasta: 'Diciembre 2026'
+    });
+    const abonoId = repo.crearMovimiento({
+      cuentaId, fecha: '2026-02-21', tipo: 'Abono', exigible: 1, monto: -70000, reciboDetalleId: recibo.detalleId
+    });
+    const cargos = db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' ORDER BY mes`).all(cuentaId);
+    for (const c of cargos) repo.crearImputacion({ abonoId, cargoId: c.id, monto: 10000 });
+    repo.crearCredito({
+      cuentaId, tipo: 'Abono', monto: 12000, fecha: '2026-02-21',
+      reciboDetalleId: recibo.detalleId, observaciones: 'Sobrante de imputación: crédito no aplicado'
+    });
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.pagosAdelantados.some(p => p.codigo === 'R102'), false, 'no debe aparecer como corregida');
+    const pendiente = r.pendientesManuales.find(p => p.codigo === 'R102');
+    assert.ok(pendiente, 'debe quedar en pendientesManuales');
+    assert.equal(pendiente.disponible, 12000);
+    assert.equal(pendiente.necesario, 50000, 'agosto a diciembre, 5 x 10.000');
+    assert.equal(pendiente.faltante, 38000);
+
+    // Nada se tocó: ni se causaron meses nuevos, ni se movió el crédito, ni la apertura.
+    const cargosFinal = getCargos(db, cuentaId);
+    assert.equal(cargosFinal.length, 7, 'no debe causar agosto-diciembre si el crédito no alcanza');
+    const credito = db.prepare(`SELECT monto FROM cuenta_creditos WHERE cuenta_id=?`).get(cuentaId);
+    assert.equal(credito.monto, 12000, 'el crédito queda intacto');
+    const CarteraService = require('../../src/services/CarteraService');
+    const service = new CarteraService(ctx.dbService);
+    const estado = service.getEstadoCartera(cuentaId);
+    assert.equal(estado.deudaAntes2024, 0, 'la apertura, ya paga desde antes, sigue paga');
   } finally {
     cerrarDbTemporal(ctx);
   }

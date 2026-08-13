@@ -205,9 +205,13 @@
 // crédito de este archivo. La 16 se detecta por si el abono del recibo 2159 ya tiene alguna
 // imputación real (en el estado original siempre tiene cero, porque quedó convertido íntegro
 // en crédito) -- si ya tiene, deshace todo (imputaciones y créditos) de los tres abonos
-// involucrados y los recalcula desde cero, así que repetir la corrida no duplica nada.
+// involucrados y los recalcula desde cero, así que repetir la corrida no duplica nada. La 17 se
+// detecta candidato por candidato: costoPeriodoSinCausar devuelve 0 cuando el período declarado
+// ya está totalmente cubierto (por esta corrida o una anterior), así que se salta sin tocar
+// nada -- y como candidatosPagoAdelantado() vuelve a consultar cuenta_creditos en cada corrida,
+// un candidato ya corregido (sin sobrante) simplemente deja de aparecer la próxima vez.
 const { normalizarCodigo } = require('./normalizar');
-const { primerDiaDelMes } = require('../../src/services/cartera/periodos');
+const { primerDiaDelMes, decodificarPeriodo } = require('../../src/services/cartera/periodos');
 const { distribuir, MODOS } = require('../../src/services/cartera/imputacion');
 const { redondear, esMayor } = require('../../src/services/cartera/dinero');
 const { mesesDelPeriodo, TIPOS_CARGO_COMBINADOS } = require('./paso10-imputacion');
@@ -375,6 +379,159 @@ const RECALCULO_R0831 = {
   ]
 };
 
+// 17. PAGOS POR ADELANTADO: cuentas cuyo recibo declaraba un período que se extendía más allá
+//    de lo que la carga causó (tope julio 2026, ver paso9-causacion.js) quedaron con ese tramo
+//    convertido en crédito genérico -- "pagado hasta julio 2026" y saldo a favor, cuando en
+//    realidad ya pagaron hasta diciembre. A diferencia de las correcciones 1-16 (una cuenta a
+//    la vez, con evidencia puntual), esta es QUERY-DRIVEN (ver candidatosPagoAdelantado): no
+//    hay una lista fija porque el patrón se repite en decenas de cuentas y no hay nada puntual
+//    que investigar en cada una -- todas comparten el mismo mecanismo (paso10-imputacion.js
+//    solo imputa contra cargos que YA existen; un mes futuro sin causar no es candidato, así
+//    que el sobrante queda como crédito). La corrección: causar los meses que el recibo
+//    declara (asegurarCausacion) y redimir el crédito contra esos cargos puntuales
+//    (CarteraService.redimirCredito, MesesEspecificos) -- NUNCA borra ni reconstruye la
+//    imputación original (a diferencia de las correcciones 4-9/16): ver el comentario extenso
+//    en el bloque de la corrección, sección "Chequeo de seguridad", sobre por qué reconstruir
+//    desde cero desalinea cuentas que en verdad no tenían ningún problema.
+//
+//    Chequeo de seguridad por cuenta (costoPeriodoSinCausar): si el crédito disponible no
+//    alcanza para cubrir lo que el período declarado necesita -- señal de que parte de esa
+//    plata ya pagó deuda vieja real, o de que el recibo nunca alcanzó para todo lo que dice --
+//    la cuenta NO se toca y queda en pendientesManuales para revisión con el talonario. De las
+//    49 candidatas reales (2026-08-14), 10 cayeron acá (R027, R051, S014, C009, R048, S040,
+//    C019, S011, R103, S03311): todas tenían parte del sobrante ya aplicado por FIFO contra
+//    deuda anterior a 2024, y causar el período completo sin ese chequeo las descuadraba contra
+//    CARTERA.xlsx por exactamente el monto que faltaba -- verificado antes de aplicar nada real.
+//
+//    EXCLUSIONES explícitas (candidatosPagoAdelantado las descarta, no es que no calcen el
+//    patrón -- calzan, pero aplicarles esto sería incorrecto o le quita una decisión a la junta):
+//    - S0312: los $210.000 son un pago mal anotado, no un pago adelantado real -- aplicarlo
+//      marcaría meses futuros como pagados sin que sea cierto (PUNTOS-CONFLICTIVOS.md, nota
+//      interna de la sección de saldo a favor).
+//    - R028, S0331: créditos viejos sin usar, documentados como decisión pendiente de la junta
+//      (avisarle a la persona o no) -- no es una corrección de datos que el sistema deba tomar
+//      solo (PUNTOS-CONFLICTIVOS.md sección 2, "Los 4 créditos a favor que nadie usa").
+//    - S0061: cuenta duplicada e inactiva desde antes de esta carga (PUNTOS-CONFLICTIVOS.md
+//      sección de duplicadas) -- no es una cuenta real con un pago pendiente de aplicar.
+//    - R031: Suspendida y sin categoria_tarifas configurada para su historia temprana (2024) --
+//      asegurarCausacion no puede causar nada ahí; causar el resto sin resolver eso primero
+//      dejaría un hueco a mitad de camino. Necesita revisión manual aparte.
+const EXCLUSIONES_PAGO_ADELANTADO = {
+  S0312: 'crédito de $210.000 es un pago mal anotado, no un pago adelantado real',
+  R028: 'crédito viejo sin usar -- decisión pendiente de la junta, no del sistema',
+  S0331: 'crédito viejo sin usar -- decisión pendiente de la junta, no del sistema',
+  S0061: 'cuenta duplicada e inactiva desde antes de esta carga',
+  R031: 'sin categoria_tarifas configurada para su historia temprana -- revisión manual aparte'
+};
+
+const OBSERVACION_PAGO_ADELANTADO =
+  'Recalculado (paso9b, corrección 17): el recibo declaraba un período que se extendía más ' +
+  'allá de lo que la carga había causado, así que el tramo futuro había quedado como crédito ' +
+  'genérico en vez de imputado a esos meses. Se causaron los meses declarados y se redimió el ' +
+  'crédito disponible contra esos cargos puntuales, sin tocar ninguna imputación previa.';
+
+const MESES_TEXTO_A_NUMERO = {
+  enero: 1, febrero: 2, marzo: 3, abril: 4, mayo: 5, junio: 6,
+  julio: 7, agosto: 8, septiembre: 9, octubre: 10, noviembre: 11, diciembre: 12
+};
+
+// recibo_detalles.periodo_desde/periodo_hasta mezcla dos formatos según cuándo se cargó el
+// recibo ("Enero 2026" o "2026-01") -- a diferencia de paso10-imputacion.js (que solo lee del
+// JSON, siempre ISO), acá hay que leer lo que quedó en la base, en cualquiera de los dos.
+function parsearPeriodoAnioMes(texto) {
+  if (!texto) return null;
+  let m = texto.match(/^(\d{4})-(\d{2})$/);
+  if (m) return { anio: Number(m[1]), mes: Number(m[2]) };
+  m = texto.trim().toLowerCase().match(/^([a-záéíóúñ]+)\s+(\d{4})$/);
+  if (m && MESES_TEXTO_A_NUMERO[m[1]]) return { anio: Number(m[2]), mes: MESES_TEXTO_A_NUMERO[m[1]] };
+  return null;
+}
+
+function periodoAIso(periodo) {
+  return `${periodo.anio}-${String(periodo.mes).padStart(2, '0')}`;
+}
+
+// Créditos tipo='Abono' ligados a un recibo_detalle cuyo periodo_hasta declarado va más allá
+// del último CargoMensual que la cuenta tiene causado hoy -- el patrón exacto de "pago
+// adelantado" (ver comentario de la corrección 17 arriba). No es una lista fija: se recalcula
+// cada vez que corre este paso, así que si aparece un pago adelantado nuevo (real, posterior a
+// esta carga) esta consulta también lo encuentra -- por diseño, para que el paso siga sirviendo
+// más allá de esta corrida puntual.
+function candidatosPagoAdelantado(db) {
+  const maxCausadoPorCuenta = new Map(
+    db.prepare(`
+      SELECT cuenta_id, MAX(anio * 12 + (mes - 1)) AS cod
+      FROM cartera_movimientos WHERE tipo = 'CargoMensual' GROUP BY cuenta_id
+    `).all().map(f => [f.cuenta_id, f.cod])
+  );
+
+  const filas = db.prepare(`
+    SELECT cc.id AS creditoId, cc.cuenta_id AS cuentaId, cc.monto AS creditoMonto, cu.codigo,
+           rd.id AS detalleId, rd.periodo_desde, rd.periodo_hasta, r.numero_recibo AS numeroRecibo
+    FROM cuenta_creditos cc
+    JOIN recibo_detalles rd ON rd.id = cc.recibo_detalle_id
+    JOIN recibos r ON r.id = rd.recibo_id
+    JOIN cuentas cu ON cu.id = cc.cuenta_id
+    WHERE cc.tipo = 'Abono' AND rd.periodo_hasta IS NOT NULL
+    ORDER BY cu.codigo, r.numero_recibo
+  `).all();
+
+  const candidatos = [];
+  for (const f of filas) {
+    if (EXCLUSIONES_PAGO_ADELANTADO[f.codigo]) continue;
+    const desde = parsearPeriodoAnioMes(f.periodo_desde);
+    const hasta = parsearPeriodoAnioMes(f.periodo_hasta);
+    if (!desde || !hasta) continue;
+    const hastaCod = hasta.anio * 12 + (hasta.mes - 1);
+    const maxCod = maxCausadoPorCuenta.get(f.cuentaId);
+    if (maxCod !== undefined && hastaCod <= maxCod) continue; // ya no es "futuro": nada que hacer
+    candidatos.push({ ...f, desde, hasta });
+  }
+  return candidatos;
+}
+
+// Cuánto falta pagar en [desde, hasta] SIN causar nada todavía: para los meses que ya tienen
+// CargoMensual, lo realmente pendiente (monto menos lo imputado); para los que no, la tarifa
+// vigente en ese mes (lo que asegurarCausacion crearía). Si algún mes no tiene tarifa
+// configurada, cuenta como 0 -- asegurarCausacion tampoco podría causarlo, y ese hueco ya lo
+// reporta mesesSinTarifa por su cuenta; no es responsabilidad de esta corrección.
+function costoPeriodoSinCausar(db, pagoRepo, cuentaId, desde, hasta) {
+  const desdeCod = desde.anio * 12 + (desde.mes - 1);
+  const hastaCod = hasta.anio * 12 + (hasta.mes - 1);
+  let total = 0;
+  for (let cod = desdeCod; cod <= hastaCod; cod++) {
+    const anio = Math.floor(cod / 12), mes = (cod % 12) + 1;
+    const cargo = db.prepare(
+      `SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?`
+    ).get(cuentaId, anio, mes);
+    if (cargo) {
+      const cubierto = db.prepare(
+        `SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE cargo_id=?`
+      ).get(cargo.id).s;
+      total += Math.max(0, redondear(cargo.monto - cubierto));
+    } else {
+      const tarifa = pagoRepo.getCategoriaTarifaParaMes(cuentaId, anio, mes);
+      total += tarifa ? tarifa.tarifa_sostenimiento : 0;
+    }
+  }
+  return redondear(total);
+}
+
+// Cargos pendientes (con saldo > 0) dentro de [desde, hasta], para pasarlos como cargosElegidos
+// a redimirCredito -- se llama DESPUÉS de asegurarCausacion, cuando ya existen.
+function cargosPendientesEnRango(db, cuentaId, desde, hasta) {
+  const desdeCod = desde.anio * 12 + (desde.mes - 1);
+  const hastaCod = hasta.anio * 12 + (hasta.mes - 1);
+  return db.prepare(`
+    SELECT m.id, m.monto,
+      COALESCE((SELECT SUM(i.monto) FROM cartera_imputaciones i WHERE i.cargo_id = m.id), 0) AS cubierto
+    FROM cartera_movimientos m
+    WHERE m.cuenta_id = ? AND m.tipo = 'CargoMensual' AND (m.anio * 12 + (m.mes - 1)) BETWEEN ? AND ?
+  `).all(cuentaId, desdeCod, hastaCod)
+    .map(f => ({ id: f.id, pendiente: redondear(f.monto - f.cubierto) }))
+    .filter(f => esMayor(f.pendiente, 0));
+}
+
 function borrarCargoMensualDelAnio(db, cuentaId, anio) {
   return db.prepare("DELETE FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=?")
     .run(cuentaId, anio).changes;
@@ -464,8 +621,12 @@ function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, peri
 
 function ejecutarPaso9b({ dbService }) {
   const CarteraRepository = require('../../src/repositories/CarteraRepository');
+  const CarteraService = require('../../src/services/CarteraService');
+  const PagoRepository = require('../../src/repositories/PagoRepository');
   const db = dbService.getDb();
   const repo = new CarteraRepository(dbService);
+  const service = new CarteraService(dbService);
+  const pagoRepo = new PagoRepository(dbService);
 
   const idPorCodigo = new Map(
     db.prepare('SELECT id, codigo FROM cuentas').all().map(c => [normalizarCodigo(c.codigo), c.id])
@@ -488,6 +649,8 @@ function ejecutarPaso9b({ dbService }) {
   const limpiezaSuspendidas = [];
   let creditoR0942 = null;
   let recalculoR0831 = null;
+  const pagosAdelantados = [];
+  const pendientesManuales = [];
 
   const transaccion = db.transaction(() => {
     // 1. S03311: causar 2024 completo a 10.000
@@ -943,6 +1106,83 @@ function ejecutarPaso9b({ dbService }) {
 
       recalculoR0831 = { yaCorregido: false, abonos: resultados };
     }
+
+    // 17. PAGOS POR ADELANTADO -- ver candidatosPagoAdelantado() y el comentario de arriba.
+    //
+    // NUNCA borra ni reconstruye la imputación original del recibo (a diferencia de las
+    // correcciones 4-9/16, que sí lo hacen porque ahí la imputación vieja estaba mal desde el
+    // origen): acá lo que ya está imputado es correcto y no se toca -- incluido cualquier
+    // sobrante que el FIFO del paso10/una corrección anterior ya haya usado para pagar deuda
+    // vieja real (apertura opaca u otro cargo). Descubierto en la verificación de esta
+    // corrección (2026-08-14): borrar y reimputar desde cero, aunque preserva el TOTAL de
+    // plata, cambia A QUÉ se aplica -- si antes parte del sobrante pagaba una apertura opaca
+    // real y ahora el período recién causado absorbe todo el abono, esa apertura queda
+    // "despagada" de nuevo aunque nadie tocó esa deuda. El mecanismo seguro es
+    // CarteraService.redimirCredito (el mismo que ya usa el operador desde la pantalla) contra
+    // los cargos puntuales del período declarado -- nunca toca imputaciones existentes, solo
+    // agrega una nueva.
+    //
+    // Chequeo de seguridad ANTES de causar nada: si el crédito disponible de la cuenta no
+    // alcanza para cubrir lo que el período declarado necesita, es señal de que parte de esa
+    // plata ya se usó en otra cosa (deuda vieja real) o de que el recibo, en plata, nunca
+    // alcanzó para todo lo que dice cubrir -- en cualquiera de los dos casos hay algo que
+    // revisar con el talonario antes de tocar la cuenta, así que se deja intacta y se reporta
+    // en pendientesManuales en vez de causar meses que van a quedar a medio pagar.
+    for (const candidato of candidatosPagoAdelantado(db)) {
+      const necesario = costoPeriodoSinCausar(db, pagoRepo, candidato.cuentaId, candidato.desde, candidato.hasta);
+
+      if (!esMayor(necesario, 0)) {
+        pagosAdelantados.push({ codigo: candidato.codigo, numeroRecibo: candidato.numeroRecibo, yaCorregido: true });
+        continue;
+      }
+
+      const disponible = repo.getSaldoCreditoDisponible(candidato.cuentaId);
+      if (esMayor(necesario, disponible)) {
+        pendientesManuales.push({
+          codigo: candidato.codigo, numeroRecibo: candidato.numeroRecibo,
+          motivo: 'credito_insuficiente', disponible, necesario, faltante: redondear(necesario - disponible)
+        });
+        continue;
+      }
+
+      // asegurarCausacion causa TODO lo que falte desde el ancla real de la cuenta hasta
+      // `hasta` -- no solo lo que este recibo declaró. Si hay un hueco entre lo ya causado y el
+      // `desde` de este recibo (otros meses, sin relación con él, que tampoco se han causado
+      // nunca), asegurarCausacion los crearía igual -- y como cargosPendientesEnRango/
+      // redimirCredito de acá abajo solo cubren [desde, hasta], esos meses del hueco quedarían
+      // causados y sin pagar, deuda nueva que nadie pidió resolver (hallazgo real: C019, recibo
+      // con período Octubre-Diciembre 2026 mientras la cuenta solo tenía causado hasta julio --
+      // agosto y septiembre quedaban huérfanos). Se recalcula el máximo causado en este punto
+      // (no el de candidatosPagoAdelantado, que es de antes de este loop y puede estar
+      // desactualizado si una cuenta tiene más de un candidato) para decidir si hay hueco.
+      const maxCod = db.prepare(
+        `SELECT MAX(anio * 12 + (mes - 1)) AS cod FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual'`
+      ).get(candidato.cuentaId).cod;
+      const desdeCod = candidato.desde.anio * 12 + (candidato.desde.mes - 1);
+      if (maxCod !== null && desdeCod > maxCod + 1) {
+        pendientesManuales.push({
+          codigo: candidato.codigo, numeroRecibo: candidato.numeroRecibo,
+          motivo: 'hueco_antes_del_periodo_declarado',
+          ultimoCausado: decodificarPeriodo(maxCod), desdeDeclarado: candidato.desde
+        });
+        continue;
+      }
+
+      const causacion = service.asegurarCausacion(candidato.cuentaId, candidato.hasta.anio, candidato.hasta.mes);
+
+      const pendientesEnRango = cargosPendientesEnRango(db, candidato.cuentaId, candidato.desde, candidato.hasta);
+      const creditoInfo = db.prepare('SELECT fecha FROM cuenta_creditos WHERE id=?').get(candidato.creditoId);
+      const redencion = service.redimirCredito({
+        cuentaId: candidato.cuentaId, fecha: creditoInfo.fecha, monto: necesario,
+        modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: pendientesEnRango.map(c => c.id),
+        observaciones: OBSERVACION_PAGO_ADELANTADO
+      });
+
+      pagosAdelantados.push({
+        codigo: candidato.codigo, numeroRecibo: candidato.numeroRecibo, yaCorregido: false,
+        creados: causacion.creados, aplicado: redencion.aplicado, saldoRestante: redencion.saldoRestante
+      });
+    }
   });
   transaccion();
 
@@ -951,7 +1191,7 @@ function ejecutarPaso9b({ dbService }) {
     reasignacion2137, correccion2384, reimputacion2384, recalculoS010,
     correccionAperturaS044, correccionPeriodo2229, reimputacion2229,
     correccionS058, suspensionesSinCartera, inactivaS063, redencionR007,
-    limpiezaSuspendidas, creditoR0942, recalculoR0831
+    limpiezaSuspendidas, creditoR0942, recalculoR0831, pagosAdelantados, pendientesManuales
   };
 }
 
@@ -962,5 +1202,7 @@ module.exports = {
   CAUSACION_S058, OBSERVACION_CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, OBSERVACION_SUSPENSION_SIN_CARTERA,
   INACTIVA_FUSIONADA_S063, OBSERVACION_INACTIVA_S063, REDENCION_R007, OBSERVACION_REDENCION_R007,
   CUENTAS_SUSPENDIDAS_SIN_RECAUSAR, FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS,
-  CREDITO_R0942, OBSERVACION_CREDITO_R0942, RECALCULO_R0831, OBSERVACION_RECALCULO_R0831
+  CREDITO_R0942, OBSERVACION_CREDITO_R0942, RECALCULO_R0831, OBSERVACION_RECALCULO_R0831,
+  EXCLUSIONES_PAGO_ADELANTADO, OBSERVACION_PAGO_ADELANTADO, candidatosPagoAdelantado,
+  parsearPeriodoAnioMes, periodoAIso
 };
