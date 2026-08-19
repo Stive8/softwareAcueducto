@@ -336,6 +336,168 @@ const REDENCION_R007 = {
   fecha: '2024-03-16'
 };
 
+// 18. R007: el saldo a favor restante ($80.000, después de la corrección 13) no es un sobrepago
+//    genuino sin destino -- es el resto del recibo 2470 (11-abr-2026, "ENERO A DICIEMBRE 2026",
+//    $192.000). paso10-imputacion.js solo encontró causado enero-julio 2026 ($112.000); el
+//    sobrante ($80.000) cayó al FIFO general de la cuenta y pagó el hueco de julio-diciembre
+//    2024 en vez de quedarse cubriendo su propio año. Investigado 2026-08-18: agosto-diciembre
+//    2026 (5 meses x $16.000 = $80.000, exacto) nunca se causaron -- ni en la carga inicial
+//    (tope real julio 2026) ni después, porque no hay causación automática -- así que
+//    calcularAPagar los sigue mostrando "a pagar" en vivo pese a que el recibo ya los pagó.
+//    Mismo mecanismo que la corrección 17 (asegurarCausacion + redimirCredito, MesesEspecificos)
+//    pero bespoke, no query-driven: este crédito no está ligado al recibo 2470
+//    (recibo_detalle_id es null, viene de la apertura opaca de 2023-12-31), así que
+//    candidatosPagoAdelantado() nunca lo iba a encontrar solo.
+const OBSERVACION_REDENCION_R007_2026 =
+  'Redime los $80.000 de credito restantes (ver correccion 13) contra agosto-diciembre 2026, el ' +
+  'tramo que el recibo 2470 (11-abr-2026, "ENERO A DICIEMBRE 2026", $192.000) declaro pagar pero ' +
+  'que paso10-imputacion.js nunca causo -- el sobrante de ese pago se desvio por FIFO hacia el ' +
+  'hueco de 2024 en vez de quedarse en su propio año. Investigado 2026-08-18. Deja cubierto hasta ' +
+  'diciembre 2026, $0 a pagar, $0 de saldo a favor.';
+
+const REDENCION_R007_2026 = {
+  codigoCuenta: 'R007',
+  hasta: { anio: 2026, mes: 12 },
+  montoARedimir: 80000,
+  fecha: '2026-04-11'
+};
+
+// 19. REAJUSTE 2024 sin período: cuando la tarifa subió de $5.000 a $10.000 en enero 2024,
+//    varias cuentas pagaron primero a la tarifa vieja y llevaron un segundo recibo "de
+//    reajuste" para completar la diferencia -- patrón encontrado en 47 recibos de 32 cuentas
+//    (investigado 2026-08-19). De esos, 13 quedaron sin período declarado en el concepto
+//    (texto tipo "PAGO REAJUSTE 2024", sin mes explícito) -- 10 ya se habían imputado bien
+//    (procesados antes del cambio de diseño 2026-08-04, que exige período para que el FIFO de
+//    respaldo corra); solo 3 quedaron sin redimir, con evidencia verificada contra el
+//    talonario físico:
+//    - S0334 (recibo 2067, 1-feb-2025, $60.000, "PAGO REAJUSTE 2024"): el recibo anterior
+//      (1646, 27-ene-2024) dice literalmente "PENDIENTE REAJUSTE 2024" -- pagó 12 meses a
+//      $5.000 (tarifa vieja) y quedó debiendo la diferencia. $60.000 calza exacto contra el
+//      hueco real julio-diciembre 2024 (6 meses x $10.000).
+//    - S039 (recibo 2068, 1-feb-2025, $60.000, "PAGO REAJUSTE 2024"): mismo patrón textual,
+//      mismo tesorero, mismo día que S0334. El hueco real (junio-diciembre 2024) es de
+//      $61.000 -- junio quedó con $1.000 pendiente (el pago inicial fue $59.000, un mes menos
+//      que S0334) -- y esta cuenta además tiene, aparte, un crédito de apertura de $1.000
+//      (2023-12-31) sin relación con el reajuste. Los dos créditos juntos ($60.000 + $1.000)
+//      calzan exacto contra el hueco de $61.000.
+//    - S0271 (recibo 2021, 28-dic-2024, $60.000, "PAGO REAJUSTE 2024"): a diferencia de las
+//      dos anteriores, acá el pago inicial (recibo 1693) ya estaba a la tarifa vigente de
+//      $10.000 -- no hay "tarifa vieja" que reajustar. Solo $20.000 de los $60.000 tienen un
+//      hueco real contra el cual calzar (noviembre-diciembre 2024, el tramo que ni el recibo
+//      1693 -- que llega hasta octubre 2024 -- ni el 1984 -- que empieza en enero 2025 --
+//      cubren). Los otros $40.000 no tienen evidencia de a qué corresponden (la cuenta además
+//      arrastra $500.000 de deuda opaca anterior a 2024, sin relación con esto): se redimen
+//      solo los $20.000 que calzan, y el resto queda como crédito disponible sin tocar,
+//      marcado para que la junta lo revise -- mismo tratamiento que los 4 créditos "no
+//      consumidos" ya documentados (S0331, R028, R070, R086).
+const REDENCIONES_REAJUSTE_2024 = [
+  {
+    codigoCuenta: 'S0334', desde: { anio: 2024, mes: 7 }, hasta: { anio: 2024, mes: 12 },
+    montoARedimir: 60000, fecha: '2025-02-01',
+    observaciones:
+      'Redime $60.000 del recibo 2067 ("PAGO REAJUSTE 2024") contra julio-diciembre 2024: el ' +
+      'recibo 1646 pagó 12 meses a la tarifa vieja ($5.000, "PENDIENTE REAJUSTE 2024") y este ' +
+      'completa la diferencia a la tarifa vigente ($10.000). Sin período declarado, había ' +
+      'quedado como credito sin aplicar. Investigado 2026-08-19.'
+  },
+  {
+    codigoCuenta: 'S039', desde: { anio: 2024, mes: 6 }, hasta: { anio: 2024, mes: 12 },
+    montoARedimir: 61000, fecha: '2025-02-01',
+    observaciones:
+      'Redime $61.000 ($60.000 del recibo 2068 "PAGO REAJUSTE 2024" + $1.000 de un credito de ' +
+      'apertura aparte) contra junio-diciembre 2024: el recibo 1645 pagó 12 meses a la tarifa ' +
+      'vieja ($5.000, "PENDIENTE REAJUSTE 2024") y este completa la diferencia a la tarifa ' +
+      'vigente ($10.000). Sin período declarado, había quedado como credito sin aplicar. ' +
+      'Investigado 2026-08-19.'
+  },
+  {
+    codigoCuenta: 'S0271', desde: { anio: 2024, mes: 11 }, hasta: { anio: 2024, mes: 12 },
+    montoARedimir: 20000, fecha: '2024-12-28',
+    observaciones:
+      'Redime $20.000 (de los $60.000) del recibo 2021 ("PAGO REAJUSTE 2024") contra ' +
+      'noviembre-diciembre 2024, el unico hueco real que calza. Los $40.000 restantes no ' +
+      'tienen evidencia de a que corresponden y quedan como credito disponible, para revision ' +
+      'de la junta. Investigado 2026-08-19.'
+  }
+];
+
+// 20. S023: el recibo 1627 (18-ene-2024, "PAGA DEUDA PENDIENTE", $15.000) declaraba pagar la
+//    deuda opaca de apertura (identica en monto: $15.000 al 31-dic-2023), pero al no tener
+//    periodo declarado el sistema lo guardo integro como credito sin aplicar. El siguiente
+//    recibo (1759, 2-mar-2024, "ENERO A JUNIO 2024", $100.000) barrio por FIFO cronologico esa
+//    misma deuda opaca de apertura + el ajuste de categoria de $4.000, dejando julio 2024 (el
+//    mes que ese FIFO desplazo, "sandwich" entre junio 2024 cubierto y agosto 2024 cubierto por
+//    el recibo 2029, 28-dic-2024, "AGOSTO A DICIEMBRE 2024") con $15.000 sin cubrir. El credito
+//    varado calza exacto contra ese hueco. Investigado 2026-08-19 contra el talonario fisico.
+//    Aplicada contra la base real 2026-08-19: como con la correccion 19, paso11-conciliacion.js
+//    muestra un residuo pequeño ($1.000) tras aplicarla, porque su target usa el snapshot
+//    congelado del 14-ago-2024 (snapshot_captura), no el credito en vivo -- mismo mecanismo de
+//    fondo que las diferencias ya documentadas de S0334/S039/S0271, no un error de esta
+//    correccion (verificado con getEstadoCartera: saldoAFavor=0, deudaExigible correcta).
+const OBSERVACION_REDENCION_S023 =
+  'Redime $15.000 del recibo 1627 (18-ene-2024, "PAGA DEUDA PENDIENTE") contra julio 2024, el ' +
+  'unico mes con hueco real. El recibo declaraba pagar la deuda opaca pre-2024 ($15.000, monto ' +
+  'identico a la apertura opaca), pero el sistema lo guardo integro como credito sin aplicar ' +
+  '(sin periodo declarado). El siguiente recibo (1759, 2-mar-2024, "ENERO A JUNIO 2024", ' +
+  '$100.000) barrio por FIFO esa misma deuda opaca de apertura + el ajuste de categoria, dejando ' +
+  'julio 2024 con $15.000 sin cubrir cuando el recibo 2029 (28-dic-2024) siguio con ' +
+  'agosto-diciembre 2024. El credito de $15.000 calza exacto contra ese hueco. Investigado ' +
+  '2026-08-19.';
+
+const REDENCION_S023 = {
+  codigoCuenta: 'S023',
+  desde: { anio: 2024, mes: 7 },
+  hasta: { anio: 2024, mes: 7 },
+  montoARedimir: 15000,
+  fecha: '2024-01-18'
+};
+
+// 21-22. Dos huecos mas, cada uno con un recibo cuyo propio concepto nombra el mes exacto del
+//    hueco -- misma calidad de evidencia que S023, investigados 2026-08-19 contra el talonario
+//    fisico. A diferencia de S023 (calce exacto), en ambos el credito disponible excede el monto
+//    a redimir: se redime solo lo que calza contra el hueco real y el resto queda documentado
+//    como credito sin tocar, para revision de la junta (mismo tratamiento que S0271, correccion 19).
+//    - S0501 (recibo 1793, 6-abr-2024, $20.000, "CU0TA DE SOSTENIMIENTO MARZO Y ABRIL"): el
+//      concepto declara dos meses (marzo Y abril 2024) pero el periodo se guardo como un solo
+//      mes (marzo=marzo), asi que el recibo entero cayo a credito sin aplicar. Marzo 2024 se
+//      termino cubriendo por otra via (el sobrante del recibo 2194, "FEBRERO A MARZO 2025",
+//      11-may-2025) antes de que este credito se tocara, asi que solo abril 2024 sigue siendo un
+//      hueco real ($10.000); los otros $10.000 no tienen destino claro.
+//    - S022 (recibo 2394, 24-ene-2026, $100.000, concepto real "...Y ENERO A FEBRERO 2026"): el
+//      periodo guardado en la base no capturo esa segunda clausula, y el FIFO de respaldo desvio
+//      2 de los 10 meses declarados hacia una deuda vieja real (febrero-marzo 2024, que si estaba
+//      pendiente) en vez de completar hasta febrero 2026 como el concepto promete. Enero-febrero
+//      2026 quedan con $20.000 sin cubrir, calzando exacto contra $20.000 de los $100.000 en
+//      credito varado que arrastran dos recibos "ABONO A LA DEUDA" sin periodo (1692 y 1813,
+//      ambos de 2024). Los $80.000 restantes no tienen destino claro.
+//    Aplicadas contra la base real 2026-08-19: S0501 concilia exacto ($0). S022 muestra un
+//    residuo de -$10.000 en paso11-conciliacion.js -- mismo mecanismo del snapshot congelado del
+//    14-ago-2024 ya documentado en S023/S0334/S039/S0271, no un error de esta correccion
+//    (verificado con getEstadoCartera: cubiertoHasta avanza sin huecos, saldoAFavor documentado).
+const REDENCIONES_HUECO_TEXTUAL_2026 = [
+  {
+    codigoCuenta: 'S0501', desde: { anio: 2024, mes: 4 }, hasta: { anio: 2024, mes: 4 },
+    montoARedimir: 10000, fecha: '2024-04-06',
+    observaciones:
+      'Redime $10.000 (de los $20.000) del recibo 1793 ("CU0TA DE SOSTENIMIENTO MARZO Y ABRIL") ' +
+      'contra abril 2024, el unico mes con hueco real -- marzo 2024 ya se cubrio por otra via ' +
+      '(recibo 2194) antes de que este credito se tocara. Los $10.000 restantes no tienen ' +
+      'evidencia de a que corresponden y quedan como credito disponible, para revision de la ' +
+      'junta. Investigado 2026-08-19.'
+  },
+  {
+    codigoCuenta: 'S022', desde: { anio: 2026, mes: 1 }, hasta: { anio: 2026, mes: 2 },
+    montoARedimir: 20000, fecha: '2026-01-24',
+    observaciones:
+      'Redime $20.000 (de los $100.000) de credito varado (recibos 1692 y 1813, "ABONO A LA ' +
+      'DEUDA" sin periodo, ambos de 2024) contra enero-febrero 2026 -- el tramo que el recibo ' +
+      '2394 ("...Y ENERO A FEBRERO 2026") declaro pagar pero el FIFO de respaldo desvio hacia ' +
+      'una deuda vieja real de 2024. Los $80.000 restantes no tienen evidencia de a que ' +
+      'corresponden y quedan como credito disponible, para revision de la junta. Investigado ' +
+      '2026-08-19.'
+  }
+];
+
 const FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS = 'Corrección: meses desde 2024-01 causados a $5.000';
 const CUENTAS_SUSPENDIDAS_SIN_RECAUSAR = ['R002', 'R0501', 'R0971', 'S004', 'S009', 'S0141', 'S0441'];
 
@@ -646,6 +808,10 @@ function ejecutarPaso9b({ dbService }) {
   const suspensionesSinCartera = [];
   let inactivaS063 = null;
   let redencionR007 = null;
+  let redencionR007Adelantado = null;
+  let redencionS023 = null;
+  const redencionesHuecoTextual2026 = [];
+  const redencionesReajuste2024 = [];
   const limpiezaSuspendidas = [];
   let creditoR0942 = null;
   let recalculoR0831 = null;
@@ -1183,6 +1349,202 @@ function ejecutarPaso9b({ dbService }) {
         creados: causacion.creados, aplicado: redencion.aplicado, saldoRestante: redencion.saldoRestante
       });
     }
+
+    // 18. Ver comentario junto a REDENCION_R007_2026 más arriba.
+    //
+    // Detección de idempotencia: si diciembre 2026 ya existe y no tiene nada pendiente, esta
+    // corrección ya corrió (o algo más lo cerró) -- se detiene sin volver a causar ni redimir.
+    // Si diciembre 2026 no existe todavía, se verifica que el crédito disponible sea EXACTAMENTE
+    // el esperado antes de causar y redimir nada -- mismo criterio de "no adivinar" que la
+    // corrección 13: cualquier otro valor es un estado inesperado y se detiene con un error.
+    const cuentaR007b = idPorCodigo.get(normalizarCodigo(REDENCION_R007_2026.codigoCuenta));
+    if (cuentaR007b === undefined) throw new Error('R007: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+    const cargoDic2026R007 = db.prepare(
+      `SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?`
+    ).get(cuentaR007b, REDENCION_R007_2026.hasta.anio, REDENCION_R007_2026.hasta.mes);
+
+    if (cargoDic2026R007) {
+      const cubiertoDic2026R007 = db.prepare(
+        `SELECT COALESCE(SUM(monto),0) AS total FROM cartera_imputaciones WHERE cargo_id=?`
+      ).get(cargoDic2026R007.id).total;
+      const pendienteDic2026R007 = redondear(cargoDic2026R007.monto - cubiertoDic2026R007);
+
+      if (!esMayor(pendienteDic2026R007, 0)) {
+        redencionR007Adelantado = { yaCorregido: true };
+      } else {
+        throw new Error(
+          `R007: diciembre 2026 ya existe pero tiene $${pendienteDic2026R007} pendientes -- ` +
+          'estado inesperado, revisar antes de aplicar a ciegas'
+        );
+      }
+    } else {
+      const disponibleR007b = repo.getSaldoCreditoDisponible(cuentaR007b);
+      if (Math.abs(disponibleR007b - REDENCION_R007_2026.montoARedimir) >= 1) {
+        throw new Error(
+          `R007: se esperaba $${REDENCION_R007_2026.montoARedimir} de credito disponible antes de ` +
+          `esta correccion, hay $${disponibleR007b} -- revisar antes de aplicar a ciegas`
+        );
+      }
+
+      const causacionR007b = service.asegurarCausacion(
+        cuentaR007b, REDENCION_R007_2026.hasta.anio, REDENCION_R007_2026.hasta.mes
+      );
+      const pendientesAgostoDiciembre2026 = cargosPendientesEnRango(
+        db, cuentaR007b, { anio: 2026, mes: 8 }, REDENCION_R007_2026.hasta
+      );
+      const redencionR007b = service.redimirCredito({
+        cuentaId: cuentaR007b, fecha: REDENCION_R007_2026.fecha, monto: REDENCION_R007_2026.montoARedimir,
+        modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: pendientesAgostoDiciembre2026.map(c => c.id),
+        observaciones: OBSERVACION_REDENCION_R007_2026
+      });
+
+      redencionR007Adelantado = {
+        yaCorregido: false, creados: causacionR007b.creados,
+        aplicado: redencionR007b.aplicado, saldoRestante: redencionR007b.saldoRestante
+      };
+    }
+
+    // 19. Ver comentario junto a REDENCIONES_REAJUSTE_2024 más arriba.
+    //
+    // Detección de idempotencia: si el último mes del rango ya no tiene nada pendiente, esta
+    // redención ya corrió. Si el crédito disponible no alcanza el monto exacto a redimir antes
+    // de empezar, es un estado inesperado -- se detiene en vez de redimir lo que sí haya.
+    for (const r of REDENCIONES_REAJUSTE_2024) {
+      const cuentaId = idPorCodigo.get(normalizarCodigo(r.codigoCuenta));
+      if (cuentaId === undefined) throw new Error(`${r.codigoCuenta}: no existe en la base -- ¿corrieron los pasos 1-2?`);
+
+      const cargoUltimoMes = db.prepare(
+        `SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?`
+      ).get(cuentaId, r.hasta.anio, r.hasta.mes);
+      if (!cargoUltimoMes) {
+        throw new Error(`${r.codigoCuenta}: no tiene CargoMensual de ${r.hasta.anio}-${r.hasta.mes} -- ¿corrieron los pasos 9/10?`);
+      }
+      const cubiertoUltimoMes = db.prepare(
+        `SELECT COALESCE(SUM(monto),0) AS total FROM cartera_imputaciones WHERE cargo_id=?`
+      ).get(cargoUltimoMes.id).total;
+      const pendienteUltimoMes = redondear(cargoUltimoMes.monto - cubiertoUltimoMes);
+
+      if (!esMayor(pendienteUltimoMes, 0)) {
+        redencionesReajuste2024.push({ codigo: r.codigoCuenta, yaCorregido: true });
+        continue;
+      }
+
+      const disponible = repo.getSaldoCreditoDisponible(cuentaId);
+      if (Math.abs(disponible - r.montoARedimir) >= 1 && disponible < r.montoARedimir) {
+        throw new Error(
+          `${r.codigoCuenta}: se esperaba al menos $${r.montoARedimir} de credito disponible antes ` +
+          `de esta correccion, hay $${disponible} -- revisar antes de aplicar a ciegas`
+        );
+      }
+
+      const pendientesEnRango = cargosPendientesEnRango(db, cuentaId, r.desde, r.hasta);
+      const redencion = service.redimirCredito({
+        cuentaId, fecha: r.fecha, monto: r.montoARedimir,
+        modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: pendientesEnRango.map(c => c.id),
+        observaciones: r.observaciones
+      });
+
+      redencionesReajuste2024.push({
+        codigo: r.codigoCuenta, yaCorregido: false,
+        aplicado: redencion.aplicado, saldoRestante: redencion.saldoRestante
+      });
+    }
+
+    // 20. Ver comentario junto a REDENCION_S023 más arriba.
+    //
+    // Misma detección de idempotencia que la corrección 19: si julio 2024 ya no tiene nada
+    // pendiente, esta redención ya corrió. Si el crédito disponible no coincide exacto con el
+    // monto a redimir antes de empezar, es un estado inesperado -- se detiene.
+    {
+      const cuentaS023 = idPorCodigo.get(normalizarCodigo(REDENCION_S023.codigoCuenta));
+      if (cuentaS023 === undefined) {
+        throw new Error('S023: no existe en la base -- ¿corrieron los pasos 1-2?');
+      }
+
+      const cargoJulioS023 = db.prepare(
+        `SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?`
+      ).get(cuentaS023, REDENCION_S023.hasta.anio, REDENCION_S023.hasta.mes);
+      if (!cargoJulioS023) {
+        throw new Error(
+          `S023: no tiene CargoMensual de ${REDENCION_S023.hasta.anio}-${REDENCION_S023.hasta.mes} -- ¿corrieron los pasos 9/10?`
+        );
+      }
+      const cubiertoJulioS023 = db.prepare(
+        `SELECT COALESCE(SUM(monto),0) AS total FROM cartera_imputaciones WHERE cargo_id=?`
+      ).get(cargoJulioS023.id).total;
+      const pendienteJulioS023 = redondear(cargoJulioS023.monto - cubiertoJulioS023);
+
+      if (!esMayor(pendienteJulioS023, 0)) {
+        redencionS023 = { yaCorregido: true };
+      } else {
+        const disponibleS023 = repo.getSaldoCreditoDisponible(cuentaS023);
+        if (Math.abs(disponibleS023 - REDENCION_S023.montoARedimir) >= 1) {
+          throw new Error(
+            `S023: se esperaba $${REDENCION_S023.montoARedimir} de credito disponible antes de ` +
+            `esta correccion, hay $${disponibleS023} -- revisar antes de aplicar a ciegas`
+          );
+        }
+
+        const pendientesJulioS023 = cargosPendientesEnRango(db, cuentaS023, REDENCION_S023.desde, REDENCION_S023.hasta);
+        const redencion = service.redimirCredito({
+          cuentaId: cuentaS023, fecha: REDENCION_S023.fecha, monto: REDENCION_S023.montoARedimir,
+          modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: pendientesJulioS023.map(c => c.id),
+          observaciones: OBSERVACION_REDENCION_S023
+        });
+
+        redencionS023 = {
+          yaCorregido: false,
+          aplicado: redencion.aplicado, saldoRestante: redencion.saldoRestante
+        };
+      }
+    }
+
+    // 21-22. Ver comentario junto a REDENCIONES_HUECO_TEXTUAL_2026 más arriba.
+    //
+    // Misma detección de idempotencia y mismo chequeo "al menos" que la corrección 19: si el
+    // último mes del rango ya no tiene nada pendiente, ya corrió. Si el crédito disponible no
+    // alcanza el monto a redimir, es un estado inesperado -- se detiene.
+    for (const r of REDENCIONES_HUECO_TEXTUAL_2026) {
+      const cuentaId = idPorCodigo.get(normalizarCodigo(r.codigoCuenta));
+      if (cuentaId === undefined) throw new Error(`${r.codigoCuenta}: no existe en la base -- ¿corrieron los pasos 1-2?`);
+
+      const cargoUltimoMes = db.prepare(
+        `SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?`
+      ).get(cuentaId, r.hasta.anio, r.hasta.mes);
+      if (!cargoUltimoMes) {
+        throw new Error(`${r.codigoCuenta}: no tiene CargoMensual de ${r.hasta.anio}-${r.hasta.mes} -- ¿corrieron los pasos 9/10?`);
+      }
+      const cubiertoUltimoMes = db.prepare(
+        `SELECT COALESCE(SUM(monto),0) AS total FROM cartera_imputaciones WHERE cargo_id=?`
+      ).get(cargoUltimoMes.id).total;
+      const pendienteUltimoMes = redondear(cargoUltimoMes.monto - cubiertoUltimoMes);
+
+      if (!esMayor(pendienteUltimoMes, 0)) {
+        redencionesHuecoTextual2026.push({ codigo: r.codigoCuenta, yaCorregido: true });
+        continue;
+      }
+
+      const disponible = repo.getSaldoCreditoDisponible(cuentaId);
+      if (Math.abs(disponible - r.montoARedimir) >= 1 && disponible < r.montoARedimir) {
+        throw new Error(
+          `${r.codigoCuenta}: se esperaba al menos $${r.montoARedimir} de credito disponible antes ` +
+          `de esta correccion, hay $${disponible} -- revisar antes de aplicar a ciegas`
+        );
+      }
+
+      const pendientesEnRango = cargosPendientesEnRango(db, cuentaId, r.desde, r.hasta);
+      const redencion = service.redimirCredito({
+        cuentaId, fecha: r.fecha, monto: r.montoARedimir,
+        modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: pendientesEnRango.map(c => c.id),
+        observaciones: r.observaciones
+      });
+
+      redencionesHuecoTextual2026.push({
+        codigo: r.codigoCuenta, yaCorregido: false,
+        aplicado: redencion.aplicado, saldoRestante: redencion.saldoRestante
+      });
+    }
   });
   transaccion();
 
@@ -1190,7 +1552,8 @@ function ejecutarPaso9b({ dbService }) {
     s03311Creados, tarifaCorregida, propietarioS0244,
     reasignacion2137, correccion2384, reimputacion2384, recalculoS010,
     correccionAperturaS044, correccionPeriodo2229, reimputacion2229,
-    correccionS058, suspensionesSinCartera, inactivaS063, redencionR007,
+    correccionS058, suspensionesSinCartera, inactivaS063, redencionR007, redencionR007Adelantado,
+    redencionesReajuste2024, redencionS023, redencionesHuecoTextual2026,
     limpiezaSuspendidas, creditoR0942, recalculoR0831, pagosAdelantados, pendientesManuales
   };
 }
@@ -1201,6 +1564,8 @@ module.exports = {
   CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229, OBSERVACION_APERTURA_S044, reimputarAbono,
   CAUSACION_S058, OBSERVACION_CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, OBSERVACION_SUSPENSION_SIN_CARTERA,
   INACTIVA_FUSIONADA_S063, OBSERVACION_INACTIVA_S063, REDENCION_R007, OBSERVACION_REDENCION_R007,
+  REDENCION_R007_2026, OBSERVACION_REDENCION_R007_2026, REDENCIONES_REAJUSTE_2024,
+  REDENCION_S023, OBSERVACION_REDENCION_S023, REDENCIONES_HUECO_TEXTUAL_2026,
   CUENTAS_SUSPENDIDAS_SIN_RECAUSAR, FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS,
   CREDITO_R0942, OBSERVACION_CREDITO_R0942, RECALCULO_R0831, OBSERVACION_RECALCULO_R0831,
   EXCLUSIONES_PAGO_ADELANTADO, OBSERVACION_PAGO_ADELANTADO, candidatosPagoAdelantado,

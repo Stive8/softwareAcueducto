@@ -7,6 +7,7 @@ const {
   REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
   CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229,
   CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, INACTIVA_FUSIONADA_S063, REDENCION_R007,
+  REDENCION_R007_2026, REDENCIONES_REAJUSTE_2024, REDENCION_S023, REDENCIONES_HUECO_TEXTUAL_2026,
   CUENTAS_SUSPENDIDAS_SIN_RECAUSAR, FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS,
   CREDITO_R0942, RECALCULO_R0831, reimputarAbono
 } = require('./paso9b-correcciones');
@@ -184,12 +185,34 @@ function sembrarTodas(db) {
 
   // --- R007: crédito de apertura ($92.000) sin tocar + diciembre 2024 con $12.000 pendientes
   // (cubierto parcial $4.000, simulando el abono de 2026 que llegó hasta ahí por FIFO) --
-  // reproduce el estado real encontrado en producción antes de la corrección 13.
+  // reproduce el estado real encontrado en producción antes de la corrección 13. Además, todos
+  // los demás meses de enero 2024 a julio 2026 vienen causados y pagados (categoría "Finca con
+  // piscina", $16.000, la real) para reproducir el estado real ANTES de la corrección 18:
+  // agosto-diciembre 2026 nunca se causaron, y son justo los 5 meses (5 x $16.000 = $80.000)
+  // que la corrección 18 debe causar y cubrir con el resto del crédito.
+  const categoriaPiscinaId = db.prepare(`SELECT id FROM categorias WHERE nombre='Finca con piscina'`).get().id;
   ids.R007 = sembrarCuenta(db, 'R007');
-  const cargoDic2024R007Id = repo.crearMovimiento({
-    cuentaId: ids.R007, fecha: '2024-12-01', tipo: 'CargoMensual', exigible: 1, monto: 16000, anio: 2024, mes: 12
+  db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2024-01-01')`)
+    .run(ids.R007, categoriaPiscinaId);
+
+  const abonoPagosR007Id = repo.crearMovimiento({
+    cuentaId: ids.R007, fecha: '2024-03-16', tipo: 'Abono', exigible: 1, monto: -480000
   });
+  let cargoDic2024R007Id = null;
+  for (let cod = 2024 * 12; cod <= 2026 * 12 + 6; cod++) {
+    const anio = Math.floor(cod / 12), mes = (cod % 12) + 1;
+    const cargoId = repo.crearMovimiento({
+      cuentaId: ids.R007, fecha: `${anio}-${String(mes).padStart(2, '0')}-01`,
+      tipo: 'CargoMensual', exigible: 1, monto: 16000, anio, mes
+    });
+    if (anio === 2024 && mes === 12) {
+      cargoDic2024R007Id = cargoId; // se deja parcialmente pendiente, ver más abajo
+    } else {
+      repo.crearImputacion({ abonoId: abonoPagosR007Id, cargoId, monto: 16000 });
+    }
+  }
   ids.cargoDic2024R007Id = cargoDic2024R007Id;
+
   const abono2026R007Id = repo.crearMovimiento({
     cuentaId: ids.R007, fecha: '2026-04-11', tipo: 'Abono', exigible: 1, monto: -4000
   });
@@ -197,6 +220,118 @@ function sembrarTodas(db) {
   ids.creditoAperturaR007Id = repo.crearCredito({
     cuentaId: ids.R007, tipo: 'Abono', monto: 92000, fecha: '2023-12-31',
     observaciones: 'Apertura opaca negativa al 31/12/2023: saldo a favor anterior al corte, redimible contra deuda de 2024+ (retrofit 2026-08-04)'
+  });
+
+  // --- S0334 y S039 (corrección 19): patrón "reajuste 2024 sin período" -- pagaron 12 meses
+  // a la tarifa vieja y llevaron un segundo recibo, sin período declarado, a completar la
+  // diferencia. Se reproduce solo el tramo relevante (los meses del hueco, sin pagar) más el
+  // crédito suelto -- igual de minimalista que el seed de R007 para la corrección 13.
+  ids.S0334 = sembrarCuenta(db, 'S0334');
+  for (let mes = 7; mes <= 12; mes++) {
+    repo.crearMovimiento({ cuentaId: ids.S0334, fecha: `2024-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes });
+  }
+  const r2067 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 2067, cuentaId: ids.S0334, fecha: '2025-02-01', valor: 60000, concepto: 'PAGO REAJUSTE 2024'
+  });
+  repo.crearMovimiento({ cuentaId: ids.S0334, fecha: '2025-02-01', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: r2067.detalleId });
+  ids.creditoS0334Id = repo.crearCredito({
+    cuentaId: ids.S0334, tipo: 'Abono', monto: 60000, fecha: '2025-02-01', reciboDetalleId: r2067.detalleId,
+    observaciones: 'Sobrante de imputación del recibo 2067: crédito no aplicado'
+  });
+
+  // S039: junio 2024 queda con $1.000 pendiente (a diferencia de S0334, donde el mes anterior
+  // al hueco cierra en $0) y tiene, aparte, un crédito de apertura de $1.000 sin relación con
+  // el reajuste -- los dos créditos juntos ($60.000 + $1.000) calzan contra el hueco real de
+  // $61.000 (junio parcial + julio-diciembre completo).
+  ids.S039 = sembrarCuenta(db, 'S039');
+  const cargoJunioS039Id = repo.crearMovimiento({ cuentaId: ids.S039, fecha: '2024-06-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 6 });
+  const abonoParcialJunioS039Id = repo.crearMovimiento({ cuentaId: ids.S039, fecha: '2024-01-27', tipo: 'Abono', exigible: 1, monto: -9000 });
+  repo.crearImputacion({ abonoId: abonoParcialJunioS039Id, cargoId: cargoJunioS039Id, monto: 9000 });
+  for (let mes = 7; mes <= 12; mes++) {
+    repo.crearMovimiento({ cuentaId: ids.S039, fecha: `2024-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes });
+  }
+  ids.creditoAperturaS039Id = repo.crearCredito({
+    cuentaId: ids.S039, tipo: 'Abono', monto: 1000, fecha: '2023-12-31',
+    observaciones: 'Apertura opaca negativa al 31/12/2023: saldo a favor anterior al corte, redimible contra deuda de 2024+ (retrofit 2026-08-04)'
+  });
+  const r2068 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 2068, cuentaId: ids.S039, fecha: '2025-02-01', valor: 60000, concepto: 'PAGO REAJUSTE 2024'
+  });
+  repo.crearMovimiento({ cuentaId: ids.S039, fecha: '2025-02-01', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: r2068.detalleId });
+  ids.creditoS039Id = repo.crearCredito({
+    cuentaId: ids.S039, tipo: 'Abono', monto: 60000, fecha: '2025-02-01', reciboDetalleId: r2068.detalleId,
+    observaciones: 'Sobrante de imputación del recibo 2068: crédito no aplicado'
+  });
+
+  // --- S0271 (corrección 19, caso parcial): el recibo de reajuste trae $60.000 pero solo
+  // $20.000 calzan contra un hueco real (noviembre-diciembre 2024) -- los otros $40.000 no
+  // tienen destino claro y deben quedar sin tocar.
+  ids.S0271 = sembrarCuenta(db, 'S0271');
+  for (const mes of [11, 12]) {
+    repo.crearMovimiento({ cuentaId: ids.S0271, fecha: `2024-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes });
+  }
+  const r2021 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 2021, cuentaId: ids.S0271, fecha: '2024-12-28', valor: 60000, concepto: 'PAGO REAJUSTE 2024'
+  });
+  repo.crearMovimiento({ cuentaId: ids.S0271, fecha: '2024-12-28', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: r2021.detalleId });
+  ids.creditoS0271Id = repo.crearCredito({
+    cuentaId: ids.S0271, tipo: 'Abono', monto: 60000, fecha: '2024-12-28', reciboDetalleId: r2021.detalleId,
+    observaciones: 'Sobrante de imputación del recibo 2021: crédito no aplicado'
+  });
+
+  // --- S023 (corrección 20): el recibo 1627 ("PAGA DEUDA PENDIENTE", sin período) declaraba
+  // pagar la deuda opaca de apertura pero quedó como crédito sin aplicar; el siguiente recibo
+  // barrió esa misma deuda por FIFO y dejó julio 2024 con $15.000 sin cubrir -- mismo monto
+  // exacto que el crédito varado. Se reproduce solo el mes del hueco más el crédito.
+  ids.S023 = sembrarCuenta(db, 'S023');
+  repo.crearMovimiento({ cuentaId: ids.S023, fecha: '2024-07-01', tipo: 'CargoMensual', exigible: 1, monto: 15000, anio: 2024, mes: 7 });
+  const r1627 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 1627, cuentaId: ids.S023, fecha: '2024-01-18', valor: 15000, concepto: 'PAGA DEUDA PENDIENTE'
+  });
+  repo.crearMovimiento({ cuentaId: ids.S023, fecha: '2024-01-18', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: r1627.detalleId });
+  ids.creditoS023Id = repo.crearCredito({
+    cuentaId: ids.S023, tipo: 'Abono', monto: 15000, fecha: '2024-01-18', reciboDetalleId: r1627.detalleId,
+    observaciones: 'Sobrante de imputación del recibo 1627: crédito no aplicado'
+  });
+
+  // --- S0501 (corrección 21): el recibo 1793 declara "MARZO Y ABRIL" ($20.000, 2 meses) pero el
+  // período se guardó como un solo mes -- el recibo entero cayó a crédito sin aplicar. Solo se
+  // redime la mitad (abril, el hueco real); marzo ya está cubierto por otra vía en producción,
+  // aquí simplemente no se reproduce porque no hace falta para probar la corrección.
+  ids.S0501 = sembrarCuenta(db, 'S0501');
+  repo.crearMovimiento({ cuentaId: ids.S0501, fecha: '2024-04-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 4 });
+  const r1793 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 1793, cuentaId: ids.S0501, fecha: '2024-04-06', valor: 20000, concepto: 'CU0TA DE SOSTENIMIENTO MARZO Y ABRIL'
+  });
+  repo.crearMovimiento({ cuentaId: ids.S0501, fecha: '2024-04-06', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: r1793.detalleId });
+  ids.creditoS0501Id = repo.crearCredito({
+    cuentaId: ids.S0501, tipo: 'Abono', monto: 20000, fecha: '2024-04-06', reciboDetalleId: r1793.detalleId,
+    observaciones: 'Sobrante de imputación del recibo 1793: crédito no aplicado'
+  });
+
+  // --- S022 (corrección 22): el recibo 2394 declara "...Y ENERO A FEBRERO 2026" pero el período
+  // guardado no capturó esa cláusula -- el FIFO de respaldo desvió esos 2 meses hacia una deuda
+  // vieja real, dejando enero-febrero 2026 sin cubrir. Se redime contra el crédito varado de dos
+  // recibos "ABONO A LA DEUDA" sin período (mismo par que en producción).
+  ids.S022 = sembrarCuenta(db, 'S022');
+  for (const mes of [1, 2]) {
+    repo.crearMovimiento({ cuentaId: ids.S022, fecha: `2026-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes });
+  }
+  const r1692 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 1692, cuentaId: ids.S022, fecha: '2024-02-10', valor: 50000, concepto: 'ABONO A LA DEUDA A TRAVES DE CONSIGNACIÒN No. 666096'
+  });
+  repo.crearMovimiento({ cuentaId: ids.S022, fecha: '2024-02-10', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: r1692.detalleId });
+  ids.creditoS022aId = repo.crearCredito({
+    cuentaId: ids.S022, tipo: 'Abono', monto: 50000, fecha: '2024-02-10', reciboDetalleId: r1692.detalleId,
+    observaciones: 'Sobrante de imputación del recibo 1692: crédito no aplicado'
+  });
+  const r1813 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 1813, cuentaId: ids.S022, fecha: '2024-04-20', valor: 50000, concepto: 'ABONO A DEUDA'
+  });
+  repo.crearMovimiento({ cuentaId: ids.S022, fecha: '2024-04-20', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: r1813.detalleId });
+  ids.creditoS022bId = repo.crearCredito({
+    cuentaId: ids.S022, tipo: 'Abono', monto: 50000, fecha: '2024-04-20', reciboDetalleId: r1813.detalleId,
+    observaciones: 'Sobrante de imputación del recibo 1813: crédito no aplicado'
   });
 
   // --- 7 cuentas suspendidas que NO deben recausarse (corrección 14): reproduce el estado
@@ -942,14 +1077,19 @@ test('paso9b: R007 -- redime $12.000 del crédito contra el hueco real de diciem
     ).get(ids.cargoDic2024R007Id).total;
     assert.equal(cubiertoDic2024, 16000);
 
-    // deudaExigible de R007 queda en 0 (nada más pendiente, según el seed).
+    // deudaExigible de R007 queda en 0 (todo el resto del seed -- enero 2024 a julio 2026 --
+    // ya estaba pagado; esta corrección cierra el único hueco real, diciembre 2024).
     const { deudaExigible } = repo.getSaldos(ids.R007);
     assert.equal(deudaExigible, 0);
 
     // El crédito de apertura ($92.000) no se toca -- se agrega una fila 'Aplicado' aparte.
+    // Se filtra por fecha para aislar las filas de ESTA corrección: la 18 corre justo después,
+    // en la misma llamada a ejecutarPaso9b, y agrega su propia fila 'Aplicado' fechada distinto
+    // (ver su propio test, más abajo).
     const creditos = db.prepare(
-      `SELECT tipo, monto, abono_movimiento_id, fecha, observaciones FROM cuenta_creditos WHERE cuenta_id=? ORDER BY id`
-    ).all(ids.R007);
+      `SELECT tipo, monto, abono_movimiento_id, fecha, observaciones FROM cuenta_creditos
+       WHERE cuenta_id=? AND fecha != ? ORDER BY id`
+    ).all(ids.R007, REDENCION_R007_2026.fecha);
     assert.equal(creditos.length, 2);
     assert.equal(creditos[0].tipo, 'Abono');
     assert.equal(creditos[0].monto, 92000);
@@ -959,9 +1099,9 @@ test('paso9b: R007 -- redime $12.000 del crédito contra el hueco real de diciem
     assert.match(creditos[1].observaciones, /recibo 1773/);
     assert.match(creditos[1].observaciones, /TENIA SALDO A FAVOR DE \$92\.000/);
 
-    // Saldo a favor disponible: 92.000 - 12.000 = 80.000, como pidió el usuario.
-    const saldoDisponible = repo.getSaldoCreditoDisponible(ids.R007);
-    assert.equal(saldoDisponible, 80000);
+    // El saldo a favor disponible YA NO queda en 80.000 al final de ejecutarPaso9b: la
+    // corrección 18 corre justo después, en la misma llamada, y redime el resto contra
+    // agosto-diciembre 2026 -- verificado en su propio test más abajo.
 
     // El nuevo Abono queda trazado hasta el recibo 1773 vía la observación, fechado cuando
     // pasó en la realidad (no cuando corrió esta corrección).
@@ -987,16 +1127,318 @@ test('paso9b: R007 -- idempotente, correr dos veces no duplica la redención ni 
     const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
 
     assert.equal(r2.redencionR007.yaCorregido, true);
+    assert.equal(r2.redencionR007Adelantado.yaCorregido, true);
 
+    // 1 apertura + 1 'Aplicado' de la corrección 13 + 1 'Aplicado' de la corrección 18.
     const creditos = db.prepare(`SELECT COUNT(*) AS n FROM cuenta_creditos WHERE cuenta_id=?`).get(ids.R007).n;
-    assert.equal(creditos, 2, 'la segunda corrida no debe agregar otra fila Aplicado');
+    assert.equal(creditos, 3, 'la segunda corrida no debe agregar más filas de crédito');
 
-    const abonos = db.prepare(
-      `SELECT COUNT(*) AS n FROM cartera_movimientos WHERE cuenta_id=? AND tipo='Abono' AND fecha='2024-03-16'`
+    const abonos13 = db.prepare(
+      `SELECT COUNT(*) AS n FROM cartera_movimientos WHERE cuenta_id=? AND tipo='Abono' AND monto=-12000`
     ).get(ids.R007).n;
-    assert.equal(abonos, 1, 'la segunda corrida no debe crear otro movimiento de redención');
+    assert.equal(abonos13, 1, 'la segunda corrida no debe crear otro movimiento de la corrección 13');
 
-    assert.equal(repo.getSaldoCreditoDisponible(ids.R007), 80000);
+    const abonos18 = db.prepare(
+      `SELECT COUNT(*) AS n FROM cartera_movimientos WHERE cuenta_id=? AND tipo='Abono' AND monto=-80000`
+    ).get(ids.R007).n;
+    assert.equal(abonos18, 1, 'la segunda corrida no debe crear otro movimiento de la corrección 18');
+
+    // Con ambas correcciones aplicadas, ya no queda nada del crédito de apertura sin redimir.
+    assert.equal(repo.getSaldoCreditoDisponible(ids.R007), 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R007 -- corrección 18 causa agosto-diciembre 2026 y redime los $80.000 restantes, deja pagado hasta diciembre 2026', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+    const CarteraService = require('../../src/services/CarteraService');
+    const service = new CarteraService(ctx.dbService);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.redencionR007Adelantado.yaCorregido, false);
+    assert.equal(r.redencionR007Adelantado.creados, 5, 'agosto a diciembre 2026 son 5 meses nuevos');
+    assert.equal(r.redencionR007Adelantado.aplicado, 80000);
+    assert.equal(r.redencionR007Adelantado.saldoRestante, 0);
+
+    // Agosto-diciembre 2026 quedan causados a $16.000 (tarifa real de R007, "Finca con
+    // piscina") y totalmente cubiertos.
+    const cargosNuevos = db.prepare(`
+      SELECT mes, monto, (SELECT COALESCE(SUM(monto),0) FROM cartera_imputaciones WHERE cargo_id=cm.id) AS cubierto
+      FROM cartera_movimientos cm WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=2026 AND mes>=8
+      ORDER BY mes
+    `).all(ids.R007);
+    assert.equal(cargosNuevos.length, 5);
+    assert.deepEqual(cargosNuevos.map(c => c.mes), [8, 9, 10, 11, 12]);
+    assert.ok(cargosNuevos.every(c => c.monto === 16000 && c.cubierto === 16000));
+
+    // Ya no queda ni deuda exigible ni saldo a favor -- exactamente lo que pidió el usuario.
+    assert.equal(repo.getSaldoCreditoDisponible(ids.R007), 0);
+    const { deudaExigible } = repo.getSaldos(ids.R007);
+    assert.equal(deudaExigible, 0);
+
+    // Verificación de punta a punta contra lo que ve el operador en pantalla.
+    const estado = service.getEstadoCartera(ids.R007);
+    assert.deepEqual(estado.ultimoMesCubierto, { anio: 2026, mes: 12 });
+    assert.equal(estado.aPagar, 0);
+    assert.equal(estado.saldoAFavor, 0);
+
+    const nuevoAbono = db.prepare(
+      `SELECT fecha, monto, observaciones FROM cartera_movimientos WHERE id IN (
+        SELECT abono_movimiento_id FROM cuenta_creditos WHERE cuenta_id=? AND monto=80000
+      )`
+    ).get(ids.R007);
+    assert.equal(nuevoAbono.fecha, '2026-04-11');
+    assert.equal(nuevoAbono.monto, -80000);
+    assert.match(nuevoAbono.observaciones, /recibo 2470/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R007 -- corrección 18 se detiene con un error si el crédito disponible no es el esperado (no adivina cuánto redimir)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+    // Simula que parte del crédito ya se usó por otra vía, inesperada, antes de esta corrección
+    // -- no debe adivinar cuánto redimir con lo que sobra, debe detenerse y avisar.
+    repo.crearCredito({ cuentaId: ids.R007, tipo: 'Aplicado', monto: 10000, fecha: '2026-01-01' });
+
+    assert.throws(
+      () => ejecutarPaso9b({ dbService: ctx.dbService }),
+      /R007.*se esperaba \$80000 de credito disponible/s
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: reajuste 2024 -- S0334 y S039 redimen $60.000 exacto contra su hueco real, S0271 solo $20.000 de los $60.000', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const porCodigo = Object.fromEntries(r.redencionesReajuste2024.map(x => [x.codigo, x]));
+    assert.equal(porCodigo.S0334.yaCorregido, false);
+    assert.equal(porCodigo.S0334.aplicado, 60000);
+    assert.equal(porCodigo.S0334.saldoRestante, 0);
+    assert.equal(porCodigo.S039.yaCorregido, false);
+    assert.equal(porCodigo.S039.aplicado, 61000);
+    assert.equal(porCodigo.S039.saldoRestante, 0);
+    assert.equal(porCodigo.S0271.yaCorregido, false);
+    assert.equal(porCodigo.S0271.aplicado, 20000);
+    assert.equal(porCodigo.S0271.saldoRestante, 40000, 'S0271 deja $40.000 sin tocar -- no hay evidencia de a qué corresponden');
+
+    // S0334 y S039 quedan con julio/junio-diciembre 2024 totalmente cubiertos y sin crédito.
+    for (const codigo of ['S0334', 'S039']) {
+      assert.equal(repo.getSaldoCreditoDisponible(ids[codigo]), 0);
+      const { deudaExigible } = repo.getSaldos(ids[codigo]);
+      assert.equal(deudaExigible, 0);
+    }
+
+    // S0271: noviembre-diciembre 2024 quedan cubiertos, pero sigue con $40.000 de crédito.
+    const cargosS0271 = db.prepare(`
+      SELECT mes, monto, (SELECT COALESCE(SUM(monto),0) FROM cartera_imputaciones WHERE cargo_id=cm.id) AS cubierto
+      FROM cartera_movimientos cm WHERE cuenta_id=? AND tipo='CargoMensual' ORDER BY mes
+    `).all(ids.S0271);
+    assert.ok(cargosS0271.every(c => c.monto === c.cubierto));
+    assert.equal(repo.getSaldoCreditoDisponible(ids.S0271), 40000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: reajuste 2024 -- idempotente, correr dos veces no duplica ninguna de las 3 redenciones', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const porCodigo = Object.fromEntries(r2.redencionesReajuste2024.map(x => [x.codigo, x]));
+    assert.equal(porCodigo.S0334.yaCorregido, true);
+    assert.equal(porCodigo.S039.yaCorregido, true);
+    assert.equal(porCodigo.S0271.yaCorregido, true);
+
+    for (const codigo of ['S0334', 'S039']) {
+      const n = db.prepare(`SELECT COUNT(*) AS n FROM cuenta_creditos WHERE cuenta_id=? AND tipo='Aplicado'`).get(ids[codigo]).n;
+      assert.equal(n, 1, `${codigo}: la segunda corrida no debe duplicar la redención`);
+    }
+    assert.equal(repo.getSaldoCreditoDisponible(ids.S0271), 40000, 'sigue en 40.000, no en 20.000 ni 0');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: reajuste 2024 -- se detiene con un error si el crédito disponible no alcanza el monto esperado', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+    // Alguien ya gastó parte del crédito de S0334 por otra vía, inesperada.
+    repo.crearCredito({ cuentaId: ids.S0334, tipo: 'Aplicado', monto: 50000, fecha: '2026-01-01' });
+
+    assert.throws(
+      () => ejecutarPaso9b({ dbService: ctx.dbService }),
+      /S0334.*se esperaba al menos \$60000 de credito disponible/s
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S023 -- redime $15.000 exacto contra el hueco de julio 2024', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.redencionS023.yaCorregido, false);
+    assert.equal(r.redencionS023.aplicado, 15000);
+    assert.equal(r.redencionS023.saldoRestante, 0);
+
+    assert.equal(repo.getSaldoCreditoDisponible(ids.S023), 0);
+    const { deudaExigible } = repo.getSaldos(ids.S023);
+    assert.equal(deudaExigible, 0);
+
+    const cargoJulioS023 = db.prepare(`
+      SELECT monto, (SELECT COALESCE(SUM(monto),0) FROM cartera_imputaciones WHERE cargo_id=cm.id) AS cubierto
+      FROM cartera_movimientos cm WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=2024 AND mes=7
+    `).get(ids.S023);
+    assert.equal(cargoJulioS023.monto, cargoJulioS023.cubierto);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S023 -- idempotente, correr dos veces no duplica la redención', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.redencionS023.yaCorregido, true);
+    const n = db.prepare(`SELECT COUNT(*) AS n FROM cuenta_creditos WHERE cuenta_id=? AND tipo='Aplicado'`).get(ids.S023).n;
+    assert.equal(n, 1, 'la segunda corrida no debe duplicar la redención');
+    assert.equal(repo.getSaldoCreditoDisponible(ids.S023), 0);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S023 -- se detiene con un error si el crédito disponible no coincide con el monto esperado', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+    // Alguien ya gastó parte del crédito de S023 por otra vía, inesperada.
+    repo.crearCredito({ cuentaId: ids.S023, tipo: 'Aplicado', monto: 5000, fecha: '2026-01-01' });
+
+    assert.throws(
+      () => ejecutarPaso9b({ dbService: ctx.dbService }),
+      /S023.*se esperaba \$15000 de credito disponible/s
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: hueco textual 2026 -- S0501 redime $10.000 de los $20.000, S022 redime $20.000 de los $100.000', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const porCodigo = Object.fromEntries(r.redencionesHuecoTextual2026.map(x => [x.codigo, x]));
+    assert.equal(porCodigo.S0501.yaCorregido, false);
+    assert.equal(porCodigo.S0501.aplicado, 10000);
+    assert.equal(porCodigo.S0501.saldoRestante, 10000, 'saldoRestante es el crédito de la cuenta que queda tras esta redención, no el sobrante de los $10.000 pedidos');
+    assert.equal(porCodigo.S022.yaCorregido, false);
+    assert.equal(porCodigo.S022.aplicado, 20000);
+    assert.equal(porCodigo.S022.saldoRestante, 80000, 'saldoRestante es el crédito de la cuenta que queda tras esta redención, no el sobrante de los $20.000 pedidos');
+
+    assert.equal(repo.getSaldoCreditoDisponible(ids.S0501), 10000, 'S0501 deja $10.000 sin tocar -- no hay evidencia de a qué corresponden');
+    const cargoAbrilS0501 = db.prepare(`
+      SELECT monto, (SELECT COALESCE(SUM(monto),0) FROM cartera_imputaciones WHERE cargo_id=cm.id) AS cubierto
+      FROM cartera_movimientos cm WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=2024 AND mes=4
+    `).get(ids.S0501);
+    assert.equal(cargoAbrilS0501.monto, cargoAbrilS0501.cubierto);
+
+    assert.equal(repo.getSaldoCreditoDisponible(ids.S022), 80000, 'S022 deja $80.000 sin tocar -- no hay evidencia de a qué corresponden');
+    const cargosS022 = db.prepare(`
+      SELECT mes, monto, (SELECT COALESCE(SUM(monto),0) FROM cartera_imputaciones WHERE cargo_id=cm.id) AS cubierto
+      FROM cartera_movimientos cm WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=2026 ORDER BY mes
+    `).all(ids.S022);
+    assert.ok(cargosS022.every(c => c.monto === c.cubierto));
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: hueco textual 2026 -- idempotente, correr dos veces no duplica ninguna de las 2 redenciones', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const porCodigo = Object.fromEntries(r2.redencionesHuecoTextual2026.map(x => [x.codigo, x]));
+    assert.equal(porCodigo.S0501.yaCorregido, true);
+    assert.equal(porCodigo.S022.yaCorregido, true);
+
+    for (const codigo of ['S0501', 'S022']) {
+      const n = db.prepare(`SELECT COUNT(*) AS n FROM cuenta_creditos WHERE cuenta_id=? AND tipo='Aplicado'`).get(ids[codigo]).n;
+      assert.equal(n, 1, `${codigo}: la segunda corrida no debe duplicar la redención`);
+    }
+    assert.equal(repo.getSaldoCreditoDisponible(ids.S0501), 10000);
+    assert.equal(repo.getSaldoCreditoDisponible(ids.S022), 80000);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: hueco textual 2026 -- se detiene con un error si el crédito disponible no alcanza el monto esperado', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+    // Alguien ya gastó parte del crédito de S0501 por otra vía, inesperada.
+    repo.crearCredito({ cuentaId: ids.S0501, tipo: 'Aplicado', monto: 15000, fecha: '2026-01-01' });
+
+    assert.throws(
+      () => ejecutarPaso9b({ dbService: ctx.dbService }),
+      /S0501.*se esperaba al menos \$10000 de credito disponible/s
+    );
   } finally {
     cerrarDbTemporal(ctx);
   }
