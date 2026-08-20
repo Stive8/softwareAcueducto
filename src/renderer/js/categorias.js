@@ -1,5 +1,7 @@
 // Módulo de Categorías
 const Categorias = {
+  mostrarInactivas: false,
+
   async load() {
     const content = document.getElementById('page-content');
     content.innerHTML = `
@@ -12,6 +14,10 @@ const Categorias = {
         <div class="table-header">
           <h2>Listado de Categorías</h2>
           <div class="table-controls">
+            <label style="display: flex; align-items: center; gap: 6px; font-size: 0.875rem; color: #64748b; margin-right: 12px;">
+              <input type="checkbox" id="chkMostrarInactivas" ${this.mostrarInactivas ? 'checked' : ''}>
+              Mostrar inactivas
+            </label>
             <button class="btn btn-primary" id="btnNuevaCategoria">+ Nueva Categoría</button>
           </div>
         </div>
@@ -30,11 +36,16 @@ const Categorias = {
     document.getElementById('btnNuevaCategoria').addEventListener('click', () => {
       this.showFormModal();
     });
+
+    document.getElementById('chkMostrarInactivas').addEventListener('change', (e) => {
+      this.mostrarInactivas = e.target.checked;
+      this.loadCategorias();
+    });
   },
 
   async loadCategorias() {
     try {
-      const response = await window.api.categorias.getAll();
+      const response = await window.api.categorias.getAll({ soloActivas: !this.mostrarInactivas });
 
       if (response.success) {
         this.renderTable(response.data);

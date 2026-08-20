@@ -8,5 +8,9 @@
 -- real, así que un INSERT plano reventaría con UNIQUE constraint failed en el primer arranque
 -- contra producción -- y como runMigrations hace rollback sin marcarla aplicada, en TODOS los
 -- arranques siguientes también.
-INSERT OR IGNORE INTO categorias (nombre, descripcion) VALUES
-  ('Sin clasificar', 'Categoría temporal para cuentas sin clasificar');
+--
+-- activo = 0: en una instalación nueva (otro cliente) esta categoría no tiene ningún propósito,
+-- es un artefacto de la importación histórica de esta base puntual. Nace inactiva para que no
+-- aparezca en el listado de Categorías por defecto (ver src/renderer/js/categorias.js).
+INSERT OR IGNORE INTO categorias (nombre, descripcion, activo) VALUES
+  ('Sin clasificar', 'Categoría temporal para cuentas sin clasificar', 0);
