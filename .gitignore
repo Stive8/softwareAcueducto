@@ -2,6 +2,7 @@ node_modules/
 data/
 dist/
 *.db
+.worktrees/
 *.db-shm
 *.db-wal
 .env
@@ -11,7 +12,18 @@ config/google-credentials.json
 # Salidas de las herramientas de import: contienen datos reales (nombres, cédulas, montos, códigos de cuenta, deuda)
 scripts/import-gastos/output/
 scripts/import-cartera/output/*
-!scripts/import-cartera/output/*.md
+# Únicos reportes de esta carpeta pensados para quedar en el repo como referencia permanente --
+# cualquier otro .md que se genere ahí (notas de trabajo, cruces contra el talonario, etc.) queda
+# afuera por defecto, aunque contenga nombres/montos reales.
+!scripts/import-cartera/output/PUNTOS-CONFLICTIVOS.md
+!scripts/import-cartera/output/paso12-reporte-final.md
 
 # Respaldo automático de la base antes de una carga irreversible (ya cubierto por *.db, se deja explícito)
 backups_automaticos/
+
+# Exports y herramientas de investigación puntual (rutas de máquina personal, datos reales o
+# descartables por diseño -- ver el comentario de cada script)
+/historial-aportes.xlsx
+scripts/export-historial-pagos-manual.js
+scripts/import-cartera/extraer-colillas-lote.js
+scripts/import-cartera/cruzar-colillas-db.js
