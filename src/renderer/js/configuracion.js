@@ -130,6 +130,15 @@ const Configuracion = {
             </div>
 
             <div class="form-group">
+              <label for="formato_impresion_recibo">Formato de Impresión de Recibos</label>
+              <select id="formato_impresion_recibo" name="formato_impresion_recibo">
+                <option value="carta" ${config.formato_impresion_recibo !== 'termico_80mm' ? 'selected' : ''}>Carta</option>
+                <option value="termico_80mm" ${config.formato_impresion_recibo === 'termico_80mm' ? 'selected' : ''}>Térmica 80mm</option>
+              </select>
+              <small style="color: #64748b; font-size: 0.875rem;">Formato que se usa al elegir "Usar predeterminado" al imprimir o exportar un recibo. Se puede cambiar puntualmente en cada recibo sin afectar esta configuración.</small>
+            </div>
+
+            <div class="form-group">
               <label for="valor_nuevo_punto">Valor por Defecto de Nuevos Puntos</label>
               <div class="input-currency">
                 <span class="currency-symbol">$</span>
@@ -380,6 +389,7 @@ const Configuracion = {
       telefono: document.getElementById('telefono').value.trim(),
       email: document.getElementById('email').value.trim(),
       consecutivo_recibos: document.getElementById('consecutivo_recibos').value,
+      formato_impresion_recibo: document.getElementById('formato_impresion_recibo').value,
       valor_nuevo_punto: App.parseMoneyValue(document.getElementById('valor_nuevo_punto').value),
       saldo_caja_inicial: App.parseMoneyValue(document.getElementById('saldo_caja_inicial').value),
       saldo_banco_inicial: App.parseMoneyValue(document.getElementById('saldo_banco_inicial').value)
