@@ -263,12 +263,19 @@ class ReciboRepository {
   getConfiguracionAsociacion() {
     const rows = this.db.prepare(`
       SELECT clave, valor FROM configuracion
-      WHERE clave IN ('nombre_asociacion', 'nit', 'direccion', 'telefono', 'email')
+      WHERE clave IN ('nombre_asociacion', 'nit', 'direccion', 'telefono', 'email', 'logo_path')
     `).all();
 
     const config = {};
     rows.forEach(r => { config[r.clave] = r.valor; });
     return config;
+  }
+
+  // 'carta' si la clave todavía no existe en esta base (p. ej. antes de correr la migración 043,
+  // o en un test que la borra a propósito) -- mismo patrón defensivo que getConsecutivoRecibo.
+  getFormatoImpresionPredeterminado() {
+    const row = this.db.prepare("SELECT valor FROM configuracion WHERE clave = 'formato_impresion_recibo'").get();
+    return row?.valor || 'carta';
   }
 }
 
