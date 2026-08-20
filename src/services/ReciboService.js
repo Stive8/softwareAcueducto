@@ -1,24 +1,9 @@
+const path = require('path');
 const ReciboRepository = require('../repositories/ReciboRepository');
 const AsientoContableService = require('./AsientoContableService');
 const { esMayor } = require('./cartera/dinero');
-
-function escapeHtml(value) {
-  if (value === null || value === undefined) return '';
-  return String(value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function formatNumber(num) {
-  return Number(num || 0).toLocaleString('es-CO', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
-}
-
-function formatFecha(fechaString) {
-  const fecha = new Date(fechaString);
-  return fecha.toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric' });
-}
+const { obtenerLogoBase64 } = require('./shared/logoBase64');
+const { PLANTILLAS } = require('./recibos/plantillas');
 
 const METODOS_PAGO_VALIDOS = ['Efectivo', 'Transferencia'];
 const CAMPOS_DE_RECIBO = ['numero_recibo', 'fecha_recibo'];
@@ -28,6 +13,7 @@ class ReciboService {
   constructor(dbService) {
     this.repository = new ReciboRepository(dbService);
     this.asientoContableService = new AsientoContableService(dbService);
+    this.dataDir = path.dirname(dbService.getDbPath());
   }
 
   getAll(params) {
@@ -188,89 +174,42 @@ class ReciboService {
     return this.repository.getCorrecciones(reciboId);
   }
 
-  // Genera el documento HTML imprimible de un recibo (usado tanto para imprimir como para exportar a PDF)
-  //
-  // TODO antes de exponer corregirCampo en la UI (getById/getDetalles todavía no pasan por
-  // getValorVigente, así que hoy no importa -- corregirCampo tampoco está conectado a IPC):
-  // este HTML lee recibo.detalles/recibo directo de la tabla original, nunca la corrección
-  // vigente. Un recibo con concepto/valor corregido seguiría imprimiéndose/exportándose con el
-  // valor ORIGINAL. Auditoría de entrega 2026-08-11, nota final del inventario -- ver
-  // docs/deuda-tecnica-auditoria-2026-08-11.md.
-  generarHTML(id) {
+  // Junta los datos vigentes de un recibo (aplicando cualquier corrección posterior, ver
+  // getValorVigente) con la información institucional, en un único objeto formato-agnóstico
+  // que consumen las plantillas de src/services/recibos/plantillas.js.
+  obtenerDatosParaImprimir(id) {
     const recibo = this.getById(id);
-    if (!recibo) {
-      throw new Error('Recibo no encontrado');
-    }
+    if (!recibo) throw new Error('Recibo no encontrado');
 
-    const config = this.repository.getConfiguracionAsociacion();
+    const numeroRecibo = this.repository.getValorVigente(id, 'numero_recibo') ?? recibo.numero_recibo;
+    const fechaRecibo = this.repository.getValorVigente(id, 'fecha_recibo') ?? recibo.fecha_recibo;
 
-    const filasDetalle = recibo.detalles.map(d => `
-      <tr>
-        <td>${escapeHtml(d.concepto)}</td>
-        <td>${d.periodo_desde ? escapeHtml(d.periodo_desde) + (d.periodo_hasta && d.periodo_hasta !== d.periodo_desde ? ' - ' + escapeHtml(d.periodo_hasta) : '') : '-'}</td>
-        <td class="text-right">$${formatNumber(d.valor)}</td>
-      </tr>
-    `).join('');
+    const detalles = recibo.detalles.map(d => ({
+      ...d,
+      concepto: this.repository.getValorVigente(id, 'concepto', d.id) ?? d.concepto,
+      valor: this.repository.getValorVigente(id, 'valor', d.id) ?? d.valor
+    }));
 
-    return `
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="utf-8">
-<title>Recibo No. ${recibo.numero_recibo}</title>
-<style>
-  * { box-sizing: border-box; }
-  body { font-family: Arial, Helvetica, sans-serif; padding: 32px; color: #1f2937; }
-  .header { text-align: center; margin-bottom: 24px; border-bottom: 2px solid #1e40af; padding-bottom: 16px; }
-  .header h1 { color: #1e40af; font-size: 22px; margin: 0 0 6px 0; }
-  .header p { font-size: 12px; color: #475569; margin: 2px 0; }
-  .recibo-numero { text-align: right; font-size: 18px; font-weight: bold; color: #1e40af; margin-bottom: 20px; }
-  .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 24px; font-size: 13px; }
-  .info-grid div span { font-weight: bold; color: #334155; }
-  table { width: 100%; border-collapse: collapse; margin-bottom: 16px; }
-  th, td { border: 1px solid #cbd5e1; padding: 10px 12px; font-size: 13px; text-align: left; }
-  th { background: #f1f5f9; color: #334155; }
-  .total-row td { font-weight: bold; font-size: 14px; background: #eff6ff; }
-  .text-right { text-align: right; }
-  .footer { margin-top: 32px; font-size: 11px; color: #64748b; text-align: center; }
-</style>
-</head>
-<body>
-  <div class="header">
-    <h1>${escapeHtml(config.nombre_asociacion || 'Acueducto Veredal')}</h1>
-    ${config.nit ? `<p>NIT: ${escapeHtml(config.nit)}</p>` : ''}
-    ${config.direccion ? `<p>${escapeHtml(config.direccion)}</p>` : ''}
-    ${config.telefono ? `<p>Tel: ${escapeHtml(config.telefono)}</p>` : ''}
-  </div>
+    const configBase = this.repository.getConfiguracionAsociacion();
+    const logoBase64 = obtenerLogoBase64(this.dataDir, configBase.logo_path);
 
-  <div class="recibo-numero">Recibo No. ${recibo.numero_recibo}${recibo.estado === 'Anulado' ? ' <span style="color:#dc2626;">— ANULADO</span>' : ''}</div>
-  ${recibo.estado === 'Anulado' ? `<p style="color:#dc2626; font-size: 12px; text-align: center; margin: -12px 0 16px 0;">Este recibo fue anulado${recibo.motivo_anulacion ? ': ' + escapeHtml(recibo.motivo_anulacion) : ''}</p>` : ''}
+    return {
+      ...recibo,
+      numero_recibo: numeroRecibo,
+      fecha_recibo: fechaRecibo,
+      detalles,
+      config: { ...configBase, logoBase64 }
+    };
+  }
 
-  <div class="info-grid">
-    <div>Fecha: <span>${formatFecha(recibo.fecha_recibo)}</span></div>
-    <div>Método de pago: <span>${escapeHtml(recibo.metodo_pago)}</span></div>
-    <div>Cuenta: <span>${escapeHtml(recibo.cuenta_codigo)}</span></div>
-    <div>Dirección: <span>${escapeHtml(recibo.cuenta_direccion)}</span></div>
-    <div>Propietario: <span>${escapeHtml(recibo.propietario_nombre)}</span></div>
-    <div>Identificación: <span>${escapeHtml(recibo.propietario_identificacion || '-')}</span></div>
-  </div>
-
-  <table>
-    <thead>
-      <tr><th>Concepto</th><th>Período</th><th class="text-right">Valor</th></tr>
-    </thead>
-    <tbody>
-      ${filasDetalle}
-      <tr class="total-row"><td colspan="2">TOTAL</td><td class="text-right">$${formatNumber(recibo.total)}</td></tr>
-    </tbody>
-  </table>
-
-  ${recibo.observaciones ? `<p style="font-size:13px;"><strong>Observaciones:</strong> ${escapeHtml(recibo.observaciones)}</p>` : ''}
-
-  <div class="footer">Documento generado por el sistema administrativo del acueducto. Gracias por su pago.</div>
-</body>
-</html>
-    `;
+  // Genera el documento HTML imprimible de un recibo, en el formato pedido (usado tanto para
+  // imprimir como para exportar a PDF). formatoOverride ausente/vacío = usar el predeterminado
+  // configurado para el acueducto (configuracion.formato_impresion_recibo).
+  generarHTML(id, formatoOverride) {
+    const datos = this.obtenerDatosParaImprimir(id);
+    const formato = formatoOverride || this.repository.getFormatoImpresionPredeterminado();
+    const render = PLANTILLAS[formato] || PLANTILLAS.carta;
+    return render(datos);
   }
 }
 
