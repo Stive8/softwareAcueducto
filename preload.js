@@ -76,8 +76,8 @@ contextBridge.exposeInMainWorld('api', {
     registrarAnuladoFisico: (datos) => ipcRenderer.invoke('recibos:registrarAnuladoFisico', datos),
     getConsecutivo: () => ipcRenderer.invoke('recibos:getConsecutivo'),
     getAnuladosFisicos: () => ipcRenderer.invoke('recibos:getAnuladosFisicos'),
-    imprimir: (id) => ipcRenderer.invoke('recibos:imprimir', id),
-    exportarPDF: (id) => ipcRenderer.invoke('recibos:exportarPDF', id)
+    imprimir: (id, formato) => ipcRenderer.invoke('recibos:imprimir', id, formato),
+    exportarPDF: (id, formato) => ipcRenderer.invoke('recibos:exportarPDF', id, formato)
   },
   gastos: {
     getAll: (params) => ipcRenderer.invoke('gastos:getAll', params),
