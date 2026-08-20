@@ -3,6 +3,7 @@ data/
 dist/
 *.db
 .worktrees/
+.superpowers/
 *.db-shm
 *.db-wal
 .env
