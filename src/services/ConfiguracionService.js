@@ -6,8 +6,10 @@ const CLAVES_EDITABLES = [
   'nombre_asociacion', 'nit', 'direccion', 'ciudad', 'telefono', 'email',
   'consecutivo_recibos', 'valor_nuevo_punto', 'saldo_caja_inicial', 'saldo_banco_inicial',
   'respaldo_nube_dias_retencion', 'caja_menor_activa', 'caja_menor_saldo_objetivo',
-  'periodo_bloqueo_anterior_a'
+  'periodo_bloqueo_anterior_a', 'formato_impresion_recibo'
 ];
+
+const FORMATOS_IMPRESION_RECIBO_VALIDOS = ['carta', 'termico_80mm'];
 
 class ConfiguracionService {
   constructor(dbService, asientoContableService = null) {
@@ -52,6 +54,11 @@ class ConfiguracionService {
       if (!/^\d{4}-\d{2}-\d{2}$/.test(datos.periodo_bloqueo_anterior_a)) {
         throw new Error('La fecha límite de bloqueo debe tener el formato AAAA-MM-DD, o quedar vacía para no restringir');
       }
+    }
+
+    if (datos.formato_impresion_recibo !== undefined
+      && !FORMATOS_IMPRESION_RECIBO_VALIDOS.includes(datos.formato_impresion_recibo)) {
+      throw new Error('Formato de impresión de recibo inválido');
     }
 
     const actualAntes = this.repository.getAll();
