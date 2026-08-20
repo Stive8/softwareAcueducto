@@ -6,10 +6,12 @@ const {
   ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, PROPIETARIO_S0244,
   REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
   CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229,
-  CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, INACTIVA_FUSIONADA_S063, REDENCION_R007,
+  SUSPENSIONES_SIN_CARTERA, INACTIVA_FUSIONADA_S063, REDENCION_R007,
   REDENCION_R007_2026, REDENCIONES_REAJUSTE_2024, REDENCION_S023, REDENCIONES_HUECO_TEXTUAL_2026,
   CUENTAS_SUSPENDIDAS_SIN_RECAUSAR, FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS,
-  CREDITO_R0942, RECALCULO_R0831, reimputarAbono
+  CREDITO_R0942, RECALCULO_R0831, reimputarAbono, MERGE_R0081_S058, SUSPENSION_INCOBRABLES,
+  APERTURA_INCOBRABLES, CUENTAS_NUEVAS_2026, VALOR_PUNTO_NUEVO_2026,
+  inferirPeriodoDeTexto, derivarPeriodoCorrecto, formatearPeriodoTexto
 } = require('./paso9b-correcciones');
 
 function sembrarCuenta(db, codigo) {
@@ -42,6 +44,12 @@ function sembrarTodas(db) {
 
   const repo = new CarteraRepository({ getDb: () => db });
   const propietarioId = sembrarPropietario(db);
+
+  // S0244 necesita una apertura opaca real (como en producción, $595.000) para que la corrección
+  // 28 (recibo faltante 1284) tenga contra qué aplicarse -- si no, su FIFO de respaldo cae sobre
+  // el CargoMensual de 2024 en vez de la apertura, y choca con el borrado/recreado incondicional
+  // de la corrección 2 en la segunda corrida.
+  repo.crearMovimiento({ cuentaId: ids.S0244, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 100000 });
 
   // --- Recibo 2137: S0312 -> S0393 ---
   ids.S0312 = sembrarCuenta(db, 'S0312');
@@ -157,12 +165,86 @@ function sembrarTodas(db) {
   repo.crearImputacion({ abonoId: abono2229Id, cargoId: cargoS044(1), monto: 50000 });
   repo.crearImputacion({ abonoId: abono2229Id, cargoId: cargoS044(2), monto: 44000 });
 
-  // --- S058: conexión nueva, sin fila en CARTERA -- quedó con categoría "Sin clasificar" ---
-  ids.S058 = sembrarCuenta(db, CAUSACION_S058.codigoCuenta);
-  const sinClasificarId = db.prepare(`SELECT id FROM categorias WHERE nombre='Sin clasificar'`).get().id;
-  ids.categoriaS058Id = db.prepare(
-    `INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2026-01-31')`
-  ).run(ids.S058, sinClasificarId).lastInsertRowid;
+  // --- R0081/S058: cuenta duplicada -- S058 (importación histórica) y R0081 (cuenta real, con
+  // recibo del punto y CargoMensual propio, idénticos por casualidad a los de S058 porque ambas
+  // cobran la misma deuda real dos veces). ---
+  ids.S058 = sembrarCuenta(db, MERGE_R0081_S058.codigoOrigen);
+  ids.R0081 = sembrarCuenta(db, MERGE_R0081_S058.codigoDestino);
+  const financaCategoriaId = db.prepare(`SELECT id FROM categorias WHERE nombre='Sin clasificar'`).get().id;
+  db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2026-01-31')`).run(ids.S058, financaCategoriaId);
+  db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2023-12-31')`).run(ids.R0081, financaCategoriaId);
+  db.prepare(`INSERT INTO cuenta_estados (cuenta_id, estado, fecha_inicio, motivo) VALUES (?, 'Activo', '2026-06-27', 'Estado inicial al migrar a cartera')`).run(ids.S058);
+  db.prepare(`INSERT INTO cuenta_propietarios (cuenta_id, propietario_id, fecha_inicio) VALUES (?, ?, '2026-01-31')`).run(ids.S058, propietarioId);
+  db.prepare(`INSERT INTO cuenta_propietarios (cuenta_id, propietario_id, fecha_inicio) VALUES (?, ?, '2023-12-31')`).run(ids.R0081, propietarioId);
+  const rPunto = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: MERGE_R0081_S058.numeroReciboPunto, cuentaId: ids.S058, fecha: '2026-01-31',
+    valor: 500000, concepto: 'PAGO DE PUNTO NUEVO'
+  });
+  ids.reciboPuntoId = rPunto.reciboId;
+  db.prepare(`
+    INSERT INTO nuevos_puntos (cuenta_id, valor_total, saldo_pendiente, fecha_registro, estado)
+    VALUES (?, 500000, 0, '2026-01-31', 'Pagado')
+  `).run(ids.S058);
+  for (const cuentaId of [ids.S058, ids.R0081]) {
+    for (const mes of [2, 3]) {
+      repo.crearMovimiento({ cuentaId, fecha: `2026-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes });
+    }
+  }
+
+  // --- S0312: recibos 2191 y 2362, sembrados en el estado erróneo real (ya imputados contra
+  // meses equivocados, como quedaron cuando el paso 10 corrió con el recibo 2137 todavía asignado
+  // a esta cuenta) -- para que la corrección 24 tenga algo real que deshacer y reaplicar. Reusa
+  // la cuenta S0312 que ya sembró el bloque del recibo 2137, más arriba.
+  repo.crearMovimiento({ cuentaId: ids.S0312, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 40000 });
+  for (const mes of [1, 2, 4, 5, 6]) {
+    repo.crearMovimiento({ cuentaId: ids.S0312, fecha: `2025-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2025, mes });
+  }
+  const aperturaS0312 = db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND tipo='AperturaOpaca'`).get(ids.S0312);
+  const cargoS0312 = mes => db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND anio=2025 AND mes=?`).get(ids.S0312, mes).id;
+
+  const r2191 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 2191, cuentaId: ids.S0312, fecha: '2025-05-03', valor: 30000,
+    concepto: 'CUOTA DE SOSTENIMIENTO ENERO A MARZO 2025', periodoDesde: 'Enero 2025', periodoHasta: 'Marzo 2025'
+  });
+  const abono2191Id = repo.crearMovimiento({
+    cuentaId: ids.S0312, fecha: '2025-05-03', tipo: 'Abono', exigible: 1, monto: -30000, reciboDetalleId: r2191.detalleId
+  });
+  // Estado erróneo real: el período (enero-marzo) no tenía nada pendiente contra qué aplicarse
+  // (el 2137 ya lo había cubierto), así que el FIFO de respaldo lo desvió a mayo-junio + apertura.
+  repo.crearImputacion({ abonoId: abono2191Id, cargoId: cargoS0312(5), monto: 10000 });
+  repo.crearImputacion({ abonoId: abono2191Id, cargoId: cargoS0312(6), monto: 10000 });
+  repo.crearImputacion({ abonoId: abono2191Id, cargoId: aperturaS0312.id, monto: 10000 });
+  ids.abono2191Id = abono2191Id;
+
+  const r2362 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 2362, cuentaId: ids.S0312, fecha: '2026-01-03', valor: 50000,
+    concepto: 'CUOTA DE SOSTENIMIENTO ABRIL 2025 A DICIEMBRE 2026', periodoDesde: 'Abril 2025', periodoHasta: 'Diciembre 2026'
+  });
+  const abono2362Id = repo.crearMovimiento({
+    cuentaId: ids.S0312, fecha: '2026-01-03', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: r2362.detalleId
+  });
+  repo.crearCredito({ cuentaId: ids.S0312, tipo: 'Abono', monto: 50000, fecha: '2026-01-03', reciboDetalleId: r2362.detalleId, observaciones: 'Sobrante de imputación: crédito no aplicado' });
+  ids.abono2362Id = abono2362Id;
+  ids.aperturaS0312Id = aperturaS0312.id;
+
+  // --- R049: hueco real enero-mayo 2025, con $100.000 de crédito disponible para redimir ---
+  ids.R049 = sembrarCuenta(db, 'R049');
+  for (const mes of [1, 2, 3, 4, 5]) {
+    repo.crearMovimiento({ cuentaId: ids.R049, fecha: `2025-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2025, mes });
+  }
+  repo.crearCredito({ cuentaId: ids.R049, tipo: 'Abono', monto: 100000, fecha: '2024-02-06', observaciones: 'Sobrante de imputación: crédito no aplicado' });
+
+  // --- Recibo 458: S0331 -> S03311 (S03311 ya existe, sembrada arriba para la corrección 1) ---
+  ids.S0331 = sembrarCuenta(db, 'S0331');
+  const r458 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 458, cuentaId: ids.S0331, fecha: '2019-02-18', valor: 300000, concepto: 'PAGO PUNTO DE AGUA'
+  });
+  ids.recibo458Id = r458.reciboId;
+  db.prepare(`
+    INSERT INTO nuevos_puntos (cuenta_id, valor_total, saldo_pendiente, fecha_registro, estado)
+    VALUES (?, 300000, 0, '2023-12-31', 'Pagado')
+  `).run(ids.S03311);
+  ids.puntoS03311Id = db.prepare('SELECT id FROM nuevos_puntos WHERE cuenta_id=?').get(ids.S03311).id;
 
   // --- 7 cuentas sin cartera: mismo marcador sintético que puso la migración a TODAS las
   // cuentas por igual ("Estado inicial al migrar a cartera") -- es lo que hay que reemplazar.
@@ -339,10 +421,19 @@ function sembrarTodas(db) {
   // vieja preservada a propósito) más un AjusteCategoria erróneo, mismo monto, que las dobla a
   // $10.000/mes. Dos meses por cuenta alcanzan para probar la detección y el borrado; no hace
   // falta reproducir los 31/12 reales de producción.
+  // Apertura opaca real de las 4 que nunca pagaron nada (corrección 29): la corrección 27 solo
+  // toca el tramo 2024+; esta fixture le da a la 29 algo real que poner en 0.
+  const APERTURA_OPACA_INCOBRABLES_FIXTURE = { R002: 600000, R0501: 600000, S009: 600000, R0971: 345000 };
   ids.ajustesErroneosSuspendidas = {};
   for (const codigo of CUENTAS_SUSPENDIDAS_SIN_RECAUSAR) {
     const cuentaId = sembrarCuenta(db, codigo);
     ids[codigo] = cuentaId;
+    if (APERTURA_OPACA_INCOBRABLES_FIXTURE[codigo]) {
+      ids[`apertura${codigo}Id`] = repo.crearMovimiento({
+        cuentaId, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0,
+        monto: APERTURA_OPACA_INCOBRABLES_FIXTURE[codigo]
+      });
+    }
     const erroneos = [];
     for (const mes of [1, 2]) {
       repo.crearMovimiento({ cuentaId, fecha: `2024-0${mes}-01`, tipo: 'CargoMensual', exigible: 1, monto: 5000, anio: 2024, mes });
@@ -353,6 +444,20 @@ function sembrarTodas(db) {
       }));
     }
     ids.ajustesErroneosSuspendidas[codigo] = erroneos;
+
+    // Estas mismas 7 cuentas son las "probablemente incobrables" de la corrección 27: ya
+    // Suspendidas desde 2026-08-01 (no retroactiva, decisión original de la carga inicial), con
+    // un CargoMensual más tardío (2025-12) sin pagar -- la corrección 27 mueve la fecha más
+    // atrás y borra lo que queda dentro del nuevo rango suspendido (incluye los de 2024 de arriba).
+    db.prepare(`
+      INSERT INTO cuenta_estados (cuenta_id, estado, fecha_inicio, fecha_fin, motivo)
+      VALUES (?, 'Activo', '2026-06-27', '2026-07-30', 'Estado inicial al migrar a cartera')
+    `).run(cuentaId);
+    db.prepare(`
+      INSERT INTO cuenta_estados (cuenta_id, estado, fecha_inicio, motivo)
+      VALUES (?, 'Suspendido', '2026-08-01', 'Carga inicial de cartera: suspendida desde 2026-07-31, no retroactiva')
+    `).run(cuentaId);
+    repo.crearMovimiento({ cuentaId, fecha: '2025-12-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2025, mes: 12 });
   }
 
   // --- R0942, recibo 2246 (corrección 15): transferencia real de $180.000, cargada al sistema
@@ -917,7 +1022,7 @@ test('paso9b: S044/2229 -- idempotente (apertura, texto y re-imputación)', () =
   }
 });
 
-test('paso9b: S058 -- causa febrero a julio 2026 a 10.000 y corrige la categoría a Finca', () => {
+test('paso9b: R0081/S058 -- mueve el recibo del punto a R0081, borra los CargoMensual duplicados de S058 y elimina S058', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -925,42 +1030,343 @@ test('paso9b: S058 -- causa febrero a julio 2026 a 10.000 y corrige la categorí
 
     const r = ejecutarPaso9b({ dbService: ctx.dbService });
 
-    assert.equal(r.correccionS058.categoriaCorregida, true);
-    assert.equal(r.correccionS058.creados, 6, 'febrero a julio son 6 meses');
+    assert.equal(r.mergeR0081S058.yaAplicado, false);
+    assert.equal(r.mergeR0081S058.reciboMovido, ids.reciboPuntoId);
+    assert.equal(r.mergeR0081S058.puntoMovido, true);
+    assert.equal(r.mergeR0081S058.movimientosDuplicadosBorrados, 2, 'los 2 CargoMensual de S058 se borran, no se mueven');
 
-    const categoria = db.prepare(`
-      SELECT cat.nombre FROM cuenta_categorias cc JOIN categorias cat ON cat.id = cc.categoria_id
-      WHERE cc.id = ?
-    `).get(ids.categoriaS058Id);
-    assert.equal(categoria.nombre, 'Finca');
+    assert.equal(db.prepare(`SELECT COUNT(*) n FROM cuentas WHERE id=?`).get(ids.S058).n, 0, 'S058 queda eliminada');
+    const recibo = db.prepare(`SELECT cuenta_id FROM recibos WHERE id=?`).get(ids.reciboPuntoId);
+    assert.equal(recibo.cuenta_id, ids.R0081);
+    const punto = db.prepare(`SELECT cuenta_id FROM nuevos_puntos WHERE valor_total=500000`).get();
+    assert.equal(punto.cuenta_id, ids.R0081);
 
-    const cargos = getCargos(db, ids.S058);
-    assert.equal(cargos.length, 6);
-    assert.deepEqual(cargos.map(c => c.mes), [2, 3, 4, 5, 6, 7]);
-    assert.ok(cargos.every(c => c.anio === 2026 && c.monto === 10000));
-    assert.ok(cargos.every(c => /mes siguiente a la instalacion/i.test(c.observaciones)));
-
-    assert.equal(
-      db.prepare(`SELECT COUNT(*) n FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=2026 AND mes=1`).get(ids.S058).n,
-      0, 'enero (mes de la conexión) no se causa'
-    );
+    const cargosR0081 = getCargos(db, ids.R0081);
+    assert.equal(cargosR0081.length, 2);
+    assert.deepEqual(cargosR0081.map(c => c.mes), [2, 3]);
   } finally {
     cerrarDbTemporal(ctx);
   }
 });
 
-test('paso9b: S058 -- idempotente, correr dos veces no duplica cargos ni vuelve a marcar la categoría como corregida', () => {
+test('paso9b: R0081/S058 -- idempotente, correr dos veces no falla aunque S058 ya no exista', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.mergeR0081S058.yaAplicado, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S0312 -- reimputa 2191 y 2362 en orden cronológico tras liberarse los meses que ocupaba el 2137', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const resultados = r.reimputacionS0312.resultados;
+    assert.equal(resultados.find(x => x.numeroRecibo === 2191).reimputado, true);
+    assert.equal(resultados.find(x => x.numeroRecibo === 2362).reimputado, true);
+
+    for (const mes of [1, 2, 3]) {
+      const cargo = db.prepare(`SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND anio=2025 AND mes=?`).get(ids.S0312, mes);
+      const cubierto = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE cargo_id=?`).get(cargo.id).s;
+      assert.equal(cubierto, cargo.monto, `mes ${mes} de 2025 debe quedar cubierto`);
+    }
+    assert.equal(db.prepare(`SELECT monto FROM cartera_movimientos WHERE id=?`).get(ids.abono2191Id).monto, -30000);
+    assert.equal(db.prepare(`SELECT COUNT(*) n FROM cuenta_creditos WHERE recibo_detalle_id IN (SELECT id FROM recibo_detalles WHERE recibo_id IN (SELECT id FROM recibos WHERE numero_recibo=2191))`).get().n, 0);
+
+    // 2362: abril-junio 2025 cubiertos. El sobrante (para ago-dic 2026, que aún no existen) NO
+    // debe tocar la apertura -- el recibo nunca la menciona -- se deja como crédito reservado.
+    for (const mes of [4, 5, 6]) {
+      const cargo = db.prepare(`SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND anio=2025 AND mes=?`).get(ids.S0312, mes);
+      const cubierto = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE cargo_id=?`).get(cargo.id).s;
+      assert.equal(cubierto, cargo.monto, `mes ${mes} de 2025 debe quedar cubierto`);
+    }
+    const apertura = db.prepare(`SELECT monto FROM cartera_movimientos WHERE id=?`).get(ids.aperturaS0312Id);
+    const aperturaCubierta = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE cargo_id=?`).get(ids.aperturaS0312Id).s;
+    assert.equal(apertura.monto - aperturaCubierta, 40000, 'apertura no se toca -- el recibo 2362 nunca la menciona');
+
+    const creditos2362 = db.prepare(`SELECT monto, observaciones FROM cuenta_creditos WHERE recibo_detalle_id IN (SELECT id FROM recibo_detalles WHERE recibo_id IN (SELECT id FROM recibos WHERE numero_recibo=2362))`).all();
+    assert.equal(creditos2362.length, 1, 'el sobrante queda como crédito explícito, no absorbido por el FIFO');
+    assert.equal(creditos2362[0].monto, 20000);
+    assert.match(creditos2362[0].observaciones, /agosto-diciembre 2026/i);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S0312 -- idempotente, correr dos veces no vuelve a deshacer/rehacer la reimputación', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
     const ids = sembrarTodas(db);
 
     ejecutarPaso9b({ dbService: ctx.dbService });
+    const impAntes = db.prepare(`SELECT COUNT(*) n FROM cartera_imputaciones WHERE abono_id IN (?, ?)`).get(ids.abono2191Id, ids.abono2362Id).n;
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+    const impDespues = db.prepare(`SELECT COUNT(*) n FROM cartera_imputaciones WHERE abono_id IN (?, ?)`).get(ids.abono2191Id, ids.abono2362Id).n;
+
+    assert.equal(r2.reimputacionS0312.resultados.every(x => x.reimputado === false), true);
+    assert.equal(impDespues, impAntes, 'no debe duplicar imputaciones en la segunda corrida');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R049 -- redime $50.000 contra enero-mayo 2025', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.redencionR049.yaCorregido, false);
+    assert.equal(r.redencionR049.aplicado, 50000);
+    for (const mes of [1, 2, 3, 4, 5]) {
+      const cargo = db.prepare(`SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND anio=2025 AND mes=?`).get(ids.R049, mes);
+      const cubierto = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE cargo_id=?`).get(cargo.id).s;
+      assert.equal(cubierto, cargo.monto, `mes ${mes} de 2025 debe quedar cubierto`);
+    }
+    const CarteraRepositoryLocal = require('../../src/repositories/CarteraRepository');
+    const repoLocal = new CarteraRepositoryLocal(ctx.dbService);
+    assert.equal(repoLocal.getSaldoCreditoDisponible(ids.R049), 50000, 'quedan 50.000 de los 100.000 originales');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R049 -- idempotente, correr dos veces no duplica la redención', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
     const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
 
-    assert.equal(r2.correccionS058.categoriaCorregida, false);
-    assert.equal(r2.correccionS058.creados, 6);
-    assert.equal(getCargos(db, ids.S058).length, 6, 'no debe duplicar los 6 cargos en la segunda corrida');
+    assert.equal(r2.redencionR049.yaCorregido, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: recibo 458 -- reasigna de S0331 a S03311 y le da respaldo documental al punto', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.reasignacion458.yaAplicado, false);
+    const recibo = db.prepare(`SELECT cuenta_id FROM recibos WHERE id=?`).get(ids.recibo458Id);
+    assert.equal(recibo.cuenta_id, ids.S03311);
+    const punto = db.prepare(`SELECT fecha_registro, observaciones FROM nuevos_puntos WHERE id=?`).get(ids.puntoS03311Id);
+    assert.equal(punto.fecha_registro, '2019-02-18');
+    assert.match(punto.observaciones, /respaldo documental/i);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: recibo 458 -- idempotente, correr dos veces no lo vuelve a mover', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.reasignacion458.yaAplicado, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: 7 cuentas incobrables -- mueve la suspensión al mes siguiente al último pago real y borra lo que quedó causado de más', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    for (const item of SUSPENSION_INCOBRABLES) {
+      const res = r.suspensionIncobrables.find(x => x.codigo === item.codigoCuenta);
+      assert.equal(res.yaCorregido, false, item.codigoCuenta);
+      assert.ok(res.borrados > 0, `${item.codigoCuenta}: debe borrar al menos un CargoMensual`);
+      const vigente = db.prepare(`SELECT estado, fecha_inicio FROM cuenta_estados WHERE cuenta_id=? AND fecha_fin IS NULL`).get(ids[item.codigoCuenta]);
+      assert.equal(vigente.estado, 'Suspendido');
+      assert.equal(vigente.fecha_inicio, item.fechaInicio);
+      assert.equal(
+        db.prepare(`SELECT COUNT(*) n FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual'`).get(ids[item.codigoCuenta]).n,
+        0, `${item.codigoCuenta}: no debe quedar ningún CargoMensual dentro del rango suspendido`
+      );
+    }
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: 7 cuentas incobrables -- idempotente, correr dos veces no falla ni vuelve a borrar nada', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.suspensionIncobrables.every(x => x.yaCorregido === true), true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: recibo faltante S0244 (1284, $60.000) -- se crea y su FIFO cae contra la apertura opaca', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.reciboFaltanteS0244.yaAplicado, false);
+    const recibo = db.prepare(`SELECT cuenta_id, total FROM recibos WHERE numero_recibo=1284`).get();
+    assert.equal(recibo.cuenta_id, ids.S0244);
+    assert.equal(recibo.total, 60000);
+
+    const apertura = db.prepare(`SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='AperturaOpaca'`).get(ids.S0244);
+    const cubierta = db.prepare(`SELECT COALESCE(SUM(monto),0) s FROM cartera_imputaciones WHERE cargo_id=?`).get(apertura.id).s;
+    assert.equal(cubierta, 60000, 'los 60.000 del recibo 1284 (2021) caen contra la apertura opaca');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: recibo faltante S0244 -- idempotente, correr dos veces no lo vuelve a crear', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.reciboFaltanteS0244.yaAplicado, true);
+    assert.equal(db.prepare(`SELECT COUNT(*) n FROM recibos WHERE numero_recibo=1284`).get().n, 1);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: las 4 incobrables que nunca pagaron nada -- pone su apertura opaca en 0', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    for (const codigo of APERTURA_INCOBRABLES) {
+      const res = r.aperturaIncobrables.find(x => x.codigo === codigo);
+      assert.equal(res.yaCorregido, false, codigo);
+      assert.ok(res.montoAnterior > 0, `${codigo}: debe reportar el monto anterior`);
+      const apertura = db.prepare(`SELECT monto FROM cartera_movimientos WHERE id=?`).get(ids[`apertura${codigo}Id`]);
+      assert.equal(apertura.monto, 0, `${codigo}: la apertura opaca debe quedar en 0`);
+    }
+    // Las otras 3 (S004, S0441, S0141) sí pagaron algo real -- correccion 27 no les crea apertura
+    // opaca en esta fixture y la 29 no las toca.
+    assert.equal(r.aperturaIncobrables.length, APERTURA_INCOBRABLES.length);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: las 4 incobrables -- idempotente, correr dos veces no falla ni cambia nada', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.aperturaIncobrables.every(x => x.yaCorregido === true), true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R0948/R0949 -- crea las cuentas nuevas de 2026 mínimas, con su punto en Pendiente', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    for (const item of CUENTAS_NUEVAS_2026) {
+      const res = r.cuentasNuevas2026.find(x => x.codigo === item.codigo);
+      assert.equal(res.yaAplicado, false, item.codigo);
+      assert.equal(res.estado, 'Pendiente');
+      assert.equal(res.saldoPendiente, VALOR_PUNTO_NUEVO_2026 - 100000);
+
+      const cuenta = db.prepare(`SELECT direccion, estado FROM cuentas WHERE codigo=?`).get(item.codigo);
+      assert.equal(cuenta.estado, 'Activo');
+      assert.ok(cuenta.direccion, `${item.codigo}: debe tener alguna dirección (aunque sea placeholder)`);
+
+      const propietario = db.prepare(`
+        SELECT p.nombre_completo FROM cuenta_propietarios cp
+        JOIN propietarios p ON p.id = cp.propietario_id
+        WHERE cp.cuenta_id = (SELECT id FROM cuentas WHERE codigo = ?) AND cp.fecha_fin IS NULL
+      `).get(item.codigo);
+      assert.equal(propietario.nombre_completo, item.nombre);
+
+      const recibo = db.prepare(`SELECT total FROM recibos WHERE numero_recibo=?`).get(item.numeroRecibo);
+      assert.equal(recibo.total, 100000);
+
+      const punto = db.prepare(`
+        SELECT valor_total, saldo_pendiente, estado FROM nuevos_puntos WHERE cuenta_id = (SELECT id FROM cuentas WHERE codigo = ?)
+      `).get(item.codigo);
+      assert.equal(punto.valor_total, VALOR_PUNTO_NUEVO_2026);
+      assert.equal(punto.saldo_pendiente, VALOR_PUNTO_NUEVO_2026 - 100000);
+      assert.equal(punto.estado, 'Pendiente');
+
+      assert.equal(
+        db.prepare(`SELECT COUNT(*) n FROM cartera_movimientos WHERE cuenta_id=(SELECT id FROM cuentas WHERE codigo=?)`).get(item.codigo).n,
+        0, `${item.codigo}: no debe tener ningún movimiento de cartera (sin apertura ni causación anticipada)`
+      );
+    }
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R0948/R0949 -- idempotente, correr dos veces no las vuelve a crear', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.cuentasNuevas2026.every(x => x.yaAplicado === true), true);
+    for (const item of CUENTAS_NUEVAS_2026) {
+      assert.equal(db.prepare(`SELECT COUNT(*) n FROM cuentas WHERE codigo=?`).get(item.codigo).n, 1);
+    }
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -1460,7 +1866,7 @@ test('paso9b: R007 -- se detiene con un error si diciembre 2024 no tiene el pend
   }
 });
 
-test('paso9b: las 7 suspendidas -- borra el AjusteCategoria erróneo, deja el CargoMensual a 5.000 intacto', () => {
+test('paso9b: las 7 suspendidas -- borra el AjusteCategoria erróneo (corrección 14); la corrección 27 borra también el CargoMensual, al mover la suspensión antes de 2024', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -1474,17 +1880,19 @@ test('paso9b: las 7 suspendidas -- borra el AjusteCategoria erróneo, deja el Ca
       const entrada = r.limpiezaSuspendidas.find(l => l.codigo === codigo);
       assert.equal(entrada.borradas, 2, `${codigo}: debe borrar los 2 AjusteCategoria erróneos sembrados`);
 
-      const cargos = getCargos(db, ids[codigo]);
-      assert.equal(cargos.length, 2, `${codigo}: el CargoMensual a 5.000 no se toca`);
-      assert.ok(cargos.every(c => c.monto === 5000), `${codigo}: ningún CargoMensual debe quedar en 10.000`);
-
       const ajustesRestantes = db.prepare(
         `SELECT COUNT(*) n FROM cartera_movimientos WHERE cuenta_id=? AND tipo='AjusteCategoria'`
       ).get(ids[codigo]).n;
       assert.equal(ajustesRestantes, 0, `${codigo}: no debe quedar ningún AjusteCategoria`);
 
+      // La corrección 27 (7 "probablemente incobrables", mismas 7 cuentas) mueve la suspensión a
+      // antes de 2024 -- el CargoMensual a 5.000 de enero-febrero 2024 queda dentro del nuevo
+      // rango suspendido y se borra también, no "intacto" como antes de que existiera esa corrección.
+      const cargos = getCargos(db, ids[codigo]);
+      assert.equal(cargos.length, 0, `${codigo}: sin ningún CargoMensual, la suspensión ya cubre 2024`);
+
       const { deudaExigible } = repo.getSaldos(ids[codigo]);
-      assert.equal(deudaExigible, 10000, `${codigo}: 2 meses x 5.000, no 10.000 (el doble)`);
+      assert.equal(deudaExigible, 0, `${codigo}: sin deuda exigible, todo el rango quedó suspendido`);
     }
   } finally {
     cerrarDbTemporal(ctx);
@@ -1502,7 +1910,7 @@ test('paso9b: las 7 suspendidas -- idempotente, correr dos veces no falla ni vue
 
     assert.ok(r2.limpiezaSuspendidas.every(l => l.borradas === 0), 'la segunda corrida no debe encontrar nada que borrar');
     for (const codigo of CUENTAS_SUSPENDIDAS_SIN_RECAUSAR) {
-      assert.equal(getCargos(db, ids[codigo]).length, 2, `${codigo}: sigue con solo los 2 CargoMensual originales`);
+      assert.equal(getCargos(db, ids[codigo]).length, 0, `${codigo}: sigue sin ningún CargoMensual`);
     }
   } finally {
     cerrarDbTemporal(ctx);
@@ -1846,6 +2254,244 @@ test('paso9b: falla ruidosamente si alguna de las 5 cuentas no existe en la base
     // faltan C021, R080, R091, S0244
 
     assert.throws(() => ejecutarPaso9b({ dbService: ctx.dbService }), /no existe en la base/);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('inferirPeriodoDeTexto: conector " A " con año compartido, entiende que el año aplica a ambos meses', () => {
+  const r = inferirPeriodoDeTexto('CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2017');
+  assert.deepEqual(r, { desde: { anio: 2017, mes: 1 }, hasta: { anio: 2017, mes: 12 } });
+});
+
+test('inferirPeriodoDeTexto: conector "Y" con año compartido', () => {
+  const r = inferirPeriodoDeTexto('CUOTA DE SOSTENIMIENTO ENERO Y FEBRERO 2024');
+  assert.deepEqual(r, { desde: { anio: 2024, mes: 1 }, hasta: { anio: 2024, mes: 2 } });
+});
+
+test('inferirPeriodoDeTexto: conector "Y" que retrocede el calendario resta 1 al año del primer mes', () => {
+  const r = inferirPeriodoDeTexto('CUOTA DE SOSTENIMIENTO DICIEMBRE Y ENERO 2024');
+  assert.deepEqual(r, { desde: { anio: 2023, mes: 12 }, hasta: { anio: 2024, mes: 1 } });
+});
+
+test('inferirPeriodoDeTexto: conector "HASTA"', () => {
+  const r = inferirPeriodoDeTexto('CUOTA DE SOSTENIMIENTO AGOSTO HASTA DICIEMBRE 2022');
+  assert.deepEqual(r, { desde: { anio: 2022, mes: 8 }, hasta: { anio: 2022, mes: 12 } });
+});
+
+test('inferirPeriodoDeTexto: dos años explícitos, cada mención con el suyo', () => {
+  const r = inferirPeriodoDeTexto('CUOTA DE SOSTENIMIENTO SEPTIEMBRE A DICIEMBRE 2023 Y ENERO A ABRIL 2024');
+  assert.deepEqual(r, { desde: { anio: 2023, mes: 9 }, hasta: { anio: 2024, mes: 4 } });
+});
+
+test('inferirPeriodoDeTexto: sin ningún año en el texto, no adivina (null)', () => {
+  assert.equal(inferirPeriodoDeTexto('CUOTA DE SOSTENIMIENTO MAYO A DICIEMBRE'), null);
+});
+
+test('inferirPeriodoDeTexto: sin ningún mes reconocible, no adivina (null)', () => {
+  assert.equal(inferirPeriodoDeTexto('ABONO A LA DEUDA'), null);
+});
+
+test('paso9b: período de texto (corrección 31) -- con Abono real y texto con año, usa el texto (coincide con el ledger en el caso común)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = sembrarCuenta(db, 'T900');
+    const propietarioId = sembrarPropietario(db);
+
+    const cargoEne = repo.crearMovimiento({ cuentaId, fecha: '2024-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 1 });
+    const cargoFeb = repo.crearMovimiento({ cuentaId, fecha: '2024-02-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 2 });
+
+    // Estado real encontrado en producción: el parser viejo colapsó "Enero Y Febrero 2024" a
+    // "Enero 2024" en los dos campos, pero la plata (ledger) ya está bien: cubre los dos meses.
+    const { detalleId } = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9001, cuentaId, fecha: '2024-02-17', valor: 20000,
+      concepto: 'CUOTA DE SOSTENIMIENTO ENERO Y FEBRERO 2024',
+      periodoDesde: 'Enero 2024', periodoHasta: 'Enero 2024'
+    });
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2024-02-17', tipo: 'Abono', exigible: 1, monto: -20000, reciboDetalleId: detalleId });
+    repo.crearImputacion({ abonoId, cargoId: cargoEne, monto: 10000 });
+    repo.crearImputacion({ abonoId, cargoId: cargoFeb, monto: 10000 });
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const resultado = r.periodosTextoCorregidos.find(p => p.numeroRecibo === 9001);
+    assert.equal(resultado.corregido, true);
+    assert.deepEqual(resultado.despues, ['Enero 2024', 'Febrero 2024']);
+
+    const detalle = db.prepare('SELECT periodo_desde, periodo_hasta FROM recibo_detalles WHERE id=?').get(detalleId);
+    assert.equal(detalle.periodo_desde, 'Enero 2024');
+    assert.equal(detalle.periodo_hasta, 'Febrero 2024');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: período de texto -- el sobrante desviado por FIFO hacia deuda vieja NO ensancha el período mostrado (caso real: recibo 2470 de R007)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = sembrarCuenta(db, 'T906');
+    const propietarioId = sembrarPropietario(db);
+
+    // Cargo de un mes SIN relación con lo que este recibo declara (simula el hueco viejo real
+    // que el sobrante de R007/recibo 2470 terminó pagando por FIFO, jul-dic 2024).
+    const cargoViejo = repo.crearMovimiento({ cuentaId, fecha: '2024-07-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2024, mes: 7 });
+    const cargoEne = repo.crearMovimiento({ cuentaId, fecha: '2026-01-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 1 });
+
+    const { detalleId } = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9006, cuentaId, fecha: '2026-04-11', valor: 20000,
+      concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026',
+      periodoDesde: 'Enero 2026', periodoHasta: 'Enero 2026'
+    });
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2026-04-11', tipo: 'Abono', exigible: 1, monto: -20000, reciboDetalleId: detalleId });
+    // El ledger real de este abono toca julio 2024 (deuda vieja, ajena) y enero 2026 (lo que sí
+    // declara) -- si se usara el ledger, el "hasta" mostrado sería julio 2024 (el más viejo), muy
+    // por debajo de lo que el recibo dice cubrir. El texto (con año explícito) debe ganar.
+    repo.crearImputacion({ abonoId, cargoId: cargoViejo, monto: 10000 });
+    repo.crearImputacion({ abonoId, cargoId: cargoEne, monto: 10000 });
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const resultado = r.periodosTextoCorregidos.find(p => p.numeroRecibo === 9006);
+    assert.equal(resultado.corregido, true);
+    assert.deepEqual(resultado.despues, ['Enero 2026', 'Diciembre 2026'], 'debe usar el texto declarado, no el rango disperso del ledger');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: período de texto -- sin Abono real (deuda pre-2024, absorbida en apertura), usa el texto del concepto', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T901');
+    const propietarioId = sembrarPropietario(db);
+
+    // Estado real: el desde quedó con el año del propio recibo (2018, cuándo se escribió) en
+    // vez del año que el concepto realmente declara (2017, un solo año para todo el rango).
+    sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9002, cuentaId, fecha: '2018-01-06', valor: 36000,
+      concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2017',
+      periodoDesde: 'Enero 2018', periodoHasta: 'Diciembre 2017'
+    });
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const resultado = r.periodosTextoCorregidos.find(p => p.numeroRecibo === 9002);
+    assert.equal(resultado.corregido, true);
+    assert.deepEqual(resultado.despues, ['Enero 2017', 'Diciembre 2017']);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: período de texto -- con crédito sin aplicar, extiende el "hasta" con lo que el texto declara', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const repo = new CarteraRepository(ctx.dbService);
+    const cuentaId = sembrarCuenta(db, 'T902');
+    const propietarioId = sembrarPropietario(db);
+
+    const cargoJun = repo.crearMovimiento({ cuentaId, fecha: '2026-06-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 6 });
+    const cargoJul = repo.crearMovimiento({ cuentaId, fecha: '2026-07-01', tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes: 7 });
+
+    // Declara junio-octubre (5 meses), pero agosto-octubre todavía no existen como CargoMensual
+    // -- el sobrante quedó como crédito, sin aplicar. El ledger solo confirma junio-julio; el
+    // texto es la única fuente para el "hasta" real que el recibo declara.
+    const { detalleId } = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9003, cuentaId, fecha: '2026-05-09', valor: 50000,
+      concepto: 'CUOTA DE SOSTENIMIENTO JUNIO A OCTUBRE 2026',
+      periodoDesde: 'Junio 2026', periodoHasta: 'Junio 2026'
+    });
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha: '2026-05-09', tipo: 'Abono', exigible: 1, monto: -20000, reciboDetalleId: detalleId });
+    repo.crearImputacion({ abonoId, cargoId: cargoJun, monto: 10000 });
+    repo.crearImputacion({ abonoId, cargoId: cargoJul, monto: 10000 });
+    repo.crearCredito({ cuentaId, tipo: 'Abono', monto: 30000, fecha: '2026-05-09', reciboDetalleId: detalleId, observaciones: 'Sobrante de imputación: crédito no aplicado' });
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const resultado = r.periodosTextoCorregidos.find(p => p.numeroRecibo === 9003);
+    assert.equal(resultado.corregido, true);
+    assert.deepEqual(resultado.despues, ['Junio 2026', 'Octubre 2026']);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: período de texto -- idempotente, correr dos veces no lo vuelve a tocar', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T903');
+    const propietarioId = sembrarPropietario(db);
+    sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9004, cuentaId, fecha: '2022-08-13', valor: 60000,
+      concepto: 'Cuota de sostenimiento Enero hasta Diciembre del 2022',
+      periodoDesde: 'Enero 2022', periodoHasta: 'Enero 2022'
+    });
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const resultado = r2.periodosTextoCorregidos.find(p => p.numeroRecibo === 9004);
+    assert.equal(resultado.corregido, false);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: período de texto -- sin año en el texto, deja el valor guardado tal cual (no adivina)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T904');
+    const propietarioId = sembrarPropietario(db);
+    sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9005, cuentaId, fecha: '2018-11-24', valor: 40000,
+      concepto: 'CUOTA DE SOSTENIMIENTO MAYO A DICIEMBRE',
+      periodoDesde: 'Mayo 2018', periodoHasta: 'Diciembre 2018'
+    });
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.periodosTextoCorregidos.find(p => p.numeroRecibo === 9005), undefined);
+    const detalle = db.prepare(`
+      SELECT periodo_desde, periodo_hasta FROM recibo_detalles WHERE recibo_id = (SELECT id FROM recibos WHERE numero_recibo=9005)
+    `).get();
+    assert.equal(detalle.periodo_desde, 'Mayo 2018');
+    assert.equal(detalle.periodo_hasta, 'Diciembre 2018');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: período de texto -- override manual del recibo 171 (único mes abreviado de toda la base)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T905');
+    const propietarioId = sembrarPropietario(db);
+    sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 171, cuentaId, fecha: '2018-11-01', valor: 49000,
+      concepto: 'CUOTA DE SOSTENIMIENTO ENERO A NOV 2010',
+      periodoDesde: 'Enero 2018', periodoHasta: 'Enero 2018'
+    });
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const resultado = r.periodosTextoCorregidos.find(p => p.numeroRecibo === 171);
+    assert.deepEqual(resultado.despues, ['Enero 2010', 'Noviembre 2010']);
   } finally {
     cerrarDbTemporal(ctx);
   }

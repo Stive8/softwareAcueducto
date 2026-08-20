@@ -282,20 +282,6 @@ const CORRECCION_PERIODO_RECIBO_2229 = {
   periodoHastaNuevo: 'Junio 2025'
 };
 
-const OBSERVACION_CAUSACION_S058 =
-  'Causacion iniciada en febrero 2026 (mes siguiente a la instalacion del punto de conexion, ' +
-  'pagado el 31-ene-2026 por $500.000) -- regla de negocio: el sostenimiento arranca el mes ' +
-  'siguiente a la conexion, no el mismo mes.';
-
-const CAUSACION_S058 = {
-  codigoCuenta: 'S058',
-  categoriaNombre: 'Finca',
-  anio: 2026,
-  mesInicio: 2,
-  mesFin: 7,
-  monto: 10000
-};
-
 const OBSERVACION_SUSPENSION_SIN_CARTERA =
   'No localizada en el barrido de campo; sin fila en CARTERA. Suspendida en la carga inicial.';
 
@@ -501,6 +487,219 @@ const REDENCIONES_HUECO_TEXTUAL_2026 = [
 const FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS = 'Corrección: meses desde 2024-01 causados a $5.000';
 const CUENTAS_SUSPENDIDAS_SIN_RECAUSAR = ['R002', 'R0501', 'R0971', 'S004', 'S009', 'S0141', 'S0441'];
 
+// 23. Cuenta fantasma "R0081": codigos.js documentaba (2026-07-31) que R0081 era la MISMA cuenta
+//    que S058 y que nunca debía crearse aparte -- pero sí se creó (id distinto, fuera del flujo
+//    de huérfanos: fecha_creacion 2026-07-31, con coordenadas GPS reales de un barrido de campo,
+//    algo que ninguna cuenta creada por la importación histórica trae). Investigado 2026-08-20:
+//    R0081 es la cuenta real (dirección "Vereda El Rodeo", propietaria "ARIAS MORENO MARTHA
+//    LUCIA" desde 2023-12-31) y S058 es la duplicada que sí vino de la importación histórica del
+//    talonario (mismo nombre, "ARIAS MARTHA LUCIA", sin coordenadas, creada 2026-06-27) --
+//    exactamente al revés de lo que asumía codigos.js. Decisión: mover a R0081 lo único real y
+//    no duplicado que tiene S058 (el recibo 2400 del punto, $500.000, y su fila en
+//    `nuevos_puntos`) y eliminar S058. Los 6 CargoMensual de S058 (feb-jul 2026, $10.000 c/u) NO
+//    se mueven -- son duplicados exactos de los 6 que R0081 ya tiene por su cuenta (misma deuda
+//    real, cobrada dos veces); moverlos doblaría la deuda de la persona. cuenta_propietarios,
+//    cuenta_estados y cuenta_categorias de S058 tampoco se mueven -- R0081 ya tiene sus propias
+//    filas (más antiguas y más completas) para las tres. Esto también retira la corrección 10
+//    (CAUSACION_S058): dejaba de tener sentido recrear cargos para una cuenta que se elimina, y
+//    R0081 ya causa esos mismos 6 meses por su cuenta, sin necesitar la corrección.
+const OBSERVACION_MERGE_R0081_S058 =
+  'Recibo movido de S058 (cuenta duplicada, eliminada) a R0081 (cuenta real, con coordenadas de ' +
+  'campo). codigos.js asumia lo contrario -- corregido 2026-08-20 tras verificar cual de las dos ' +
+  'tenia datos de campo reales.';
+
+const MERGE_R0081_S058 = { codigoOrigen: 'S058', codigoDestino: 'R0081', numeroReciboPunto: 2400 };
+
+// 24. S0312: reimputar los recibos 2191 y 2362 en el orden cronológico correcto, ahora que la
+//    corrección 4 le quitó el recibo 2137 (que nunca fue suyo, ver más arriba). Cuando el paso 10
+//    corrió por primera vez, el 2137 SÍ estaba asignado a S0312 en ese momento (la corrección 4 lo
+//    reasigna DESPUÉS), así que su FIFO de respaldo pagó por adelantado casi todo 2025-2026 antes
+//    de que se procesaran el 2191 (30-jul-2025, "ENERO A MARZO 2025", $30.000) y el 2362
+//    (3-ene-2026, "ABRIL 2025 A DICIEMBRE 2026", $210.000) -- a esos dos no les quedó nada
+//    pendiente contra qué aplicar su propio período declarado, y el sobrante de cada uno se fue a
+//    donde el FIFO general encontró hueco (2191 terminó pagando mayo-julio 2026; el 2362, sin
+//    ningún hueco que cubrir en ningún lado, quedó íntegro como crédito sin aplicar).
+//    La corrección 4 deshizo la imputación del 2137, pero nunca volvió a correr el 2191 ni el 2362
+//    contra los meses que el 2137 dejó de cubrir -- por eso persistía esta diferencia de
+//    $270.000 en `npm run conciliacion` pese a que S0312 ya no recibe nada del 2137.
+//    Se deshace la imputación actual de ambos (2191 primero, 2362 después, mismo orden
+//    cronológico que usó el paso 10 originalmente) y se rehace con el mismo mecanismo
+//    (`distribuir` + `mesesDelPeriodo`, período primero) -- nunca a mano.
+//
+//    2191 cubre enero-marzo 2025 exacto, sin sobrante -- no hay nada más que decidir ahí.
+//
+//    2362 SÍ necesita una decisión, revisada 2026-08-20 después de que el usuario señaló que el
+//    primer intento (dejar que el sobrante cayera al FIFO general, como hace el sistema por
+//    defecto) no tenía sentido: el propio recibo declara "ABRIL 2025 A DICIEMBRE 2026" -- una
+//    intención específica de cubrir esos meses, no de pagar deuda de antes de 2024 (de la que el
+//    recibo no dice una palabra). De los 21 meses que declara, solo 16 (abril 2025-julio 2026)
+//    existen hoy como CargoMensual -- agosto a diciembre 2026 todavía no se causan (regla pareja
+//    para todas las cuentas: los últimos 5 meses del año nunca se causan por adelantado). El FIFO
+//    general, por diseño del sistema ("quien paga, salda primero lo viejo"), habría tomado esos
+//    $50.000 sobrantes y los habría aplicado contra la deuda de apertura -- técnicamente válido
+//    como regla general, pero contradice la evidencia específica de ESTE recibo. Por eso acá se
+//    desactiva el FIFO de respaldo (`permitirFifoConPeriodo: false`) y el sobrante se deja como
+//    crédito explícito, documentado como reservado para agosto-diciembre 2026 -- listo para
+//    aplicarse cuando esos meses se causen, en vez de perderse dentro de la apertura.
+//    Resultado final, verificado en copia aislada: enero-marzo 2025 (2191) y abril-julio 2026
+//    (2362) quedan pagados. La deuda de apertura queda en $110.000 (sin tocar -- el 2362 nunca la
+//    toca). Queda un crédito de $50.000, reservado y visible, no un saldo a favor genérico.
+const OBSERVACION_REIMPUTACION_S0312_2191 =
+  'Reimputado tras la reasignacion del recibo 2137 (correccion 4): el periodo declarado (enero a ' +
+  'marzo 2025) no tenia nada pendiente contra que aplicarse porque el 2137 (que en ese momento SI ' +
+  'estaba asignado a esta cuenta) ya lo habia cubierto por adelantado. Investigado y verificado en ' +
+  'copia aislada 2026-08-20.';
+
+const OBSERVACION_REIMPUTACION_S0312_2362 =
+  'Reimputado tras la reasignacion del recibo 2137 (correccion 4). El recibo declara "ABRIL 2025 A ' +
+  'DICIEMBRE 2026" -- cubre abril 2025 a julio 2026 (los 16 meses que hoy existen como cargo). El ' +
+  'sobrante de $50.000 (para agosto-diciembre 2026, que todavia no se causan) queda como credito ' +
+  'reservado para esos meses -- a proposito NO se aplica contra la deuda de apertura (2022-2023): ' +
+  'el recibo nunca menciona esa deuda, y aplicarlo ahi habria ignorado la intencion explicita del ' +
+  'propio texto. Investigado y verificado en copia aislada 2026-08-20.';
+
+const REIMPUTACION_S0312 = {
+  codigoCuenta: 'S0312',
+  recibos: [
+    { numeroRecibo: 2191, periodoDesde: '2025-01', periodoHasta: '2025-03', permitirFifoConPeriodo: true, observaciones: OBSERVACION_REIMPUTACION_S0312_2191 },
+    { numeroRecibo: 2362, periodoDesde: '2025-04', periodoHasta: '2026-12', permitirFifoConPeriodo: false, observaciones: OBSERVACION_REIMPUTACION_S0312_2362 }
+  ]
+};
+
+// 25. R049: ver comentario junto a REDENCION_S023 (mismo patrón -- hueco real que un recibo
+//    posterior, sin período declarado, alcanza a cubrir). Investigado 2026-08-19, confirmado
+//    2026-08-20 contra CARTERA.xlsx directamente: la cuenta no trae saldo a favor en el Excel
+//    (debía $120.000 a su corte), así que enero-mayo 2025 es un hueco real, no algo inventado.
+const OBSERVACION_REDENCION_R049 =
+  'Redime $50.000 (de los $100.000 disponibles del recibo 1677, 06-feb-2024, "ABONO A LA DEUDA", ' +
+  'sin periodo) contra enero-mayo 2025, el hueco real de la cuenta. El recibo 2113 (01-mar-2025, ' +
+  '$635.000) cubre aparte apertura completa + enero-julio 2024 + junio 2025 -- calce exacto al ' +
+  'peso, sin dejar nada para enero-mayo 2025. Verificado contra CARTERA.xlsx: sin saldo a favor ' +
+  'en el Excel, coincide con que el hueco es real. Investigado 2026-08-19/20.';
+
+const REDENCION_R049 = {
+  codigoCuenta: 'R049',
+  desde: { anio: 2025, mes: 1 },
+  hasta: { anio: 2025, mes: 5 },
+  montoARedimir: 50000,
+  fecha: '2024-02-06'
+};
+
+// 26. Recibo 458 (S0331, 18-feb-2019, $300.000, "PAGO PUNTO DE AGUA"): reasignar a S03311.
+//    S0331 tiene DOS recibos de punto por $300.000 (04-ene-2019 y 18-feb-2019); el primero ya
+//    coincide con la fecha que el sistema tiene registrada como "punto de S0331 pagado". El
+//    segundo no tenía ningún destino -- nunca tocó cartera_movimientos ni cuenta_creditos (los
+//    pagos de punto no pasan por ahí, viven solo en nuevos_puntos), así que reasignarlo NO
+//    cambia el saldo a favor de S0331 (ese saldo viene de otro lado, sostenimiento, verificado
+//    2026-08-20). S03311 (mismo nombre de propietario, código casi idéntico) tiene su punto
+//    marcado "Pagado" pero con fecha sintética (31-dic-2023, sin recibo real detrás) -- este
+//    recibo le da respaldo documental real. Confirmado por el usuario 2026-08-20: "reasignar el
+//    recibo para que sea dinero del otro punto, para que no salga deuda pendiente" (opción a).
+const OBSERVACION_REASIGNACION_458 =
+  'Reasignado desde S0331: la cuenta tenia dos recibos de punto por $300.000 (04-ene y 18-feb de ' +
+  '2019); el segundo (este) no tenia destino en S0331 -- el punto de S03311 estaba marcado ' +
+  '"Pagado" con fecha sintetica sin recibo real detras. Este recibo le da respaldo documental ' +
+  'real. No mueve plata "utilizable" (los pagos de punto no pasan por cartera_movimientos). ' +
+  'Confirmado por el usuario 2026-08-20.';
+
+const REASIGNACION_RECIBO_458 = {
+  numeroRecibo: 458, codigoCuentaOrigen: 'S0331', codigoCuentaDestino: 'S03311', fechaRealPago: '2019-02-18'
+};
+
+// 27. Siete cuentas "probablemente incobrables" (R002, R0501, R0971, S004, S009, S0141, S0441):
+//    la carga inicial (2026-07-31) ya las había marcado Suspendidas, pero desde 2026-08-01 "no
+//    retroactiva" -- a propósito, para que la junta viera la cifra acumulada 2024-jul.2026 antes
+//    de decidir qué hacer. El usuario ya decidió (2026-08-20): mover la suspensión al mes
+//    siguiente al último pago real de cada una (o, para las 4 que nunca pagaron nada, al inicio
+//    de toda causación posible -- "como si nunca hubieran debido nada"). Se mueve la fecha de la
+//    vigencia Suspendida ya existente (no se crea una nueva) y se borran los CargoMensual que
+//    quedan dentro del nuevo rango suspendido -- verificado 2026-08-20 que ninguno de los 7 tiene
+//    ni una sola imputación real encima (nadie ha pagado nada desde 2024), así que no hay riesgo
+//    de perder un pago real.
+//    PENDIENTE (no resuelto en esta corrección): las 4 que nunca pagaron nada (R002, R0501, S009,
+//    R0971) sí tienen deuda de apertura (antes de 2024) documentada -- $600.000, $600.000,
+//    $600.000 y $345.000 respectivamente, tomada directo de CARTERA.xlsx. Esta corrección NO la
+//    toca -- falta que el usuario confirme si "como si nunca hubieran debido nada" también debe
+//    incluir esa deuda vieja, o si se queda (igual que en S004/S0441/S0141, donde la deuda de
+//    antes del último pago real sí se conserva).
+const OBSERVACION_SUSPENSION_INCOBRABLES =
+  'Fecha de suspension movida al mes siguiente al ultimo pago real (o al inicio de toda causacion ' +
+  'posible, para las que nunca pagaron nada) -- decision del usuario 2026-08-20, para que no ' +
+  'siga generando cartera desde 2024 una cuenta probablemente incobrable. Los CargoMensual que ' +
+  'quedan dentro del nuevo rango suspendido se borran (verificado: ninguno tenia imputacion real).';
+
+const SUSPENSION_INCOBRABLES = [
+  { codigoCuenta: 'S004', fechaInicio: '2021-07-01' },
+  { codigoCuenta: 'S0441', fechaInicio: '2019-01-01' },
+  { codigoCuenta: 'S0141', fechaInicio: '2023-01-01' },
+  { codigoCuenta: 'R002', fechaInicio: '2022-01-01' },
+  { codigoCuenta: 'R0501', fechaInicio: '2022-01-01' },
+  { codigoCuenta: 'S009', fechaInicio: '2022-01-01' },
+  { codigoCuenta: 'R0971', fechaInicio: '2022-01-01' }
+];
+
+// 28. Recibo 1284 (S0244, 03-dic-2022, $60.000): faltaba por completo en la base. Encontrado por
+//    el cruce automático del talonario completo (ronda 3, 2026-08-19): código de cuenta en
+//    blanco en el talonario ("SIN CODIFICAR"), pero el nombre sí está escrito ("ZAPATA MACHADO
+//    PEDRO"), que coincide con S0244 ("ZAPATO MACHADO PEDRO NEL"). Confirmado por el usuario
+//    2026-08-20. El concepto ("CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2021") es anterior a
+//    2024 y no tiene ningún CargoMensual de 2021 contra qué aplicarse (esa deuda vive solo en el
+//    bulto opaco) -- se deja que el mismo mecanismo de siempre (reimputarAbono, período primero,
+//    FIFO con el sobrante) lo resuelva: el período no encuentra nada, así que el FIFO general lo
+//    aplica contra lo más viejo pendiente, que es exactamente la apertura opaca (fechada antes
+//    que cualquier CargoMensual) -- el resultado correcto para un recibo que paga deuda de 2021.
+const OBSERVACION_RECIBO_S0244 =
+  'Recibo del talonario fisico que nunca se cargo a la base -- encontrado por el cruce automatico ' +
+  'del talonario completo contra la base (ronda 3, 2026-08-19). Codigo en blanco en el talonario ' +
+  '("SIN CODIFICAR"), identificado por el nombre del propietario. Confirmado por el usuario ' +
+  '2026-08-20.';
+
+const RECIBO_FALTANTE_S0244 = {
+  numeroRecibo: 1284, codigoCuenta: 'S0244', fecha: '2022-12-03', valor: 60000,
+  concepto: 'PAGA CUOTA DE SOSTENIMIENTO ENERO 2021 A DICIEMBRE 2021',
+  periodoDesde: '2021-01', periodoHasta: '2021-12'
+};
+
+// 29. Las 4 cuentas de la corrección 27 que nunca pagaron nada (R002, R0501, S009, R0971):
+//    decisión del usuario 2026-08-20, ampliando "como si nunca hubieran debido nada" a también
+//    la deuda de apertura (antes de 2024) que trae CARTERA.xlsx -- $600.000, $600.000, $600.000
+//    y $345.000 respectivamente. A diferencia de S004/S0441/S0141 (que sí pagaron algo real y
+//    conservan su deuda de apertura), estas 4 no tienen ni un pago real conocido, así que
+//    quedan en 0 igual que su tramo 2024+ (corrección 27): "cuentas suspendidas, que no
+//    sabemos nada, no existen".
+const OBSERVACION_APERTURA_INCOBRABLES =
+  'Apertura opaca (antes de 2024) puesta en 0: decision del usuario 2026-08-20 -- "como si nunca ' +
+  'hubieran debido nada", cuenta suspendida sin ningun pago real conocido desde el barrido de ' +
+  'campo. Ver correccion 27.';
+
+const APERTURA_INCOBRABLES = ['R002', 'R0501', 'S009', 'R0971'];
+
+// 30. R0948 (Luz Stella Gómez) y R0949 (Alfonso Torres Vásquez): dos conexiones nuevas de 2026
+//    que el talonario físico ya registra (recibos 2560 y 2562, ambos "ABONO PUNTO NUEVO DE
+//    AGUA", $100.000, 08-ago-2026) pero que nunca se dieron de alta en el sistema -- encontradas
+//    por el cruce automático del talonario completo (ronda 3, 2026-08-19, sección "cuenta no
+//    resuelta" de cruce-colillas-vs-db.md). Confirmado por el usuario: crearlas mínimas, sin
+//    cédula/teléfono/correo ("se actualiza después"); precio del punto $500.000 (confirmado
+//    2026-08-20, precio vigente hoy). Categoría Finca por defecto -- sin dato de campo que diga
+//    lo contrario, mismo criterio que el resto de cuentas nuevas sin barrido (ver
+//    CATEGORIA_POR_TIPO en preview.js). Sin AperturaOpaca ni CargoMensual: son conexiones nuevas
+//    sin ningún historial anterior a agosto 2026 -- la causación de sostenimiento sigue el curso
+//    normal del sistema (regla de negocio: el mes siguiente a la instalación), no algo que esta
+//    corrección deba anticipar.
+const OBSERVACION_CUENTA_NUEVA_2026 =
+  'Cuenta creada por el cruce automatico del talonario completo (ronda 3, 2026-08-19): conexion ' +
+  'nueva de 2026 que el talonario ya registraba pero que no estaba dada de alta en el sistema. ' +
+  'Minima, sin cedula/telefono/correo -- confirmado por el usuario que se actualiza despues. ' +
+  'Categoria Finca por defecto, sin dato de campo que diga lo contrario.';
+
+const VALOR_PUNTO_NUEVO_2026 = 500000;
+const FECHA_CUENTAS_NUEVAS_2026 = '2026-08-08';
+
+const CUENTAS_NUEVAS_2026 = [
+  { codigo: 'R0948', nombre: 'LUZ STELLA GOMEZ', numeroRecibo: 2560 },
+  { codigo: 'R0949', nombre: 'ALFONSO TORRES VASQUEZ', numeroRecibo: 2562 }
+];
+
 const OBSERVACION_CREDITO_R0942 =
   'Saldo a favor no registrado: el recibo 2246 documenta una transferencia de $180.000 el ' +
   '19-jun-2025 ("CUOTA DE SOSTENIMIENTO ABRIL 2025 A FEBRERO 2026 (TRANSFERENCIA 19/06/2025 - ' +
@@ -611,6 +810,169 @@ function parsearPeriodoAnioMes(texto) {
 
 function periodoAIso(periodo) {
   return `${periodo.anio}-${String(periodo.mes).padStart(2, '0')}`;
+}
+
+// 31. periodo_desde/periodo_hasta de recibo_detalles: campo LEGACY que solo alimenta el
+//    "Historial de Aportes" (recibos.js) -- paso7/paso8/paso10 nunca lo leen, causan e imputan
+//    con su propio período tomado del JSON. Un parser antiguo, ya no existe en el código, solo
+//    entendía el conector " A " -- cuando el concepto usaba "HASTA" o "Y" para declarar el rango
+//    ("...HASTA Diciembre 2022", "Enero Y Febrero 2024"), se quedó con el primer mes solo, en
+//    los dos campos. Además, cuando el rango completo compartía un solo año ("Enero A Diciembre
+//    2017"), el "desde" a veces quedó con el año del propio recibo (cuándo se escribió) en vez
+//    del año que el concepto realmente declara. Encontrado 2026-08-20: el usuario revisó el
+//    recibo 1773 de R007 y vio "Enero 2024" en vez de "Enero a Diciembre 2024".
+//
+//    Investigado a fondo antes de tocar nada: es 100% cosmético. Confirmado leyendo paso7/paso8/
+//    paso10 que ninguno lee este campo -- la plata real de cada recibo (cartera_movimientos/
+//    cartera_imputaciones) viene de una fuente separada y ya está correcta, verificada recibo
+//    por recibo contra el ledger real en los que generaron un Abono real.
+//
+//    Corrección query-driven (mismo patrón que la 17), no una lista fija -- se re-evalúa cada
+//    corrida contra las ~2.133 filas con período declarado:
+//    - Si el recibo_detalle tiene un Abono real con imputaciones a CargoMensual, el rango
+//      correcto es el mínimo/máximo real de esas imputaciones -- la fuente más confiable, es
+//      plata ya verificada. Si además dejó un crédito sin aplicar ligado al mismo detalle
+//      (declaró más meses de los que ya se causaron), el "hasta" se extiende con lo que el
+//      propio texto del concepto declara, para no mostrar un rango más corto que la intención
+//      real del recibo.
+//    - Si no hay Abono real (deuda anterior a 2024, absorbida en la apertura opaca), el rango
+//      sale de parsear el concepto (conectores A/HASTA/Y, con acarreo de año hacia atrás cuando
+//      un mes no trae año explícito y el mes siguiente retrocede en el calendario -- ej.
+//      "Diciembre Y Enero 2024" -> Diciembre 2023, Enero 2024).
+//    - Si ninguna de las dos fuentes da un año con confianza (texto sin ningún año, ej. "Mayo A
+//      Diciembre" sin año -- ~40 casos donde el año faltante ya se rellenó bien con el año del
+//      propio recibo al digitalizar), se deja tal cual -- no se adivina.
+//
+//    SOBRESCRITURA_PERIODO_MANUAL cubre el único caso real de mes abreviado en todo concepto de
+//    la base (recibo 171, "ENERO A NOV 2010" -- el parser solo entiende nombres completos, para
+//    no arriesgar falsos positivos con abreviaturas de 3 letras que puedan colisionar con otras
+//    palabras del texto en el resto de los ~2.500 recibos).
+const NOMBRES_MES_COMPLETO = [
+  'ENERO', 'FEBRERO', 'MARZO', 'ABRIL', 'MAYO', 'JUNIO',
+  'JULIO', 'AGOSTO', 'SEPTIEMBRE', 'OCTUBRE', 'NOVIEMBRE', 'DICIEMBRE'
+];
+const REGEX_MESES = new RegExp(`\\b(${NOMBRES_MES_COMPLETO.join('|')})\\b`, 'g');
+
+function formatearPeriodoTexto(p) {
+  const nombre = NOMBRES_MES_COMPLETO[p.mes - 1];
+  return `${nombre[0]}${nombre.slice(1).toLowerCase()} ${p.anio}`;
+}
+
+// Encuentra menciones "MES [AÑO]" en orden; cuando un mes no trae año explícito, lo hereda de
+// la siguiente mención que sí lo traiga -- retrocediendo el año si esa mención está en un mes
+// MENOR (el calendario retrocedió, ej. "Diciembre y Enero 2024").
+function inferirPeriodoDeTexto(concepto) {
+  const t = (concepto || '').toUpperCase();
+  const posiciones = [];
+  let m;
+  REGEX_MESES.lastIndex = 0;
+  while ((m = REGEX_MESES.exec(t)) !== null) {
+    posiciones.push({ mes: NOMBRES_MES_COMPLETO.indexOf(m[1]) + 1, pos: m.index });
+  }
+  if (posiciones.length === 0) return null;
+
+  // El año explícito de una mención solo puede venir de DESPUÉS de ella y ANTES de la próxima
+  // mención de mes -- si la ventana se extendiera más allá, "Diciembre Y Enero 2024" leería el
+  // 2024 de Enero como si también fuera el año explícito de Diciembre (mismo bug del parser
+  // legacy que esta corrección reemplaza, solo que corrido un mes hacia atrás).
+  const menciones = posiciones.map((p, idx) => {
+    const finVentana = idx + 1 < posiciones.length ? posiciones[idx + 1].pos : t.length;
+    const anioMatch = t.slice(p.pos, finVentana).match(/20\d\d/);
+    return { mes: p.mes, anioExplicito: anioMatch ? Number(anioMatch[0]) : null };
+  });
+
+  for (let i = menciones.length - 1; i >= 0; i--) {
+    if (menciones[i].anioExplicito !== null) { menciones[i].anioInferido = menciones[i].anioExplicito; continue; }
+    let j = i + 1;
+    while (j < menciones.length && menciones[j].anioExplicito === null) j++;
+    if (j < menciones.length) {
+      let anio = menciones[j].anioExplicito;
+      if (menciones[i].mes > menciones[j].mes) anio -= 1;
+      menciones[i].anioInferido = anio;
+    } else {
+      menciones[i].anioInferido = null;
+    }
+  }
+  if (menciones.some(x => x.anioInferido === null)) return null;
+
+  const primera = menciones[0], ultima = menciones[menciones.length - 1];
+  return {
+    desde: { anio: primera.anioInferido, mes: primera.mes },
+    hasta: { anio: ultima.anioInferido, mes: ultima.mes }
+  };
+}
+
+// El parser exacto (inferirPeriodoDeTexto) solo reconoce los 12 nombres de mes completos, bien
+// escritos -- a propósito: aceptar coincidencias difusas arriesga falsos positivos (ej. "PUNTO"
+// cae a distancia 2 de "JUNIO"). Encontrados 2026-08-20 con una búsqueda por distancia de edición
+// contra los 12 nombres de mes (distancia <= 2, sobre conceptos con año) y verificados a mano uno
+// por uno contra el propio texto: son los únicos con un typo real en el nombre del mes que el
+// parser exacto no puede leer solo. R027 (1710/1711) además se verificó contra su ledger real
+// (enero-diciembre 2024 completo, imputaciones a CargoMensual): coincide exacto.
+const SOBRESCRITURA_PERIODO_MANUAL = {
+  171: { desde: { anio: 2010, mes: 1 }, hasta: { anio: 2010, mes: 11 } },     // "ENERO A NOV 2010"
+  217: { desde: { anio: 2017, mes: 6 }, hasta: { anio: 2017, mes: 9 } },      // "JUNIO A SEPTEMBRE 2017"
+  614: { desde: { anio: 2019, mes: 10 }, hasta: { anio: 2019, mes: 12 } },    // "OCTUBBRE A DICIEMBRE 2019"
+  851: { desde: { anio: 2021, mes: 9 }, hasta: { anio: 2021, mes: 12 } },     // "SE`PTIEMBRE A DICIEMBRE 2021"
+  857: { desde: { anio: 2021, mes: 1 }, hasta: { anio: 2021, mes: 9 } },      // "ENERO A SEPTIIEMBRE 2021"
+  1276: { desde: { anio: 2022, mes: 11 }, hasta: { anio: 2022, mes: 12 } },   // "NOVIDEMBRE 2022 A DICIEMBRE 2022"
+  1560: { desde: { anio: 2019, mes: 2 }, hasta: { anio: 2019, mes: 5 } },     // "FERERO 2019 A MAYO 2019"
+  1698: { desde: { anio: 2023, mes: 6 }, hasta: { anio: 2023, mes: 11 } },    // "JUNIO A MOVIEMBRE 2023"
+  1710: { desde: { anio: 2024, mes: 1 }, hasta: { anio: 2024, mes: 12 } },    // "ENERO A DICIEMRBE 2024"
+  1711: { desde: { anio: 2024, mes: 1 }, hasta: { anio: 2024, mes: 12 } },    // "ENERO A DICIEMRBE 2024"
+  1741: { desde: { anio: 2024, mes: 1 }, hasta: { anio: 2024, mes: 2 } },     // "ENERO A FEBREO 2024"
+  1773: { desde: { anio: 2024, mes: 1 }, hasta: { anio: 2024, mes: 12 } },    // "ENERO A DIIEMBRE 2024" (R007)
+  1992: { desde: { anio: 2024, mes: 1 }, hasta: { anio: 2024, mes: 12 } },    // "ENERO A JUNIO Y HASTA DICIEMRE 2024"
+  2487: { desde: { anio: 2026, mes: 1 }, hasta: { anio: 2026, mes: 2 } },     // "ENERO A FEBREO 2026"
+  // "20217" (dígito de más): el año leído tal cual (2021) es imposible -- los 4 recibos son de
+  // 2017, no pueden cubrir hasta un año que todavía no había pasado. 2017 es la única lectura
+  // consistente con la fecha real del recibo.
+  2: { desde: { anio: 2016, mes: 1 }, hasta: { anio: 2017, mes: 12 } },       // "DICIEMBRE 20217" (recibo real de 2017)
+  3: { desde: { anio: 2016, mes: 1 }, hasta: { anio: 2017, mes: 12 } },       // "DICIEMBRE 20217" (recibo real de 2017)
+  14: { desde: { anio: 2016, mes: 1 }, hasta: { anio: 2017, mes: 12 } },      // "DICIEMBRE 20217" (recibo real de 2017)
+  90014: { desde: { anio: 2016, mes: 1 }, hasta: { anio: 2017, mes: 12 } },   // "DICIEMBRE 20217" (recibo real de 2017)
+  5: { desde: { anio: 2016, mes: 1 }, hasta: { anio: 2017, mes: 5 } },        // "MAYO 20217" (recibo real de 2017)
+  1490: { desde: { anio: 2022, mes: 5 }, hasta: { anio: 2022, mes: 12 } },    // "MAY0 2022 A DICIEMBRE 2022" (cero por O)
+  1491: { desde: { anio: 2022, mes: 5 }, hasta: { anio: 2022, mes: 12 } }     // "MAY0 2022 A DICIEMBRE 2022" (cero por O)
+};
+
+// Recibos cuyo periodo_desde/periodo_hasta ya lo escribe una corrección puntual de este mismo
+// archivo (5: recibo 2384: 9: recibo 2229) -- 31 los deja intactos, ver su comentario arriba.
+const RECIBOS_PERIODO_GESTIONADO_APARTE = [2384, 2229];
+
+// Prioridad: 1) override manual puntual, 2) texto del concepto, 3) ledger real (Abono +
+// imputaciones a CargoMensual), solo como respaldo cuando el texto no trae ningún año.
+//
+// Investigado 2026-08-20 (caso real: recibo 2470 de R007): el ledger NO es la fuente correcta
+// para esto pese a ser "la plata ya verificada" -- cuando el sobrante de un recibo se desvió por
+// FIFO hacia deuda vieja SIN RELACIÓN (el patrón que motivó media docena de correcciones de este
+// archivo: R007, R049, S0312...), el rango real de imputaciones de ese abono queda mucho más
+// ancho que lo que el recibo declara (ej. "Julio 2024 a Julio 2026" para un recibo que dice
+// "Enero a Diciembre 2026") -- técnicamente cierto sobre a dónde fue la plata, pero es peor que
+// el bug original para el propósito de esta pantalla: mostrar lo que la colilla física dice, no
+// una traza forense de cada peso. El texto del propio concepto es la fuente correcta casi
+// siempre (y coincide con el ledger en el caso común, donde no hubo desvío) -- el ledger solo
+// entra cuando el texto no trae ningún año (ej. "Mayo a Diciembre" sin año, y sin ningún Abono
+// real tampoco: ahí no hay ninguna fuente y se deja tal cual).
+function derivarPeriodoCorrecto(db, { detalleId, numeroRecibo, concepto }) {
+  if (SOBRESCRITURA_PERIODO_MANUAL[numeroRecibo]) return SOBRESCRITURA_PERIODO_MANUAL[numeroRecibo];
+
+  const porTexto = inferirPeriodoDeTexto(concepto);
+  if (porTexto) return porTexto;
+
+  const abono = db.prepare(`SELECT id FROM cartera_movimientos WHERE recibo_detalle_id=? AND tipo='Abono'`).get(detalleId);
+  if (!abono) return null;
+
+  const reales = db.prepare(`
+    SELECT cg.anio, cg.mes FROM cartera_imputaciones i JOIN cartera_movimientos cg ON cg.id=i.cargo_id
+    WHERE i.abono_id=? AND cg.anio IS NOT NULL AND cg.mes IS NOT NULL
+  `).all(abono.id);
+  if (reales.length === 0) return null;
+
+  const cod = x => x.anio * 12 + x.mes;
+  const minReal = reales.reduce((a, b) => cod(a) < cod(b) ? a : b);
+  const maxReal = reales.reduce((a, b) => cod(a) > cod(b) ? a : b);
+  return { desde: { anio: minReal.anio, mes: minReal.mes }, hasta: { anio: maxReal.anio, mes: maxReal.mes } };
 }
 
 // Créditos tipo='Abono' ligados a un recibo_detalle cuyo periodo_hasta declarado va más allá
@@ -741,7 +1103,12 @@ function cargosPendientesCombinados(db, cuentaId) {
 // DEUDA" -- a diferencia del 1825 de arriba, que era un error de transcripción, no una
 // instrucción). Nunca activarlo por defecto: cada uso es una decisión caso por caso, con su
 // propia evidencia documentada en el bloque que llama a esta función.
-function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, periodoHasta, forzarFifoSinPeriodo = false }) {
+// permitirFifoConPeriodo (default true) es la excepción simétrica a forzarFifoSinPeriodo: para
+// un abono CON período declarado cuyo sobrante NO debe caer al FIFO general -- porque el propio
+// texto ya declara un destino específico para ese sobrante (meses futuros que todavía no existen
+// como cargo), y aplicarlo contra la deuda vieja (lo más antiguo, por diseño del FIFO) contradice
+// esa evidencia en vez de honrarla. Ver REIMPUTACION_S0312/recibo 2362 para el caso real.
+function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, periodoHasta, forzarFifoSinPeriodo = false, permitirFifoConPeriodo = true }) {
   let restante = monto;
   let periodoImputados = 0;
   let fifoImputados = 0;
@@ -755,7 +1122,8 @@ function reimputarAbono(db, repo, { abonoId, cuentaId, monto, periodoDesde, peri
     restante = sobrante;
   }
 
-  if (esMayor(restante, 0) && (meses.length > 0 || forzarFifoSinPeriodo)) {
+  const corresponFifo = meses.length > 0 ? permitirFifoConPeriodo : forzarFifoSinPeriodo;
+  if (esMayor(restante, 0) && corresponFifo) {
     const cargosFifo = cargosPendientesCombinados(db, cuentaId);
     const { imputaciones: impFifo, sobrante: sobranteFifo } = distribuir({ modo: MODOS.ABONO_DEUDA_FIFO, cargos: cargosFifo, monto: restante });
     for (const imp of impFifo) repo.crearImputacion({ abonoId, cargoId: imp.cargoId, monto: imp.monto });
@@ -804,7 +1172,6 @@ function ejecutarPaso9b({ dbService }) {
   let correccionAperturaS044 = null;
   let correccionPeriodo2229 = null;
   let reimputacion2229 = null;
-  let correccionS058 = null;
   const suspensionesSinCartera = [];
   let inactivaS063 = null;
   let redencionR007 = null;
@@ -817,8 +1184,58 @@ function ejecutarPaso9b({ dbService }) {
   let recalculoR0831 = null;
   const pagosAdelantados = [];
   const pendientesManuales = [];
+  let mergeR0081S058 = null;
+  let reimputacionS0312 = null;
+  let redencionR049 = null;
+  let reasignacion458 = null;
+  const suspensionIncobrables = [];
+  let reciboFaltanteS0244 = null;
+  const aperturaIncobrables = [];
+  const cuentasNuevas2026 = [];
+  const periodosTextoCorregidos = [];
 
   const transaccion = db.transaction(() => {
+    // 31. Ver comentario junto a derivarPeriodoCorrecto más arriba. Corre PRIMERO en la
+    // transacción, antes que cualquier otra corrección que también toque periodo_desde/hasta:
+    // así una corrección puntual con más contexto (ej. un typo en el concepto que el parser
+    // genérico no puede adivinar, como "ENERIO" en el recibo 2229) siempre tiene la última
+    // palabra sobre su propio recibo. RECIBOS_PERIODO_GESTIONADO_APARTE cubre además los que
+    // esas correcciones puntuales SÍ escriben en periodo_desde/hasta -- sin la exclusión, un
+    // typo así haría que 31 y la corrección puntual se corrigieran mutuamente en cada corrida
+    // sin converger nunca a un estado idempotente (verificado con el test de S044/2229).
+    {
+      const todos = db.prepare(`
+        SELECT rd.id AS detalleId, rd.periodo_desde, rd.periodo_hasta, rd.concepto, r.numero_recibo
+        FROM recibo_detalles rd JOIN recibos r ON r.id = rd.recibo_id
+        WHERE rd.periodo_desde IS NOT NULL AND r.numero_recibo NOT IN (${RECIBOS_PERIODO_GESTIONADO_APARTE.join(',')})
+      `).all();
+
+      for (const fila of todos) {
+        const correcto = derivarPeriodoCorrecto(db, {
+          detalleId: fila.detalleId, numeroRecibo: fila.numero_recibo, concepto: fila.concepto
+        });
+        if (!correcto) continue;
+
+        const guardadoDesde = parsearPeriodoAnioMes(fila.periodo_desde);
+        const guardadoHasta = parsearPeriodoAnioMes(fila.periodo_hasta);
+        const desdeIgual = guardadoDesde && guardadoDesde.anio === correcto.desde.anio && guardadoDesde.mes === correcto.desde.mes;
+        const hastaIgual = guardadoHasta && guardadoHasta.anio === correcto.hasta.anio && guardadoHasta.mes === correcto.hasta.mes;
+        if (desdeIgual && hastaIgual) {
+          periodosTextoCorregidos.push({ numeroRecibo: fila.numero_recibo, corregido: false });
+          continue;
+        }
+
+        db.prepare('UPDATE recibo_detalles SET periodo_desde=?, periodo_hasta=? WHERE id=?').run(
+          formatearPeriodoTexto(correcto.desde), formatearPeriodoTexto(correcto.hasta), fila.detalleId
+        );
+        periodosTextoCorregidos.push({
+          numeroRecibo: fila.numero_recibo, corregido: true,
+          antes: [fila.periodo_desde, fila.periodo_hasta],
+          despues: [formatearPeriodoTexto(correcto.desde), formatearPeriodoTexto(correcto.hasta)]
+        });
+      }
+    }
+
     // 1. S03311: causar 2024 completo a 10.000
     const cuentaS03311 = idPorCodigo.get(normalizarCodigo('S03311'));
     if (cuentaS03311 === undefined) throw new Error('S03311: no existe en la base -- ¿corrieron los pasos 1-2?');
@@ -1041,43 +1458,9 @@ function ejecutarPaso9b({ dbService }) {
       reimputacion2229 = { abonoId: abono2229.id, reimputado: true, ...r };
     }
 
-    // 10. S058: causar sostenimiento desde febrero 2026 (mes siguiente a la conexión) y
-    // corregir la categoría de "Sin clasificar" a Finca.
-    const cuentaS058 = idPorCodigo.get(normalizarCodigo(CAUSACION_S058.codigoCuenta));
-    if (cuentaS058 === undefined) throw new Error('S058: no existe en la base -- ¿corrieron los pasos 1-2?');
-
-    const categoriaFinca = db.prepare('SELECT id FROM categorias WHERE nombre=?').get(CAUSACION_S058.categoriaNombre);
-    if (!categoriaFinca) throw new Error(`Categoría "${CAUSACION_S058.categoriaNombre}" no existe en la base`);
-
-    const catActualS058 = db.prepare(
-      'SELECT id, categoria_id FROM cuenta_categorias WHERE cuenta_id=? AND fecha_fin IS NULL'
-    ).get(cuentaS058);
-    if (!catActualS058) throw new Error('S058: no tiene categoría activa en cuenta_categorias -- ¿corrió el paso de categorías?');
-
-    let categoriaS058Corregida;
-    if (catActualS058.categoria_id === categoriaFinca.id) {
-      categoriaS058Corregida = false;
-    } else {
-      db.prepare('UPDATE cuenta_categorias SET categoria_id=? WHERE id=?').run(categoriaFinca.id, catActualS058.id);
-      categoriaS058Corregida = true;
-    }
-
-    let borradosS058 = 0;
-    for (let mes = CAUSACION_S058.mesInicio; mes <= CAUSACION_S058.mesFin; mes++) {
-      borradosS058 += db.prepare(
-        "DELETE FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?"
-      ).run(cuentaS058, CAUSACION_S058.anio, mes).changes;
-    }
-    const causacionS058 = [];
-    for (let mes = CAUSACION_S058.mesInicio; mes <= CAUSACION_S058.mesFin; mes++) {
-      const movId = repo.crearMovimiento({
-        cuentaId: cuentaS058, fecha: primerDiaDelMes(CAUSACION_S058.anio, mes),
-        tipo: 'CargoMensual', exigible: 1, monto: CAUSACION_S058.monto,
-        anio: CAUSACION_S058.anio, mes, observaciones: OBSERVACION_CAUSACION_S058
-      });
-      causacionS058.push({ mes, movId });
-    }
-    correccionS058 = { categoriaCorregida: categoriaS058Corregida, borrados: borradosS058, creados: causacionS058.length };
+    // 10. (retirada 2026-08-20, ver corrección 23) -- causaba sostenimiento para S058, cuenta que
+    // la corrección 23 elimina por ser un duplicado de R0081. R0081 ya causa esos mismos meses por
+    // su cuenta, así que no hace falta reemplazarla por nada.
 
     // 11. Siete cuentas sin cartera y sin barrido de campo: suspender sin causar nada. Se
     // detecta por si la vigencia abierta ya es exactamente el Suspendido esperado; si no,
@@ -1545,6 +1928,351 @@ function ejecutarPaso9b({ dbService }) {
         aplicado: redencion.aplicado, saldoRestante: redencion.saldoRestante
       });
     }
+
+    // 23. Ver comentario junto a MERGE_R0081_S058 más arriba.
+    {
+      const cuentaDestinoMerge = idPorCodigo.get(normalizarCodigo(MERGE_R0081_S058.codigoDestino));
+      if (cuentaDestinoMerge === undefined) {
+        throw new Error(`${MERGE_R0081_S058.codigoDestino}: no existe en la base -- ¿corrieron los pasos 1-2?`);
+      }
+
+      const cuentaOrigenMerge = idPorCodigo.get(normalizarCodigo(MERGE_R0081_S058.codigoOrigen));
+      if (cuentaOrigenMerge === undefined) {
+        // S058 ya no existe -- esta corrección ya corrió (o nunca hizo falta, en un reimport
+        // limpio donde codigos.js ya mapea R0081 directo, sin crear S058 aparte).
+        mergeR0081S058 = { yaAplicado: true };
+      } else {
+        const reciboPunto = db.prepare('SELECT id, cuenta_id, observaciones FROM recibos WHERE numero_recibo=?')
+          .get(MERGE_R0081_S058.numeroReciboPunto);
+        if (!reciboPunto) throw new Error(`Recibo ${MERGE_R0081_S058.numeroReciboPunto}: no existe -- ¿corrió el paso 7?`);
+        if (reciboPunto.cuenta_id !== cuentaOrigenMerge) {
+          throw new Error(
+            `Recibo ${MERGE_R0081_S058.numeroReciboPunto}: se esperaba en cuenta_id=${cuentaOrigenMerge} ` +
+            `(${MERGE_R0081_S058.codigoOrigen}), está en cuenta_id=${reciboPunto.cuenta_id} -- revisar antes de fusionar a ciegas`
+          );
+        }
+
+        const observacionesNuevas = (reciboPunto.observaciones ? reciboPunto.observaciones + ' | ' : '') + OBSERVACION_MERGE_R0081_S058;
+        db.prepare('UPDATE recibos SET cuenta_id=?, observaciones=? WHERE id=?')
+          .run(cuentaDestinoMerge, observacionesNuevas, reciboPunto.id);
+        const puntoMovido = db.prepare('UPDATE nuevos_puntos SET cuenta_id=? WHERE cuenta_id=?')
+          .run(cuentaDestinoMerge, cuentaOrigenMerge).changes;
+        // Los CargoMensual de la cuenta origen son duplicados exactos de los que ya tiene la
+        // cuenta destino (misma deuda real, cobrada dos veces) -- se borran, no se mueven.
+        const movimientosDuplicadosBorrados = db.prepare('DELETE FROM cartera_movimientos WHERE cuenta_id=?')
+          .run(cuentaOrigenMerge).changes;
+        db.prepare('DELETE FROM cuenta_propietarios WHERE cuenta_id=?').run(cuentaOrigenMerge);
+        db.prepare('DELETE FROM cuenta_estados WHERE cuenta_id=?').run(cuentaOrigenMerge);
+        db.prepare('DELETE FROM cuenta_categorias WHERE cuenta_id=?').run(cuentaOrigenMerge);
+        db.prepare('DELETE FROM cuentas WHERE id=?').run(cuentaOrigenMerge);
+
+        mergeR0081S058 = {
+          yaAplicado: false, reciboMovido: reciboPunto.id, puntoMovido: puntoMovido > 0,
+          movimientosDuplicadosBorrados, cuentaOrigenEliminada: cuentaOrigenMerge
+        };
+      }
+    }
+
+    // 24. Ver comentario junto a REIMPUTACION_S0312 más arriba.
+    {
+      const cuentaS0312 = idPorCodigo.get(normalizarCodigo(REIMPUTACION_S0312.codigoCuenta));
+      if (cuentaS0312 === undefined) throw new Error('S0312: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+      const resultados = [];
+      for (const r of REIMPUTACION_S0312.recibos) {
+        const { detalleId } = getReciboDetalle(db, r.numeroRecibo);
+        const abono = getAbonoPorDetalle(db, detalleId);
+        if (!abono) throw new Error(`Recibo ${r.numeroRecibo}: no tiene movimiento de Abono -- ¿corrió el paso 8?`);
+        if (abono.cuenta_id !== cuentaS0312) {
+          throw new Error(`Recibo ${r.numeroRecibo}: se esperaba en cuenta_id=${cuentaS0312} (S0312), está en cuenta_id=${abono.cuenta_id}`);
+        }
+
+        const [anioDesde, mesDesde] = r.periodoDesde.split('-').map(Number);
+        const imputacionesAbono = db.prepare(`
+          SELECT cg.anio, cg.mes FROM cartera_imputaciones i JOIN cartera_movimientos cg ON cg.id = i.cargo_id
+          WHERE i.abono_id = ?
+        `).all(abono.id);
+        // Ordena los meses reales primero (AperturaOpaca no tiene anio/mes -- no sirve para
+        // comparar contra el período declarado del recibo).
+        const primeraImputacion = imputacionesAbono
+          .filter(x => x.anio !== null)
+          .sort((a, b) => a.anio - b.anio || a.mes - b.mes)[0];
+        const tocaApertura = imputacionesAbono.some(x => x.anio === null);
+        const yaCorregido = !!primeraImputacion &&
+          primeraImputacion.anio === anioDesde && primeraImputacion.mes === mesDesde &&
+          (r.permitirFifoConPeriodo !== false || !tocaApertura);
+
+        if (yaCorregido) {
+          resultados.push({ numeroRecibo: r.numeroRecibo, reimputado: false });
+          continue;
+        }
+
+        // Deshacer: borrar imputaciones e cualquier crédito que este abono haya dejado, y
+        // restaurar el movimiento a su monto original completo antes de reaplicar.
+        const creditoPrevio = db.prepare('SELECT COALESCE(SUM(monto),0) AS s FROM cuenta_creditos WHERE recibo_detalle_id=?')
+          .get(detalleId).s;
+        const montoOriginal = redondear(Math.abs(abono.monto) + creditoPrevio);
+        db.prepare('DELETE FROM cartera_imputaciones WHERE abono_id=?').run(abono.id);
+        db.prepare('DELETE FROM cuenta_creditos WHERE recibo_detalle_id=?').run(detalleId);
+        db.prepare('UPDATE cartera_movimientos SET monto=? WHERE id=?').run(-montoOriginal, abono.id);
+
+        const resultado = reimputarAbono(db, repo, {
+          abonoId: abono.id, cuentaId: cuentaS0312, monto: montoOriginal,
+          periodoDesde: r.periodoDesde, periodoHasta: r.periodoHasta,
+          permitirFifoConPeriodo: r.permitirFifoConPeriodo
+        });
+        // La observación del crédito que crea reimputarAbono es genérica; se sobreescribe con
+        // el detalle específico de esta corrección, si quedó algún sobrante.
+        if (resultado.creditoId) {
+          db.prepare('UPDATE cuenta_creditos SET observaciones=? WHERE id=?')
+            .run(r.observaciones, resultado.creditoId);
+        }
+        resultados.push({ numeroRecibo: r.numeroRecibo, reimputado: true, ...resultado });
+      }
+      reimputacionS0312 = { cuentaId: cuentaS0312, resultados };
+    }
+
+    // 25. Ver comentario junto a REDENCION_R049 más arriba. Mismo patrón que S023/S0501/S022.
+    {
+      const cuentaR049 = idPorCodigo.get(normalizarCodigo(REDENCION_R049.codigoCuenta));
+      if (cuentaR049 === undefined) throw new Error('R049: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+      const cargoMayoR049 = db.prepare(
+        `SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?`
+      ).get(cuentaR049, REDENCION_R049.hasta.anio, REDENCION_R049.hasta.mes);
+      if (!cargoMayoR049) {
+        throw new Error(`R049: no tiene CargoMensual de ${REDENCION_R049.hasta.anio}-${REDENCION_R049.hasta.mes} -- ¿corrieron los pasos 9/10?`);
+      }
+      const cubiertoMayoR049 = db.prepare(
+        `SELECT COALESCE(SUM(monto),0) AS total FROM cartera_imputaciones WHERE cargo_id=?`
+      ).get(cargoMayoR049.id).total;
+      const pendienteMayoR049 = redondear(cargoMayoR049.monto - cubiertoMayoR049);
+
+      if (!esMayor(pendienteMayoR049, 0)) {
+        redencionR049 = { yaCorregido: true };
+      } else {
+        const disponibleR049 = repo.getSaldoCreditoDisponible(cuentaR049);
+        if (Math.abs(disponibleR049 - REDENCION_R049.montoARedimir) >= 1 && disponibleR049 < REDENCION_R049.montoARedimir) {
+          throw new Error(
+            `R049: se esperaba al menos $${REDENCION_R049.montoARedimir} de credito disponible antes ` +
+            `de esta correccion, hay $${disponibleR049} -- revisar antes de aplicar a ciegas`
+          );
+        }
+
+        const pendientesR049 = cargosPendientesEnRango(db, cuentaR049, REDENCION_R049.desde, REDENCION_R049.hasta);
+        const redencion = service.redimirCredito({
+          cuentaId: cuentaR049, fecha: REDENCION_R049.fecha, monto: REDENCION_R049.montoARedimir,
+          modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: pendientesR049.map(c => c.id),
+          observaciones: OBSERVACION_REDENCION_R049
+        });
+
+        redencionR049 = { yaCorregido: false, aplicado: redencion.aplicado, saldoRestante: redencion.saldoRestante };
+      }
+    }
+
+    // 26. Ver comentario junto a REASIGNACION_RECIBO_458 más arriba.
+    {
+      const cuentaOrigen458 = idPorCodigo.get(normalizarCodigo(REASIGNACION_RECIBO_458.codigoCuentaOrigen));
+      const cuentaDestino458 = idPorCodigo.get(normalizarCodigo(REASIGNACION_RECIBO_458.codigoCuentaDestino));
+      if (cuentaOrigen458 === undefined) throw new Error('S0331: no existe en la base -- ¿corrieron los pasos 1-2?');
+      if (cuentaDestino458 === undefined) throw new Error('S03311: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+      const recibo458 = db.prepare('SELECT id, cuenta_id FROM recibos WHERE numero_recibo=?').get(REASIGNACION_RECIBO_458.numeroRecibo);
+      if (!recibo458) throw new Error(`Recibo ${REASIGNACION_RECIBO_458.numeroRecibo}: no existe -- ¿corrió el paso 7?`);
+
+      if (recibo458.cuenta_id === cuentaDestino458) {
+        reasignacion458 = { yaAplicado: true };
+      } else {
+        if (recibo458.cuenta_id !== cuentaOrigen458) {
+          throw new Error(
+            `Recibo ${REASIGNACION_RECIBO_458.numeroRecibo}: se esperaba en cuenta_id=${cuentaOrigen458} ` +
+            `(S0331), está en cuenta_id=${recibo458.cuenta_id} -- revisar antes de reasignar a ciegas`
+          );
+        }
+        const puntoDestino458 = db.prepare('SELECT id FROM nuevos_puntos WHERE cuenta_id=?').get(cuentaDestino458);
+        if (!puntoDestino458) throw new Error('S03311: no tiene fila en nuevos_puntos -- ¿corrió el paso 6?');
+
+        db.prepare('UPDATE recibos SET cuenta_id=? WHERE id=?').run(cuentaDestino458, recibo458.id);
+        db.prepare('UPDATE nuevos_puntos SET fecha_registro=?, observaciones=? WHERE id=?')
+          .run(REASIGNACION_RECIBO_458.fechaRealPago, OBSERVACION_REASIGNACION_458, puntoDestino458.id);
+
+        reasignacion458 = { yaAplicado: false, reciboId: recibo458.id, puntoActualizado: puntoDestino458.id };
+      }
+    }
+
+    // 27. Ver comentario junto a SUSPENSION_INCOBRABLES más arriba.
+    for (const item of SUSPENSION_INCOBRABLES) {
+      const cuentaId = idPorCodigo.get(normalizarCodigo(item.codigoCuenta));
+      if (cuentaId === undefined) throw new Error(`${item.codigoCuenta}: no existe en la base -- ¿corrieron los pasos 1-2?`);
+
+      const vigente = db.prepare(
+        `SELECT id, estado, fecha_inicio FROM cuenta_estados WHERE cuenta_id=? AND fecha_fin IS NULL`
+      ).get(cuentaId);
+      if (!vigente || vigente.estado !== 'Suspendido') {
+        throw new Error(`${item.codigoCuenta}: se esperaba un estado Suspendido vigente -- estado real: ${vigente ? vigente.estado : 'ninguno'}`);
+      }
+      if (vigente.fecha_inicio === item.fechaInicio) {
+        suspensionIncobrables.push({ codigo: item.codigoCuenta, yaCorregido: true, borrados: 0 });
+        continue;
+      }
+
+      const [anioCorte, mesCorte] = item.fechaInicio.split('-').map(Number);
+      const corteCod = anioCorte * 12 + (mesCorte - 1);
+      const cargosEnRango = db.prepare(
+        `SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND (anio*12+(mes-1)) >= ?`
+      ).all(cuentaId, corteCod);
+      const conImputacionReal = cargosEnRango.filter(c =>
+        db.prepare('SELECT COUNT(*) n FROM cartera_imputaciones WHERE cargo_id=?').get(c.id).n > 0
+      );
+      if (conImputacionReal.length > 0) {
+        throw new Error(
+          `${item.codigoCuenta}: tiene ${conImputacionReal.length} CargoMensual con una imputación real ` +
+          `dentro del nuevo rango suspendido -- no se puede borrar a ciegas, revisar antes de continuar`
+        );
+      }
+
+      db.prepare('UPDATE cuenta_estados SET fecha_inicio=?, motivo=? WHERE id=?')
+        .run(item.fechaInicio, OBSERVACION_SUSPENSION_INCOBRABLES, vigente.id);
+      let borrados = 0;
+      for (const c of cargosEnRango) {
+        borrados += db.prepare('DELETE FROM cartera_movimientos WHERE id=?').run(c.id).changes;
+      }
+      suspensionIncobrables.push({ codigo: item.codigoCuenta, yaCorregido: false, borrados });
+    }
+
+    // 28. Ver comentario junto a RECIBO_FALTANTE_S0244 más arriba.
+    {
+      const cuentaS0244Falt = idPorCodigo.get(normalizarCodigo(RECIBO_FALTANTE_S0244.codigoCuenta));
+      if (cuentaS0244Falt === undefined) throw new Error('S0244: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+      const yaExiste = db.prepare('SELECT id FROM recibos WHERE numero_recibo=?').get(RECIBO_FALTANTE_S0244.numeroRecibo);
+      if (yaExiste) {
+        reciboFaltanteS0244 = { yaAplicado: true };
+      } else {
+        const propietarioS0244Falt = db.prepare(
+          'SELECT propietario_id FROM cuenta_propietarios WHERE cuenta_id=? AND fecha_fin IS NULL'
+        ).get(cuentaS0244Falt);
+        if (!propietarioS0244Falt) throw new Error('S0244: no tiene propietario vigente en cuenta_propietarios');
+
+        const reciboId = db.prepare(`
+          INSERT INTO recibos (numero_recibo, cuenta_id, propietario_id, fecha_recibo, total, observaciones)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+          RECIBO_FALTANTE_S0244.numeroRecibo, cuentaS0244Falt, propietarioS0244Falt.propietario_id,
+          RECIBO_FALTANTE_S0244.fecha, RECIBO_FALTANTE_S0244.valor, OBSERVACION_RECIBO_S0244
+        ).lastInsertRowid;
+        const detalleId = db.prepare(`
+          INSERT INTO recibo_detalles (recibo_id, concepto, periodo_desde, periodo_hasta, valor)
+          VALUES (?, ?, ?, ?, ?)
+        `).run(reciboId, RECIBO_FALTANTE_S0244.concepto, 'Enero 2021', 'Diciembre 2021', RECIBO_FALTANTE_S0244.valor).lastInsertRowid;
+        const abonoId = repo.crearMovimiento({
+          cuentaId: cuentaS0244Falt, fecha: RECIBO_FALTANTE_S0244.fecha, tipo: 'Abono', exigible: 1,
+          monto: -RECIBO_FALTANTE_S0244.valor, reciboDetalleId: detalleId
+        });
+
+        const resultado = reimputarAbono(db, repo, {
+          abonoId, cuentaId: cuentaS0244Falt, monto: RECIBO_FALTANTE_S0244.valor,
+          periodoDesde: RECIBO_FALTANTE_S0244.periodoDesde, periodoHasta: RECIBO_FALTANTE_S0244.periodoHasta
+        });
+
+        reciboFaltanteS0244 = { yaAplicado: false, reciboId, detalleId, abonoId, ...resultado };
+      }
+    }
+
+    // 29. Ver comentario junto a APERTURA_INCOBRABLES más arriba.
+    for (const codigo of APERTURA_INCOBRABLES) {
+      const cuentaId = idPorCodigo.get(normalizarCodigo(codigo));
+      if (cuentaId === undefined) throw new Error(`${codigo}: no existe en la base -- ¿corrieron los pasos 1-2?`);
+
+      const apertura = db.prepare(`SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='AperturaOpaca'`).get(cuentaId);
+      if (!apertura || apertura.monto === 0) {
+        aperturaIncobrables.push({ codigo, yaCorregido: true });
+        continue;
+      }
+
+      const conImputacionReal = db.prepare('SELECT COUNT(*) n FROM cartera_imputaciones WHERE cargo_id=?').get(apertura.id).n;
+      if (conImputacionReal > 0) {
+        throw new Error(
+          `${codigo}: la AperturaOpaca tiene ${conImputacionReal} imputación(es) real(es) -- ` +
+          `no se puede poner en 0 a ciegas, revisar antes de continuar`
+        );
+      }
+
+      repo.actualizarMontoMovimiento(apertura.id, 0, OBSERVACION_APERTURA_INCOBRABLES);
+      aperturaIncobrables.push({ codigo, yaCorregido: false, montoAnterior: apertura.monto });
+    }
+
+    // 30. Ver comentario junto a CUENTAS_NUEVAS_2026 más arriba.
+    {
+      const CuentaRepository = require('../../src/repositories/CuentaRepository');
+      const CuentaEstadoRepository = require('../../src/repositories/CuentaEstadoRepository');
+      const CategoriaRepository = require('../../src/repositories/CategoriaRepository');
+      const NuevoPuntoRepository = require('../../src/repositories/NuevoPuntoRepository');
+      const cuentaRepo = new CuentaRepository(dbService);
+      const estadoRepo = new CuentaEstadoRepository(dbService);
+      const categoriaRepo = new CategoriaRepository(dbService);
+      const puntoRepo = new NuevoPuntoRepository(dbService);
+      const categoriaFinca = categoriaRepo.findByNombre('Finca');
+      if (!categoriaFinca) throw new Error('Categoría "Finca" no encontrada en la base');
+
+      for (const item of CUENTAS_NUEVAS_2026) {
+        const yaExiste = db.prepare('SELECT id FROM cuentas WHERE codigo=?').get(item.codigo);
+        if (yaExiste) {
+          cuentasNuevas2026.push({ codigo: item.codigo, yaAplicado: true });
+          continue;
+        }
+
+        const reciboExistente = db.prepare('SELECT id FROM recibos WHERE numero_recibo=?').get(item.numeroRecibo);
+        if (reciboExistente) {
+          throw new Error(
+            `Recibo ${item.numeroRecibo}: ya existe en la base pero ${item.codigo} todavía no -- ` +
+            `estado inesperado, revisar antes de crear la cuenta a ciegas`
+          );
+        }
+
+        const cuentaId = cuentaRepo.create({
+          codigo: item.codigo, direccion: 'Sin dirección registrada', estado: 'Activo',
+          observaciones: OBSERVACION_CUENTA_NUEVA_2026,
+          categoria_id: categoriaFinca.id, categoria_fecha_inicio: FECHA_CUENTAS_NUEVAS_2026
+        });
+
+        const propietarioId = db.prepare('INSERT INTO propietarios (nombre_completo) VALUES (?)')
+          .run(item.nombre).lastInsertRowid;
+        db.prepare('INSERT INTO cuenta_propietarios (cuenta_id, propietario_id, fecha_inicio) VALUES (?, ?, ?)')
+          .run(cuentaId, propietarioId, FECHA_CUENTAS_NUEVAS_2026);
+
+        estadoRepo.sembrarVigenciaInicial({
+          cuentaId, estado: 'Activo', fechaInicio: FECHA_CUENTAS_NUEVAS_2026,
+          motivo: OBSERVACION_CUENTA_NUEVA_2026
+        });
+
+        const reciboId = db.prepare(`
+          INSERT INTO recibos (numero_recibo, cuenta_id, propietario_id, fecha_recibo, total, observaciones)
+          VALUES (?, ?, ?, ?, ?, ?)
+        `).run(
+          item.numeroRecibo, cuentaId, propietarioId, FECHA_CUENTAS_NUEVAS_2026, 100000, OBSERVACION_CUENTA_NUEVA_2026
+        ).lastInsertRowid;
+        const detalleId = db.prepare(`
+          INSERT INTO recibo_detalles (recibo_id, concepto, valor) VALUES (?, ?, ?)
+        `).run(reciboId, 'ABONO PUNTO NUEVO DE AGUA', 100000).lastInsertRowid;
+
+        const nuevoPuntoId = puntoRepo.create({
+          cuentaId, valorTotal: VALOR_PUNTO_NUEVO_2026, fechaRegistro: FECHA_CUENTAS_NUEVAS_2026,
+          observaciones: OBSERVACION_CUENTA_NUEVA_2026
+        });
+        puntoRepo.crearAbono({
+          nuevoPuntoId, monto: 100000, fechaAbono: FECHA_CUENTAS_NUEVAS_2026,
+          reciboDetalleId: detalleId, observaciones: OBSERVACION_CUENTA_NUEVA_2026
+        });
+        const { saldoPendiente, estado } = puntoRepo.actualizarSaldoYEstado(nuevoPuntoId);
+
+        cuentasNuevas2026.push({
+          codigo: item.codigo, yaAplicado: false, cuentaId, propietarioId,
+          reciboId, nuevoPuntoId, saldoPendiente, estado
+        });
+      }
+    }
+
   });
   transaccion();
 
@@ -1552,9 +2280,12 @@ function ejecutarPaso9b({ dbService }) {
     s03311Creados, tarifaCorregida, propietarioS0244,
     reasignacion2137, correccion2384, reimputacion2384, recalculoS010,
     correccionAperturaS044, correccionPeriodo2229, reimputacion2229,
-    correccionS058, suspensionesSinCartera, inactivaS063, redencionR007, redencionR007Adelantado,
+    suspensionesSinCartera, inactivaS063, redencionR007, redencionR007Adelantado,
     redencionesReajuste2024, redencionS023, redencionesHuecoTextual2026,
-    limpiezaSuspendidas, creditoR0942, recalculoR0831, pagosAdelantados, pendientesManuales
+    limpiezaSuspendidas, creditoR0942, recalculoR0831, pagosAdelantados, pendientesManuales,
+    mergeR0081S058, reimputacionS0312,
+    redencionR049, reasignacion458, suspensionIncobrables, reciboFaltanteS0244,
+    aperturaIncobrables, cuentasNuevas2026, periodosTextoCorregidos
   };
 }
 
@@ -1562,12 +2293,19 @@ module.exports = {
   ejecutarPaso9b, CUENTAS_TARIFA_CORREGIDA, OBSERVACION_S03311, OBSERVACION_TARIFA, PROPIETARIO_S0244,
   REASIGNACION_RECIBO_2137, CORRECCION_PERIODO_RECIBO_2384, RECALCULO_S010,
   CORRECCION_APERTURA_S044, CORRECCION_PERIODO_RECIBO_2229, OBSERVACION_APERTURA_S044, reimputarAbono,
-  CAUSACION_S058, OBSERVACION_CAUSACION_S058, SUSPENSIONES_SIN_CARTERA, OBSERVACION_SUSPENSION_SIN_CARTERA,
+  SUSPENSIONES_SIN_CARTERA, OBSERVACION_SUSPENSION_SIN_CARTERA,
   INACTIVA_FUSIONADA_S063, OBSERVACION_INACTIVA_S063, REDENCION_R007, OBSERVACION_REDENCION_R007,
   REDENCION_R007_2026, OBSERVACION_REDENCION_R007_2026, REDENCIONES_REAJUSTE_2024,
   REDENCION_S023, OBSERVACION_REDENCION_S023, REDENCIONES_HUECO_TEXTUAL_2026,
   CUENTAS_SUSPENDIDAS_SIN_RECAUSAR, FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS,
   CREDITO_R0942, OBSERVACION_CREDITO_R0942, RECALCULO_R0831, OBSERVACION_RECALCULO_R0831,
   EXCLUSIONES_PAGO_ADELANTADO, OBSERVACION_PAGO_ADELANTADO, candidatosPagoAdelantado,
-  parsearPeriodoAnioMes, periodoAIso
+  parsearPeriodoAnioMes, periodoAIso,
+  MERGE_R0081_S058, OBSERVACION_MERGE_R0081_S058, REIMPUTACION_S0312,
+  OBSERVACION_REIMPUTACION_S0312_2191, OBSERVACION_REIMPUTACION_S0312_2362,
+  REDENCION_R049, OBSERVACION_REDENCION_R049, REASIGNACION_RECIBO_458, OBSERVACION_REASIGNACION_458,
+  SUSPENSION_INCOBRABLES, OBSERVACION_SUSPENSION_INCOBRABLES, RECIBO_FALTANTE_S0244, OBSERVACION_RECIBO_S0244,
+  APERTURA_INCOBRABLES, OBSERVACION_APERTURA_INCOBRABLES,
+  CUENTAS_NUEVAS_2026, OBSERVACION_CUENTA_NUEVA_2026, VALOR_PUNTO_NUEVO_2026, FECHA_CUENTAS_NUEVAS_2026,
+  inferirPeriodoDeTexto, derivarPeriodoCorrecto, formatearPeriodoTexto, SOBRESCRITURA_PERIODO_MANUAL
 };
