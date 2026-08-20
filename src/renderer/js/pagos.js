@@ -973,8 +973,9 @@ const Pagos = {
       </p>
       <div class="form-actions">
         <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
-        <button type="button" class="btn btn-secondary btn-icon" onclick="Recibos.imprimir(${reciboId})">Imprimir Recibo</button>
-        <button type="button" class="btn btn-success btn-icon" onclick="Recibos.exportarPDF(${reciboId})">Descargar PDF</button>
+        ${Recibos.renderSelectorFormato(`confirmacion_${reciboId}`)}
+        <button type="button" class="btn btn-secondary btn-icon" onclick="Recibos.imprimir(${reciboId}, Recibos.leerFormatoSeleccionado('confirmacion_${reciboId}'))">Imprimir Recibo</button>
+        <button type="button" class="btn btn-success btn-icon" onclick="Recibos.exportarPDF(${reciboId}, Recibos.leerFormatoSeleccionado('confirmacion_${reciboId}'))">Descargar PDF</button>
       </div>
     `;
 
