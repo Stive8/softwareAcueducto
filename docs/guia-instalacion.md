@@ -2,7 +2,7 @@
 
 **Documento técnico**, dirigido a la persona que va a instalar o desplegar el sistema en el equipo de la asociación.
 
-_Basado en el código del repositorio a fecha 2026-07-16 (commit `2093aad`). Actualizado 2026-07-21: se agregó el §9 sobre el checkpoint contable (incluida la herramienta `scripts/import-gastos/` para el historial de gastos), a raíz de las nuevas funciones "Registrar Retiro" y "Ajustar saldos" en Caja y Bancos._
+_Basado en el código del repositorio a fecha 2026-07-16 (commit `2093aad`). Actualizado 2026-07-21: se agregó el §9 sobre el checkpoint contable (incluida la herramienta `scripts/import-gastos/` para el historial de gastos), a raíz de las nuevas funciones "Registrar Retiro" y "Ajustar saldos" en Caja y Bancos. Actualizado 2026-07-22: aclaración sobre la cuenta de Google Drive a usar (§8). Actualizado 2026-07-27: §14 ahora documenta la cuenta de Administrador de recuperación como funcionalidad implementada (ya no pendiente), y se agregó una nota al inicio del §8 sobre el diálogo de contraseña del primer arranque._
 
 ---
 
@@ -134,13 +134,15 @@ Esta separación es intencional: una vez instalada en "Archivos de Programa", es
 
 ## 8. Primer inicio de sesión y configuración inicial recomendada
 
+> **Antes que nada** — en el primerísimo arranque de esta versión (instalación nueva o actualización sobre una base de datos existente), y antes de que aparezca cualquier ventana, el sistema muestra un cuadro de diálogo nativo con la contraseña de la cuenta de recuperación (`recuperacion`). **Anótala y entrégasela al cliente en un canal seguro aparte del equipo** (no la dejes escrita en el propio computador); guarda tú también una copia para poder asistir por soporte remoto si el cliente la pierde. Solo se muestra esa vez — ver el §14 para el detalle completo.
+
 1. Al abrir la app por primera vez en un equipo sin datos, aparece la pantalla **"Configuración Inicial"**, que ofrece **"Traer datos desde Google Drive"** (si la asociación ya usa el sistema en otro equipo y tiene un respaldo) o **"Continuar sin la nube"** (para un uso nuevo desde cero). Para una instalación nueva, usa "Continuar sin la nube".
 2. En la pantalla de Login, ingresa `admin` / `admin123`.
 3. Ve a **Configuración → Datos de la Asociación** y completa el nombre real, NIT, dirección, ciudad, teléfono, correo y logo de la asociación. Guarda.
 4. Ve a **Configuración → Seguridad** y cambia la contraseña del usuario `admin` por una definitiva.
 5. Ve a **Configuración → Usuarios** y crea las cuentas de usuario reales del personal que va a operar el sistema, asignando el rol correspondiente (Administrador / Usuario / Consulta).
 6. Revisa **Configuración → Parámetros Generales** (próximo número de recibo, valor por defecto de nuevos puntos, saldos iniciales de caja y banco) antes de empezar a registrar operaciones reales.
-7. Si la asociación va a usar Respaldo en la Nube, configúralo desde **Configuración → Respaldo en la Nube**.
+7. Si la asociación va a usar Respaldo en la Nube, configúralo desde **Configuración → Respaldo en la Nube**. **Antes de conectar la cuenta**, define con el cliente qué cuenta de Google se va a usar — se recomienda crear una cuenta de Gmail dedicada a la asociación (no la personal de un directivo), porque **todos los equipos que vayan a sincronizar entre sí deben conectar exactamente la misma cuenta**. No requiere ninguna configuración previa en Google Cloud ni permisos especiales — solo una cuenta de Gmail normal (el detalle completo, incluyendo dónde quedan guardados los archivos, está en el manual de usuario, sección "Configuración → Respaldo en la Nube").
 
 ---
 
@@ -199,6 +201,7 @@ Checklist rápido:
 | "Conectar con Google Drive" falla o no hace nada | Falta el archivo `config/google-credentials.json`, o el firewall/antivirus del equipo bloquea el navegador predeterminado o el servidor local temporal (`localhost`) que usa el proceso de autorización de Google | Verificar que el archivo exista en la instalación; revisar reglas de firewall/antivirus que puedan estar bloqueando conexiones a `localhost` o la apertura del navegador |
 | Se necesita reiniciar todo de cero en un equipo de pruebas | — | Ver `resetear_db.bat` en el §11. **No usar en la instalación real de un cliente** |
 | "Ajustar saldos" rechaza el ajuste con un error sobre el período contable | La fecha del ajuste cae en un período ya Cerrado o Bloqueado (ver §9) | Si el período está Cerrado, reabrirlo desde Contabilidad → Períodos, registrar el ajuste, y volver a cerrarlo. Si está Bloqueado, no se puede reabrir desde la aplicación — usar una fecha de ajuste posterior al bloqueo |
+| El arranque muestra un diálogo de error nada más instalar/actualizar (no abre ninguna ventana) | Muy probablemente la base de datos que se está migrando ya tenía un usuario llamado literalmente `recuperacion` antes de llegar a la migración 035 — el nombre está reservado para la cuenta de recuperación (ver §14) y la migración falla por `UNIQUE` | Revisar Configuración → Usuarios (o consultar la tabla `usuarios` directamente) en la base de datos de origen, renombrar ese usuario antes de instalar la versión nueva |
 
 ---
 
@@ -208,3 +211,19 @@ Checklist rápido:
 2. `config/google-credentials.json` viaja incluido en cada instalador y es compartido entre todos los clientes de este producto (ver §3) — no requiere acción para una venta puntual, pero tenlo presente si el negocio escala.
 3. No existen variables de entorno ni archivos `.env` que configurar: todo lo sensible se reduce a los dos puntos anteriores.
 4. La aplicación usa la configuración de seguridad estándar de Electron (`nodeIntegration: false`, `contextIsolation: true`) — el renderer no tiene acceso directo a Node.js, todo pasa por el puente controlado de `preload.js`.
+
+---
+
+## 14. Cuenta de Administrador de recuperación
+
+Solicitado el 2026-07-22, a partir de una observación de un revisor del manual: si el personal del cliente desactiva o pierde el acceso de todas sus cuentas Administrador (por error, olvido de contraseñas, etc.), no había ninguna forma de recuperar el acceso desde la propia aplicación — había que intervenir la base de datos directamente. **Implementado el 2026-07-27.**
+
+**No confundir con el `admin`/`admin123`** (ver §7 y §8): ese es el usuario operativo inicial, y la recomendación sigue siendo cambiar su contraseña de inmediato — no sirve como mecanismo de recuperación porque es una cuenta normal, editable/desactivable como cualquier otra. La cuenta de recuperación es distinta: usuario `recuperacion`, y no se puede editar, desactivar ni resetear desde la aplicación bajo ninguna circunstancia (ni siquiera un Administrador puede hacerlo) — es justamente lo que garantiza que nunca quede un acueducto sin ningún acceso.
+
+**Cómo funciona**: en el primer arranque de esta versión (instalación nueva o actualización), el sistema genera una contraseña aleatoria — distinta en cada instalación, nunca la misma cadena para dos clientes — y la muestra una única vez en un cuadro de diálogo nativo, antes de que aparezca cualquier ventana (ver la nota al inicio del §8). No queda guardada en ningún archivo de texto ni log; solo su versión cifrada (hash) vive en la base de datos.
+
+**Qué hacer con esa contraseña al instalar**:
+1. Anótala y entrégasela al cliente por un canal seguro, aparte del propio equipo (no la dejes en una nota pegada al monitor ni en un archivo sin cifrar en el mismo computador).
+2. Guarda tú también tu propia copia (en tu gestor de contraseñas, por ejemplo) — es el respaldo que te permite asistir remotamente si el cliente pierde la suya. No hay ninguna otra forma de recuperarla desde dentro de la aplicación si ambas copias se pierden (en ese caso extremo, solo queda un reinicio completo de la base de datos, perdiendo todos los datos, o intervención directa del archivo `.db`).
+
+**Antes de instalar sobre una base de datos de un cliente que ya tiene usuarios cargados**: confirma que ninguno se llame literalmente `recuperacion` (username reservado). Es muy improbable, pero si ocurriera, el arranque fallaría con un mensaje de error claro (ya no en silencio, ver §12) hasta corregirlo a mano.

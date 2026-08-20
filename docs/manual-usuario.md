@@ -2,7 +2,7 @@
 
 Guía para el personal administrativo de la asociación (tesorería, secretaría, junta directiva). No se necesitan conocimientos de informática para usar este manual.
 
-_Versión del documento: 2026-07-21 (agrega Registrar Retiro y Ajustar Saldos en Caja y Bancos, edición parcial de Gastos, y corrige el permiso de Reembolsar Caja Menor)._
+_Versión del documento: 2026-07-27 (agrega Registrar Retiro y Ajustar Saldos en Caja y Bancos, edición parcial de Gastos, corrige el permiso de Reembolsar Caja Menor, explica en detalle la cuenta de Google Drive del Respaldo en la Nube, y documenta la cuenta de recuperación `recuperacion`)._
 
 ---
 
@@ -54,6 +54,8 @@ A lo largo de este manual, las secciones marcadas con 🔒 solo las puede usar e
 ## 2. Cómo iniciar sesión
 
 ### Primera vez que se usa el sistema en un equipo nuevo
+
+> **Antes de que aparezca cualquier pantalla**, la primerísima vez que se abre esta versión del sistema en un equipo (instalación nueva o actualización), se muestra un cuadro de mensaje con la contraseña de una **cuenta de recuperación** (usuario `recuperacion`). Anótala y guárdala en un lugar seguro aparte del computador — solo se muestra esa vez. Ver el detalle en "Usuarios 🔒" (sección Configuración) más abajo.
 
 Si el equipo no tiene ningún dato todavía, antes del login aparece la pantalla **"Configuración Inicial"**:
 
@@ -534,12 +536,30 @@ Solo informativo: muestra la fecha del último respaldo automático que el siste
 
 ### Respaldo en la Nube (Google Drive) — opcional
 
-Permite mantener la información sincronizada entre varios computadores de la misma asociación (por ejemplo, el de tesorería y el de la presidencia), usando una cuenta de Google Drive.
+Permite mantener la información sincronizada entre varios computadores de la misma asociación (por ejemplo, el de tesorería y el de la presidencia), usando una cuenta de Google Drive como punto de encuentro. Es completamente opcional: el sistema funciona igual de completo sin esto, guardando todo solo en el equipo local.
 
-**Cómo conectar la cuenta por primera vez:**
+#### ¿De quién debe ser la cuenta de Google, y qué permisos necesita?
+
+Esto **no es la misma cuenta con la que se inicia sesión en el programa** (esa es interna del sistema, usuario/contraseña). Es una cuenta de Google/Gmail aparte, que actúa como el "casillero" donde se guardan los respaldos.
+
+- **No necesita ningún permiso especial ni configuración previa en Google** — cualquier cuenta de Gmail normal, gratuita, sirve. El sistema pide autorización solo para *"ver y administrar los archivos que esta app cree"* (nunca ve fotos, correos, documentos ni ningún otro archivo que ya exista en esa cuenta — solo las carpetas que el propio sistema crea, descritas abajo).
+- **Recomendación**: crea una cuenta de Google dedicada solo para esto (ej. `acueducto.[nombreasociacion]@gmail.com`), en vez de usar la cuenta personal de un directivo. Si se usa la cuenta personal de una sola persona y esa persona deja la junta, la asociación podría quedarse sin acceso a sus propios respaldos. Guarda el usuario y la contraseña de esa cuenta en un lugar seguro y compartido (no solo en la cabeza de una persona).
+- **Punto crítico — todos los equipos deben conectar la MISMA cuenta**: el sistema sincroniza porque todos los computadores suben/traen archivos del mismo lugar. Si el computador de tesorería conecta una cuenta de Google y el de presidencia conecta *otra* cuenta distinta, cada uno tendrá su propia copia por separado y **nunca se van a sincronizar entre sí** — no hay ningún aviso de error en ese caso, simplemente cada equipo seguirá viendo solo lo suyo. Antes de conectar un segundo equipo, confirma con quien configuró el primero cuál es el correo y la contraseña de esa cuenta compartida.
+
+#### Dónde quedan guardados los datos
+
+Al conectar la cuenta, el sistema crea automáticamente (la primera vez) dos carpetas dentro de esa cuenta de Google Drive — visibles entrando a [drive.google.com](https://drive.google.com) con ese mismo correo:
+
+- **"Acueducto Admin - Respaldos"**: la copia completa de la base de datos (cuentas, pagos, gastos, contabilidad — todo).
+- **"Acueducto Admin - Soportes"**: las facturas/comprobantes escaneados que se adjuntan desde el módulo de Gastos.
+
+No hace falta crear estas carpetas a mano ni tocarlas manualmente — el sistema las administra solo. Tampoco hace falta preocuparse por espacio: una cuenta de Gmail gratuita (15 GB compartidos entre Gmail/Drive/Fotos) alcanza sin problema para años de uso de un solo acueducto.
+
+#### Cómo conectar la cuenta por primera vez
+
 1. Haz clic en **"Conectar con Google Drive"**.
-2. Se abre el navegador de internet del computador (Chrome, Edge, etc.) — inicia sesión con la cuenta de Google que va a usar la asociación y acepta el permiso solicitado.
-3. Cuando termine, verás un mensaje de confirmación en el navegador; vuelve a la ventana del programa.
+2. Se abre el navegador de internet del computador (Chrome, Edge, etc.) — esto es una pantalla de Google, no del programa. Inicia sesión ahí con la cuenta de Google que se haya definido para la asociación (ver recomendación arriba) y acepta el permiso solicitado.
+3. Cuando termine, verás una página de confirmación en el navegador; vuelve a la ventana del programa (no se regresa sola).
 4. El sistema muestra "Cuenta de Google conectada correctamente".
 
 [CAPTURA DE PANTALLA AQUÍ: sección "Respaldo en la Nube" antes y después de conectar la cuenta]
@@ -550,6 +570,10 @@ Una vez conectada, verás cuándo fue el último respaldo subido, y estos botone
 - **"Desconectar cuenta"**: deja de sincronizar con esa cuenta de Google.
 
 > Si otro computador de la asociación subió información más nueva que este equipo no conoce todavía, el sistema te avisa antes de continuar — nunca sobrescribe nada sin avisar primero.
+
+#### Agregar un segundo (o tercer) equipo más adelante
+
+Cuando se instala el sistema en otro computador de la misma asociación, la pantalla previa al login ofrece **"Traer datos desde Google Drive"** (ver sección 2 de este manual). Ahí hay que iniciar sesión con **la misma cuenta de Google** ya conectada en el primer equipo — así trae automáticamente todo lo que ya existe, en vez de empezar de cero.
 
 ### Usuarios 🔒
 
@@ -565,6 +589,10 @@ Aquí se crean las cuentas de acceso del personal y se les asigna su rol.
 **Restablecer la contraseña de otra persona:** botón **"Resetear Clave"** en su fila — solo pide la nueva contraseña, no la anterior (útil si alguien olvidó la suya).
 
 **Desactivar un usuario** que ya no debe tener acceso: botón "Desactivar" en su fila (no se puede desactivar a uno mismo).
+
+**Cuenta de recuperación**: además de los usuarios que ves y administras aquí, el sistema trae una cuenta especial llamada `recuperacion`, que **no aparece en esta lista** y no se puede editar, desactivar ni resetear desde esta pantalla — a propósito. Existe para que la asociación nunca quede sin ningún acceso de Administrador, ni siquiera si todas las demás cuentas se desactivan por error o se pierden todas sus contraseñas.
+
+Su contraseña se genera automáticamente y es distinta en cada instalación (no es la misma para todos los clientes del sistema). Se muestra **una única vez**, en un cuadro de mensaje al primerísimo arranque (ver la nota al principio de la sección "2. Cómo iniciar sesión"). Guarda esa contraseña en un lugar seguro, aparte del propio computador (por ejemplo, un gestor de contraseñas o un documento físico bajo llave), y resérvala para el caso de emergencia de quedar bloqueados de todas las demás cuentas — no la uses para el trabajo diario.
 
 ### Auditoría 🔒
 
