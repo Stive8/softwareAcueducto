@@ -460,7 +460,7 @@ const Pagos = {
                 background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px;
                 padding: 10px 12px; margin-bottom: 8px;">
                 <span>⚠ Saldo a favor disponible: <strong>$${this.formatNumber(saldoAFavorUsable)}</strong></span>
-                <button class="btn btn-success btn-icon" onclick="App.closeModal(); Pagos.showRedimirCreditoModal(${cuentaId})">Usar</button>
+                <button class="btn btn-success btn-icon" onclick="App.closeModal(); Pagos.showRegistrarPagoModal(${cuentaId}, { prefillUsarSaldoFavor: true })">Usar</button>
               </div>
             ` : ''}
           </div>
@@ -677,115 +677,14 @@ const Pagos = {
     });
   },
 
-  // Redime saldo a favor ya existente contra deuda exigible por FIFO (CarteraService.
-  // redimirCredito, conectado 2026-08-10). No genera recibo -- no es plata nueva entrando, es
-  // reasignar la que la cuenta ya tiene guardada en cuenta_creditos.
-  async showRedimirCreditoModal(cuentaId) {
-    const response = await window.api.cartera.getEstadoCartera(cuentaId);
-    if (!response.success) {
-      App.toast('Error al cargar el saldo a favor: ' + response.error, 'error');
-      return;
-    }
-    const disponible = response.data.saldoCreditoDisponible;
-    const hoy = new Date().toISOString().split('T')[0];
-
-    const content = `
-      <div class="modal-header"><h2>Usar Saldo a Favor</h2></div>
-
-      <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
-        <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
-          <strong>Saldo a Favor Disponible:</strong> $${this.formatNumber(disponible)}
-        </p>
-      </div>
-
-      <div id="formError"></div>
-
-      <form id="redimirCreditoForm">
-        <div class="form-group">
-          <label for="monto_redimir">Monto a Redimir <span style="color: #ef4444;">*</span></label>
-          <div class="input-currency">
-            <span class="currency-symbol">$</span>
-            <input type="text" inputmode="numeric" id="monto_redimir" name="monto_redimir" required>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="fecha_redimir">Fecha <span style="color: #ef4444;">*</span></label>
-          <input type="date" id="fecha_redimir" name="fecha_redimir" value="${hoy}" required>
-        </div>
-
-        <div class="form-group">
-          <label for="observaciones_redimir">Observaciones</label>
-          <textarea id="observaciones_redimir" name="observaciones_redimir"></textarea>
-        </div>
-
-        <p id="previewRedimir" style="font-size: 0.8125rem; color: #64748b; margin: -8px 0 16px 0;"></p>
-
-        <div class="form-actions">
-          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Redimir Crédito</button>
-        </div>
-      </form>
-    `;
-
-    App.openModal(content);
-
-    const montoInput = document.getElementById('monto_redimir');
-    App.attachMoneyInput(montoInput);
-    montoInput.value = App.formatMoneyValue(disponible);
-
-    const previewEl = document.getElementById('previewRedimir');
-    const actualizarPreview = () => {
-      const monto = App.parseMoneyValue(montoInput.value);
-      previewEl.textContent = monto > 0
-        ? `Se aplicarán $${this.formatNumber(monto)} a los meses más antiguos pendientes.`
-        : '';
-    };
-    montoInput.addEventListener('input', actualizarPreview);
-    actualizarPreview();
-
-    const opId = crypto.randomUUID();
-    App.protegerEnvioDoble(document.getElementById('redimirCreditoForm'), async () => {
-      const errorDiv = document.getElementById('formError');
-      errorDiv.innerHTML = '';
-
-      const payload = {
-        cuentaId,
-        monto: App.parseMoneyValue(montoInput.value),
-        fecha: document.getElementById('fecha_redimir').value,
-        observaciones: document.getElementById('observaciones_redimir').value.trim() || null,
-        opId
-      };
-
-      try {
-        const resp = await window.api.cartera.redimirCredito(payload);
-        if (resp.success) {
-          App.closeModal();
-          App.toast(`Crédito redimido: $${this.formatNumber(resp.data.aplicado)} aplicados a deuda pendiente. Saldo a favor restante: $${this.formatNumber(resp.data.saldoRestante)}.`);
-          this.showDetalleModal(cuentaId);
-          this.loadCuentas();
-        } else {
-          errorDiv.innerHTML = `<div class="error-message">${this.mensajeErrorRedimirCredito(resp.error)}</div>`;
-        }
-      } catch (error) {
-        console.error('Error:', error);
-        errorDiv.innerHTML = `<div class="error-message">Error al redimir el crédito</div>`;
-      }
-    });
-  },
-
-  // Traduce los 2 errores conocidos de CarteraService.redimirCredito a lenguaje claro para
-  // quien opera la caja; cualquier otro error se muestra tal cual (ya viene en español desde
-  // el servicio).
-  mensajeErrorRedimirCredito(error) {
-    if (/no hay .* de crédito disponible/i.test(error)) {
-      return 'El monto ingresado supera el saldo a favor disponible de la cuenta.';
-    }
-    if (/no hay deuda exigible pendiente/i.test(error)) {
-      return 'Esta cuenta no tiene deuda pendiente contra la cual aplicar el crédito.';
-    }
-    return error;
-  },
+  // El botón "Usar saldo a favor" (ver renderCarteraDetalle) abre showRegistrarPagoModal con la
+  // casilla "usar saldo a favor" premarcada, en vez de un modal aparte de redención FIFO ciega:
+  // ese modal ya declara un período explícito (anioInicio/mesInicio/cantidadMeses) y ya usa
+  // asegurarCausacion + aplicarCreditoAMeses -- el mismo mecanismo que un aporte nuevo, sin tope
+  // de meses futuros y sin dejar sobrante suelto (ver PagoService.registrarPagoSostenimiento).
+  // Un solo camino para todo aporte, nuevo o desde crédito guardado. CarteraService.
+  // redimirCredito (FIFO ciego contra deuda vieja/actual) sigue existiendo -- lo usan los
+  // scripts de corrección de la carga histórica -- solo se retiró el botón de esta pantalla.
 
   showCancelarConexionModal(nuevoPuntoId, cuentaId) {
     const content = `
@@ -836,7 +735,13 @@ const Pagos = {
     });
   },
 
-  async showRegistrarPagoModal(cuentaId) {
+  // prefillUsarSaldoFavor (default false): llega en true desde el botón "Usar" del aviso de
+  // saldo a favor (ver renderCarteraDetalle) -- premarca la casilla y calcula el total de una
+  // vez, para que quien cobra no tenga que repetir el gesto de "aplicar crédito" que ya vino a
+  // hacer. El período de inicio sigue siendo estado.siguientePeriodo (el más antiguo pendiente),
+  // igual que cualquier aporte nuevo -- quien cobra ajusta la cantidad de meses según lo que
+  // declare la colilla física.
+  async showRegistrarPagoModal(cuentaId, { prefillUsarSaldoFavor = false } = {}) {
     const [estadoResponse, conexionesResponse] = await Promise.all([
       window.api.pagos.getEstadoCuenta(cuentaId),
       window.api.nuevosPuntos.getByCuentaId(cuentaId)
@@ -887,7 +792,7 @@ const Pagos = {
         ${estado.saldoAFavor > 0 ? `
           <div class="form-group">
             <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
-              <input type="checkbox" id="usar_saldo_favor">
+              <input type="checkbox" id="usar_saldo_favor" ${prefillUsarSaldoFavor ? 'checked' : ''}>
               Aplicar saldo a favor disponible ($${this.formatNumber(estado.saldoAFavor)})
             </label>
           </div>
@@ -940,6 +845,9 @@ const Pagos = {
 
     App.openModal(content, 'large');
     this.setupRegistrarPagoModal(cuentaId, conexionPendiente);
+    if (prefillUsarSaldoFavor && estado.saldoAFavor > 0) {
+      this.simularPago(cuentaId);
+    }
   },
 
   setupRegistrarPagoModal(cuentaId, conexionPendiente) {
