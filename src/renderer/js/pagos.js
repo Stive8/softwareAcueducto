@@ -387,12 +387,18 @@ const Pagos = {
   // "Abonar" punto de conexión NO se muestra acá: ya existe un botón que hace exactamente eso
   // ("Abonar Conexión", ver renderConexionDetalle más arriba en esta misma pantalla) -- repetirlo
   // acá era un botón muerto duplicando uno que sí funciona.
+  // El título de esta sección era "Cartera (nuevo modelo) -- vista de solo lectura": lenguaje
+  // interno de cuando esto era un panel de validación en paralelo al cálculo viejo. Hoy es la
+  // única forma de ver el saldo pendiente, el saldo a favor y el detalle de movimientos de la
+  // cuenta -- no un panel aparte -- así que se renombró a algo que un operador entienda sin
+  // contexto del proyecto. El texto de comparación con el modelo viejo (MOSTRAR_COMPARACION_MODELO_VIEJO)
+  // sigue funcionando igual, solo el título cambió.
   renderCarteraDetalle(estadoViejo, carteraEstado, carteraDetalle, motivoDiferencia) {
     if (!carteraEstado) {
       return `
         <div class="detail-section">
-          <h3>Cartera (nuevo modelo) — vista de solo lectura</h3>
-          <p style="color: #64748b; margin-top: 12px;">No se pudo cargar el detalle del nuevo modelo de cartera.</p>
+          <h3>Cartera y Movimientos</h3>
+          <p style="color: #64748b; margin-top: 12px;">No se pudo cargar el detalle de la cartera.</p>
         </div>
       `;
     }
@@ -415,7 +421,7 @@ const Pagos = {
 
     return `
       <div class="detail-section">
-        <h3>Cartera (nuevo modelo) — vista de solo lectura</h3>
+        <h3>Cartera y Movimientos</h3>
         ${this.MOSTRAR_COMPARACION_MODELO_VIEJO ? `
         <p style="color: #64748b; font-size: 0.8125rem; margin: -4px 0 12px 0;">
           El sistema sigue cobrando con el cálculo de arriba ("Sistema actual"). Esto es el
@@ -457,9 +463,9 @@ const Pagos = {
             ` : ''}
             ${saldoAFavorUsable > 0 ? `
               <div style="display: flex; align-items: center; justify-content: space-between;
-                background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px;
+                background: #dbeafe; border: 1px solid #93c5fd; border-radius: 6px;
                 padding: 10px 12px; margin-bottom: 8px;">
-                <span>⚠ Saldo a favor disponible: <strong>$${this.formatNumber(saldoAFavorUsable)}</strong></span>
+                <span style="color: #1e40af;">💰 Saldo a favor disponible: <strong>$${this.formatNumber(saldoAFavorUsable)}</strong></span>
                 <button class="btn btn-success btn-icon" onclick="App.closeModal(); Pagos.showRegistrarPagoModal(${cuentaId}, { prefillUsarSaldoFavor: true })">Usar</button>
               </div>
             ` : ''}

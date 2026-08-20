@@ -8,11 +8,14 @@ const Contabilidad = {
   gruposReportes: [
     {
       titulo: 'Cartera',
+      // "Cuentas en Mora" / "Cuentas al Día" / "Cuentas con Saldo a Favor" vivían acá
+      // duplicadas -- mismo tipo, mismo endpoint (window.api.reportes.getVistaPreviaHTML) que
+      // las del módulo Reportes, con el mismo título. Se sacaron de acá para no tener el mismo
+      // reporte alcanzable por dos caminos con el mismo nombre; "Cartera por Edades" se queda
+      // porque es el único que no existe en Reportes. El enlace de abajo (ver loadReportesContables)
+      // lleva a las otras tres.
       reportes: [
-        { tipo: 'cartera_por_edades', titulo: 'Cartera por Edades (Aging)', icon: 'clock', descripcion: 'Cuentas activas con mora, clasificadas por rango de antigüedad de la deuda.', destacado: true },
-        { tipo: 'cuentas_en_mora', titulo: 'Cuentas en Mora', icon: 'alertTriangle', descripcion: 'Listado de cuentas que tienen pagos pendientes.' },
-        { tipo: 'cuentas_al_dia', titulo: 'Cuentas al Día', icon: 'checkCircle', descripcion: 'Cuentas activas sin deuda pendiente.' },
-        { tipo: 'cuentas_saldo_favor', titulo: 'Cuentas con Saldo a Favor', icon: 'wallet', descripcion: 'Cuentas que tienen saldo a favor acumulado.' }
+        { tipo: 'cartera_por_edades', titulo: 'Cartera por Edades (Aging)', icon: 'clock', descripcion: 'Cuentas activas con mora, clasificadas por rango de antigüedad de la deuda.', destacado: true }
       ]
     },
     {
@@ -128,28 +131,14 @@ const Contabilidad = {
           </div>
         </div>
 
-        <div class="kpi-grid" style="display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:16px; margin-bottom:32px;">
-          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid #16a34a;">
-            <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Ingresos del Mes</div>
-            <div style="font-size:1.75rem; font-weight:700; color:#16a34a;">$${fmt(data.ingresosMes)}</div>
-          </div>
-          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid #dc2626;">
-            <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Gastos del Mes</div>
-            <div style="font-size:1.75rem; font-weight:700; color:#dc2626;">$${fmt(data.gastosMes)}</div>
-          </div>
-          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid ${utilidadColor};">
+        <!-- Ingresos del Mes, Gastos del Mes, Saldo Disponible y Cuentas en Mora se sacaron de
+             acá: son las mismas cifras que ya muestra el Dashboard principal, recalculadas por
+             otro camino -- este panel se queda solo con lo que de verdad es exclusivo de
+             Contabilidad (el resultado contable del mes). -->
+        <div style="margin-bottom:32px;">
+          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid ${utilidadColor}; max-width:280px;">
             <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Resultado del Mes</div>
             <div style="font-size:1.75rem; font-weight:700; color:${utilidadColor};">${data.resultadoMes < 0 ? '-' : ''}$${fmt(Math.abs(data.resultadoMes))}</div>
-          </div>
-          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid #3b82f6;">
-            <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Saldo Disponible</div>
-            <div style="font-size:1.75rem; font-weight:700; color:#1e293b;">$${fmt(data.saldoDisponible)}</div>
-            <div style="font-size:0.75rem; color:#64748b; margin-top:4px;">Caja $${fmt(data.saldoCaja)} + Banco $${fmt(data.saldoBanco)}</div>
-          </div>
-          <div class="kpi-card" style="background:#fff; border:1px solid #e2e8f0; border-radius:12px; padding:20px; border-left:4px solid #f59e0b; cursor:pointer;" onclick="Contabilidad.mostrarTab('reportes')">
-            <div style="font-size:0.75rem; color:#64748b; text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Cuentas en Mora</div>
-            <div style="font-size:1.75rem; font-weight:700; color:#d97706;">${data.cuentasMora}</div>
-            <div style="font-size:0.75rem; color:#3b82f6; margin-top:4px;">Ver Cartera por Edades →</div>
           </div>
         </div>
 
@@ -1199,6 +1188,15 @@ const Contabilidad = {
 
   // --- Reportes Contables ---
 
+  // Navega al módulo Reportes replicando lo que hace un clic normal en el sidebar (ver
+  // sidebar.js) -- si no se actualiza el ítem activo, el sidebar se queda marcando
+  // "Contabilidad" mientras la página ya muestra Reportes.
+  irAReportes() {
+    document.querySelectorAll('.nav-item').forEach(nav => nav.classList.remove('active'));
+    document.querySelector('.nav-item[data-page="reportes"]')?.classList.add('active');
+    App.loadPage('reportes');
+  },
+
   async loadReportesContables() {
     const body = document.getElementById('contabilidadBody');
 
@@ -1231,6 +1229,12 @@ const Contabilidad = {
           <div class="reportes-grid">
             ${grupo.reportes.map((r, ri) => this.renderCard(r, `${gi}_${ri}`)).join('')}
           </div>
+          ${grupo.titulo === 'Cartera' ? `
+            <p style="margin: 12px 0 0; font-size: 0.8125rem; color: #64748b;">
+              ¿Buscas Cuentas en Mora, al Día o con Saldo a Favor?
+              <a href="#" onclick="Contabilidad.irAReportes(); return false;">Están en el módulo Reportes →</a>
+            </p>
+          ` : ''}
         </div>
       `;
     });
