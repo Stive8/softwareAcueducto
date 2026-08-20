@@ -4,6 +4,25 @@ const Recibos = {
   limit: 10,
   search: '',
 
+  FORMATOS_IMPRESION: [
+    { value: '', label: 'Usar predeterminado' },
+    { value: 'carta', label: 'Carta' },
+    { value: 'termico_80mm', label: 'Térmica 80mm' }
+  ],
+
+  renderSelectorFormato(idPrefix) {
+    return `
+      <select id="formato_${idPrefix}" class="selector-formato-recibo" style="padding: 4px 6px; font-size: 0.8rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+        ${this.FORMATOS_IMPRESION.map(f => `<option value="${f.value}">${f.label}</option>`).join('')}
+      </select>
+    `;
+  },
+
+  leerFormatoSeleccionado(idPrefix) {
+    const el = document.getElementById(`formato_${idPrefix}`);
+    return el ? el.value : '';
+  },
+
   async load() {
     const content = document.getElementById('page-content');
     content.innerHTML = `
@@ -217,8 +236,9 @@ const Recibos = {
               <td>
                 <div class="table-actions">
                   <button class="btn btn-primary btn-icon" onclick="Recibos.showDetailModal(${r.id})">Ver</button>
-                  <button class="btn btn-secondary btn-icon" onclick="Recibos.imprimir(${r.id})">Imprimir</button>
-                  <button class="btn btn-success btn-icon" onclick="Recibos.exportarPDF(${r.id})">PDF</button>
+                  ${this.renderSelectorFormato(`fila_${r.id}`)}
+                  <button class="btn btn-secondary btn-icon" onclick="Recibos.imprimir(${r.id}, Recibos.leerFormatoSeleccionado('fila_${r.id}'))">Imprimir</button>
+                  <button class="btn btn-success btn-icon" onclick="Recibos.exportarPDF(${r.id}, Recibos.leerFormatoSeleccionado('fila_${r.id}'))">PDF</button>
                   ${r.estado !== 'Anulado' ? `<button class="btn btn-warning btn-icon" onclick="Recibos.showAnularModal(${r.id})">Anular</button>` : ''}
                 </div>
               </td>
@@ -328,8 +348,9 @@ const Recibos = {
 
         <div class="form-actions">
           <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
-          <button class="btn btn-secondary" onclick="Recibos.imprimir(${recibo.id})">Imprimir</button>
-          <button class="btn btn-success" onclick="Recibos.exportarPDF(${recibo.id})">Exportar PDF</button>
+          ${this.renderSelectorFormato(`modal_${recibo.id}`)}
+          <button class="btn btn-secondary" onclick="Recibos.imprimir(${recibo.id}, Recibos.leerFormatoSeleccionado('modal_${recibo.id}'))">Imprimir</button>
+          <button class="btn btn-success" onclick="Recibos.exportarPDF(${recibo.id}, Recibos.leerFormatoSeleccionado('modal_${recibo.id}'))">Exportar PDF</button>
           ${recibo.estado !== 'Anulado' ? `<button class="btn btn-secondary" onclick="Recibos.showCorregirMetodoPagoModal(${recibo.id}, '${recibo.metodo_pago}')">Corregir Método de Pago</button>` : ''}
           ${recibo.estado !== 'Anulado' ? `<button class="btn btn-warning" onclick="App.closeModal(); Recibos.showAnularModal(${recibo.id})">Anular</button>` : ''}
         </div>
@@ -454,9 +475,9 @@ const Recibos = {
     });
   },
 
-  async imprimir(id) {
+  async imprimir(id, formato) {
     try {
-      const response = await window.api.recibos.imprimir(id);
+      const response = await window.api.recibos.imprimir(id, formato);
       if (!response.success && !response.canceled) {
         App.toast('Error al imprimir: ' + response.error, 'error');
       }
@@ -466,9 +487,9 @@ const Recibos = {
     }
   },
 
-  async exportarPDF(id) {
+  async exportarPDF(id, formato) {
     try {
-      const response = await window.api.recibos.exportarPDF(id);
+      const response = await window.api.recibos.exportarPDF(id, formato);
       if (response.canceled) return;
       if (response.success) {
         App.toast('PDF guardado en: ' + response.filePath);
