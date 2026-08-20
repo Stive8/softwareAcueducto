@@ -2,7 +2,7 @@
 
 Guía para el personal administrativo de la asociación (tesorería, secretaría, junta directiva). No se necesitan conocimientos de informática para usar este manual.
 
-_Versión del documento: 2026-08-20 (documenta el Reajuste retroactivo de tarifa y el aviso de cargos desalineados en Categorías, el filtro de estado y el uso del saldo a favor guardado en Aportes, y corrige el paso de "Registrar Aporte" que decía que el saldo a favor se descontaba solo)._
+_Versión del documento: 2026-08-20 (documenta el modal de confirmación con Imprimir/Descargar PDF al registrar un aporte o un abono de conexión, el cálculo automático del total en "Registrar Aporte", las coordenadas GPS colapsadas en "Nueva Cuenta", las 4 pestañas de Configuración, y los cambios de nombre en "Cartera y Movimientos"/"Avisos de Cartera" y en el Dashboard Financiero de Contabilidad)._
 
 ---
 
@@ -112,7 +112,7 @@ Arriba de la tabla puedes buscar por código, dirección, propietario o identifi
 2. Completa el formulario:
    - **Código** (obligatorio): tú decides el código, no es automático.
    - **Dirección** (obligatorio).
-   - **Ubicación (opcional)**: si quieres, puedes registrar las coordenadas GPS del punto de conexión de agua (acometida) y de la vivienda. Para copiarlas desde Google Maps en tu celular: mantén presionado el punto exacto en el mapa, toca las coordenadas que aparecen arriba de la pantalla y pégalas aquí. Si el punto de la vivienda es el mismo que la acometida, marca la casilla correspondiente y no hace falta escribirlo dos veces.
+   - **Ubicación (Coordenadas GPS) — opcional**: aparece plegada bajo un título que puedes hacer clic para desplegarla (si la cuenta ya tenía coordenadas guardadas, se abre sola). Ahí puedes registrar las coordenadas GPS del punto de conexión de agua (acometida) y de la vivienda. Para copiarlas desde Google Maps en tu celular: mantén presionado el punto exacto en el mapa, toca las coordenadas que aparecen arriba de la pantalla y pégalas aquí. Si el punto de la vivienda es el mismo que la acometida, marca la casilla correspondiente y no hace falta escribirlo dos veces.
    - **Categoría** (obligatorio): el tipo de predio (Finca, Tienda, etc.).
    - **Categoría Vigente Desde**: normalmente déjalo en la fecha de hoy, salvo que el predio ya existiera desde antes de usar el sistema, en cuyo caso pon la fecha real desde la que aplica esa categoría.
    - **Valor de Conexión (opcional)**: si esta es una conexión nueva que debe pagar un cargo por conectarse al acueducto, indica aquí el valor total.
@@ -243,6 +243,8 @@ Este es el módulo donde se registran los pagos que hacen los propietarios por e
 
 La tabla principal muestra, por cada cuenta: hasta qué mes está pagada, si está **Al día**, **En mora** (y cuántos meses debe), o si tiene **Saldo a Favor**. Puedes filtrar por estado de pago (todas / solo al día / solo en mora / solo con saldo a favor) y, aparte, por estado de la cuenta (Activas — lo que se ve por defecto —, todos los estados, solo suspendidas, o solo inactivas): una cuenta Suspendida no aparece en el filtro por defecto, así que si buscas a alguien y no lo encuentras, revisa este segundo filtro.
 
+La columna **"Avisos de Cartera"** (al final de la tabla, junto a "Acciones") muestra etiquetas cortas cuando corresponde: **"Deuda 2024"** (debe algo de antes de 2024), **"Conexión"** (tiene un cargo de conexión pendiente) o **"Saldo a favor"** (tiene plata guardada de un pago anterior). Para ver el detalle completo de cualquiera de estos avisos, entra al "Ver" de la cuenta.
+
 ### Cómo registrar un aporte (cobro) — paso a paso
 
 1. Busca la cuenta y haz clic en **"Registrar Aporte"**.
@@ -250,23 +252,25 @@ La tabla principal muestra, por cada cuenta: hasta qué mes está pagada, si est
 3. Elige el **Mes y Año de Inicio** del pago (viene sugerido, pero lo puedes cambiar si vas a cobrar un período distinto).
 4. Indica la **Cantidad de Meses a Aportar** — puede ser 1 o varios meses seguidos, incluso de años distintos.
 5. Si la cuenta tiene saldo a favor guardado de un pago anterior, aparece la casilla **"Aplicar saldo a favor disponible"** — solo se descuenta del total si la marcas, no es automático.
-6. Haz clic en **"Calcular Total"** para que el sistema te muestre qué meses exactos se van a cubrir y el valor total a cobrar.
+6. El total a cobrar se calcula solo, apenas abres el formulario y cada vez que cambias el mes, el año o la cantidad de meses — no hace falta apretar ningún botón. El botón **"Calcular Total"** sigue ahí por si quieres forzar el recálculo a mano (por ejemplo, justo antes de confirmar, para revisar una vez más).
 7. Si la cuenta tiene un cargo de conexión pendiente, puedes incluir un **abono a esa conexión** en el mismo pago (opcional).
 8. Confirma la **Fecha de Aporte** (por defecto es hoy) y el **Método de Pago** (Efectivo o Transferencia).
 9. Haz clic en **"Registrar Aporte y Generar Recibo"**.
 
 [CAPTURA DE PANTALLA AQUÍ: formulario de registro de aporte, mostrando el cálculo del total y los meses a cubrir]
 
-Al confirmar, el sistema genera automáticamente el **recibo** correspondiente (ver módulo Recibos).
+Al confirmar, el sistema genera automáticamente el **recibo** correspondiente y muestra una ventana de confirmación con el número de recibo y dos botones: **"Imprimir Recibo"** y **"Descargar PDF"** — ya no hace falta ir después al módulo Recibos a buscarlo a mano. Puedes usar ambos botones (por ejemplo, imprimir para entregar en mano y además guardar el PDF) antes de cerrar la ventana con **"Cerrar"**.
+
+[CAPTURA DE PANTALLA AQUÍ: ventana de confirmación tras registrar un aporte, con los botones Imprimir Recibo y Descargar PDF]
 
 > Si la cuenta no tiene un propietario asignado, el sistema no deja registrar el pago hasta que se le asigne uno (ver módulo Propietarios).
 
 ### Deuda anterior a 2024 y saldo a favor guardado
 
-Dentro del detalle de una cuenta (botón "Ver"), debajo del recuadro de "A pagar" puede aparecer alguno de estos dos avisos:
+Dentro del detalle de una cuenta (botón "Ver"), en la sección **"Cartera y Movimientos"**, debajo del recuadro de "A pagar" puede aparecer alguno de estos dos avisos:
 
-- **Deuda anterior al corte (2024)**: informa cuánto debe la cuenta de antes de 2024, pero es solo informativo — no tiene botón de acción todavía. Para cobrar esa deuda vieja, hazlo como un aporte normal (§"Cómo registrar un aporte") eligiendo como mes de inicio uno de esos meses atrasados.
-- **Saldo a favor disponible**: si la cuenta tiene plata guardada de un pago anterior que quedó sin usar (por ejemplo, pagó de más o pagó por adelantado más de lo que alcanzó a cubrir), aparece aquí con un botón **"Usar"**. Al hacer clic, se abre el formulario de "Registrar Aporte" con la casilla "Aplicar saldo a favor disponible" ya marcada y el total ya calculado — solo falta confirmar el método de pago y la fecha.
+- **Deuda anterior al corte (2024)** (en amarillo, como una alerta real): informa cuánto debe la cuenta de antes de 2024, pero es solo informativo — no tiene botón de acción todavía. Para cobrar esa deuda vieja, hazlo como un aporte normal (§"Cómo registrar un aporte") eligiendo como mes de inicio uno de esos meses atrasados.
+- **Saldo a favor disponible** (en azul, para distinguirlo de una deuda: es plata a favor del cliente, no un problema): si la cuenta tiene plata guardada de un pago anterior que quedó sin usar (por ejemplo, pagó de más o pagó por adelantado más de lo que alcanzó a cubrir), aparece aquí con un botón **"Usar"**. Al hacer clic, se abre el formulario de "Registrar Aporte" con la casilla "Aplicar saldo a favor disponible" ya marcada y el total ya calculado — solo falta confirmar el método de pago y la fecha.
 
 [CAPTURA DE PANTALLA AQUÍ: detalle de una cuenta mostrando el aviso de saldo a favor con el botón "Usar"]
 
@@ -275,7 +279,7 @@ Dentro del detalle de una cuenta (botón "Ver"), debajo del recuadro de "A pagar
 Cuando una cuenta es una conexión nueva con un cargo por conectarse al acueducto, este se administra desde el detalle de la cuenta (botón "Ver" en Aportes):
 
 - Si aún no tiene cargo registrado: botón **"Agregar Cargo de Conexión"**, donde se indica el **Valor Total** a cobrar.
-- Si ya tiene un cargo pendiente: se puede **"Abonar Conexión"** (pagos parciales, uno o varios, hasta completar el valor total — cada abono genera su propio recibo) o **"Cancelar Conexión"** si finalmente no se va a cobrar (queda registrada como cancelada, no se borra).
+- Si ya tiene un cargo pendiente: se puede **"Abonar Conexión"** (pagos parciales, uno o varios, hasta completar el valor total — cada abono genera su propio recibo, con la misma ventana de confirmación e Imprimir/Descargar PDF que un aporte) o **"Cancelar Conexión"** si finalmente no se va a cobrar (queda registrada como cancelada, no se borra).
 
 [CAPTURA DE PANTALLA AQUÍ: sección "Conexión (Nuevo Punto)" dentro del detalle de una cuenta]
 
@@ -451,7 +455,7 @@ El módulo se organiza en varias secciones, accesibles desde el submenú de "Con
 
 ### Dashboard Financiero
 
-Resumen del mes: ingresos, gastos, resultado del mes, saldo disponible (caja + banco) y cuentas en mora. También muestra si el período contable del mes actual está Abierto o Cerrado.
+Muestra el estado del período contable del mes actual (Abierto, Cerrado o Sin registro, con botón para gestionarlo si está Abierto) y el **Resultado del Mes** (utilidad o pérdida contable). Ingresos, gastos, saldo disponible y cuentas en mora **no se repiten aquí** — esos ya están en el Dashboard principal (sección 3); este panel se limita a lo que es exclusivo de la contabilidad formal. Desde acá también hay accesos directos a Gestionar Períodos, Ver Reportes Contables y Asientos Contables.
 
 ### Períodos Contables 🔒
 
@@ -509,6 +513,8 @@ Aquí se pueden consultar todos los asientos contables generados (automáticos y
 
 Incluye: Cartera por Edades, Historial de Aportes y de Gastos, Balance General, Estado de Resultados, Flujo de Caja, Libro Diario, Libro Mayor, Balance de Prueba (general y por proveedor/tercero), y el **Informe de Empalme** — pensado específicamente para cuando una junta directiva le entrega el manejo del acueducto a la siguiente. El uso es igual al del módulo Reportes general (ver siguiente sección): vista previa en pantalla y exportación a PDF o Excel.
 
+> Cuentas en Mora, Cuentas al Día y Cuentas con Saldo a Favor **no están acá** — son el mismo reporte que ya está en el módulo Reportes general (sección 12), así que se dejaron solo ahí para no tener el mismo reporte alcanzable por dos caminos distintos. El grupo "Cartera" de esta pantalla trae un enlace directo a Reportes para esos tres.
+
 ---
 
 ## 12. Reportes
@@ -534,38 +540,47 @@ Reportes disponibles:
 
 ## 13. Configuración
 
-🔒 La mayoría de esta sección solo la ve el rol **Administrador**. Los roles Usuario y Consulta solo ven "Seguridad" (para cambiar su propia contraseña), "Copias de Seguridad" (solo crear, no restaurar) y "Respaldo en la Nube".
+Esta pantalla se organiza en **4 pestañas**, justo debajo del título "Configuración". Las pestañas que ves dependen de tu rol:
 
-[CAPTURA DE PANTALLA AQUÍ: pantalla de Configuración completa, vista de Administrador]
+| Pestaña | Quién la ve | Contenido |
+|---|---|---|
+| **General** 🔒 | Solo Administrador | Datos de la Asociación, Caja Menor |
+| **Seguridad** | Todos los roles | Cambiar tu propia contraseña |
+| **Respaldo** | Todos los roles (algunos botones solo Administrador) | Copias de Seguridad, Respaldo Automático, Respaldo en la Nube |
+| **Usuarios y Auditoría** 🔒 | Solo Administrador | Usuarios, Auditoría |
 
-### Datos de la Asociación 🔒
+Es decir: los roles Usuario y Consulta solo ven dos pestañas, **Seguridad** y **Respaldo** (y dentro de Respaldo, sin el botón "Restaurar desde Archivo" ni algunos botones de la nube, que son solo de Administrador).
 
-Nombre, NIT, dirección, ciudad, teléfono, correo y logo de la asociación (el logo aparece en el encabezado de los reportes exportados). También los **Parámetros Generales**: próximo número de recibo, valor por defecto de un cargo de conexión nuevo, y los saldos iniciales de caja y banco (para cuando se empieza a usar el sistema con saldos que ya existían).
+[CAPTURA DE PANTALLA AQUÍ: pantalla de Configuración con las 4 pestañas, vista de Administrador]
 
-### Caja Menor 🔒
+### Pestaña General 🔒
 
-Activar/desactivar la Caja Menor, definir su saldo objetivo, y asignar quién es el responsable de manejarla — ver el detalle completo en la sección 10.
+**Datos de la Asociación**: Nombre, NIT, dirección, ciudad, teléfono, correo y logo de la asociación (el logo aparece en el encabezado de los reportes exportados). También los **Parámetros Generales**: próximo número de recibo, valor por defecto de un cargo de conexión nuevo, y los saldos iniciales de caja y banco (para cuando se empieza a usar el sistema con saldos que ya existían).
 
-### Seguridad — cambiar tu contraseña
+**Caja Menor**: activar/desactivar la Caja Menor, definir su saldo objetivo, y asignar quién es el responsable de manejarla — ver el detalle completo en la sección 10.
+
+### Pestaña Seguridad — cambiar tu contraseña
 
 Cualquier usuario, sin importar su rol, puede cambiar su propia contraseña aquí: escribe tu contraseña actual, la nueva, y confírmala.
 
 [CAPTURA DE PANTALLA AQUÍ: formulario de cambio de contraseña]
 
-### Copias de Seguridad
+### Pestaña Respaldo
+
+#### Copias de Seguridad
 
 - **"Crear Copia de Seguridad"** (todos los roles): genera un archivo con toda la información del sistema, para guardarlo en un lugar seguro (USB, otro computador, etc.).
 - **"Restaurar desde Archivo"** 🔒 (solo Administrador): reemplaza todos los datos actuales por los de un archivo de respaldo. **Esta acción no se puede deshacer** — el sistema pide confirmación doble antes de hacerlo, y al terminar se reinicia solo.
 
-### Respaldo Automático
+#### Respaldo Automático
 
 Solo informativo: muestra la fecha del último respaldo automático que el sistema guardó por su cuenta (esto ocurre solo, una vez al día, sin que nadie tenga que hacer nada).
 
-### Respaldo en la Nube (Google Drive) — opcional
+#### Respaldo en la Nube (Google Drive) — opcional
 
 Permite mantener la información sincronizada entre varios computadores de la misma asociación (por ejemplo, el de tesorería y el de la presidencia), usando una cuenta de Google Drive como punto de encuentro. Es completamente opcional: el sistema funciona igual de completo sin esto, guardando todo solo en el equipo local.
 
-#### ¿De quién debe ser la cuenta de Google, y qué permisos necesita?
+##### ¿De quién debe ser la cuenta de Google, y qué permisos necesita?
 
 Esto **no es la misma cuenta con la que se inicia sesión en el programa** (esa es interna del sistema, usuario/contraseña). Es una cuenta de Google/Gmail aparte, que actúa como el "casillero" donde se guardan los respaldos.
 
@@ -573,7 +588,7 @@ Esto **no es la misma cuenta con la que se inicia sesión en el programa** (esa 
 - **Recomendación**: crea una cuenta de Google dedicada solo para esto (ej. `acueducto.[nombreasociacion]@gmail.com`), en vez de usar la cuenta personal de un directivo. Si se usa la cuenta personal de una sola persona y esa persona deja la junta, la asociación podría quedarse sin acceso a sus propios respaldos. Guarda el usuario y la contraseña de esa cuenta en un lugar seguro y compartido (no solo en la cabeza de una persona).
 - **Punto crítico — todos los equipos deben conectar la MISMA cuenta**: el sistema sincroniza porque todos los computadores suben/traen archivos del mismo lugar. Si el computador de tesorería conecta una cuenta de Google y el de presidencia conecta *otra* cuenta distinta, cada uno tendrá su propia copia por separado y **nunca se van a sincronizar entre sí** — no hay ningún aviso de error en ese caso, simplemente cada equipo seguirá viendo solo lo suyo. Antes de conectar un segundo equipo, confirma con quien configuró el primero cuál es el correo y la contraseña de esa cuenta compartida.
 
-#### Dónde quedan guardados los datos
+##### Dónde quedan guardados los datos
 
 Al conectar la cuenta, el sistema crea automáticamente (la primera vez) dos carpetas dentro de esa cuenta de Google Drive — visibles entrando a [drive.google.com](https://drive.google.com) con ese mismo correo:
 
@@ -582,7 +597,7 @@ Al conectar la cuenta, el sistema crea automáticamente (la primera vez) dos car
 
 No hace falta crear estas carpetas a mano ni tocarlas manualmente — el sistema las administra solo. Tampoco hace falta preocuparse por espacio: una cuenta de Gmail gratuita (15 GB compartidos entre Gmail/Drive/Fotos) alcanza sin problema para años de uso de un solo acueducto.
 
-#### Cómo conectar la cuenta por primera vez
+##### Cómo conectar la cuenta por primera vez
 
 1. Haz clic en **"Conectar con Google Drive"**.
 2. Se abre el navegador de internet del computador (Chrome, Edge, etc.) — esto es una pantalla de Google, no del programa. Inicia sesión ahí con la cuenta de Google que se haya definido para la asociación (ver recomendación arriba) y acepta el permiso solicitado.
@@ -598,11 +613,13 @@ Una vez conectada, verás cuándo fue el último respaldo subido, y estos botone
 
 > Si otro computador de la asociación subió información más nueva que este equipo no conoce todavía, el sistema te avisa antes de continuar — nunca sobrescribe nada sin avisar primero.
 
-#### Agregar un segundo (o tercer) equipo más adelante
+##### Agregar un segundo (o tercer) equipo más adelante
 
 Cuando se instala el sistema en otro computador de la misma asociación, la pantalla previa al login ofrece **"Traer datos desde Google Drive"** (ver sección 2 de este manual). Ahí hay que iniciar sesión con **la misma cuenta de Google** ya conectada en el primer equipo — así trae automáticamente todo lo que ya existe, en vez de empezar de cero.
 
-### Usuarios 🔒
+### Pestaña Usuarios y Auditoría 🔒
+
+#### Usuarios
 
 Aquí se crean las cuentas de acceso del personal y se les asigna su rol.
 
@@ -621,7 +638,7 @@ Aquí se crean las cuentas de acceso del personal y se les asigna su rol.
 
 Su contraseña se genera automáticamente y es distinta en cada instalación (no es la misma para todos los clientes del sistema). Se muestra **una única vez**, en un cuadro de mensaje al primerísimo arranque (ver la nota al principio de la sección "2. Cómo iniciar sesión"). Guarda esa contraseña en un lugar seguro, aparte del propio computador (por ejemplo, un gestor de contraseñas o un documento físico bajo llave), y resérvala para el caso de emergencia de quedar bloqueados de todas las demás cuentas — no la uses para el trabajo diario.
 
-### Auditoría 🔒
+#### Auditoría
 
 Muestra las últimas 30 acciones registradas en el sistema: quién hizo qué, cuándo, y en qué módulo. Es de solo lectura — sirve para revisar el uso del sistema, no para hacer cambios.
 
@@ -644,13 +661,14 @@ Haz clic en el botón de cerrar sesión en la parte inferior del menú lateral, 
 | Registrar un predio nuevo | Cuentas → "+ Nueva Cuenta" (sección 4) |
 | Reajustar una tarifa con efecto retroactivo (subida aprobada en asamblea) | Categorías → "Reajuste retroactivo" (sección 6) |
 | Cobrar el sostenimiento de un mes | Aportes → "Registrar Aporte" (sección 7) |
-| Usar un saldo a favor guardado de un pago anterior | Aportes → "Ver" la cuenta → botón "Usar" junto al saldo a favor (sección 7) |
-| Imprimir o reimprimir un recibo | Recibos → buscar el número → "Imprimir" o "PDF" (sección 8) |
+| Usar un saldo a favor guardado de un pago anterior | Aportes → "Ver" la cuenta → botón "Usar" junto al saldo a favor, en azul (sección 7) |
+| Imprimir o descargar en PDF el recibo justo después de cobrar | Aparece solo, en la ventana de confirmación al registrar el aporte o el abono (sección 7) |
+| Imprimir o reimprimir un recibo ya registrado antes | Recibos → buscar el número → "Imprimir" o "PDF" (sección 8) |
 | Registrar una compra o pago del acueducto | Gastos → "+ Nuevo Gasto" (sección 9) |
 | Ver cuánto hay en caja y en banco | Caja y Bancos (sección 10) |
 | Trasladar dinero entre Caja y Banco | Caja y Bancos → "+ Registrar Consignación" (Caja→Banco) o "+ Registrar Retiro" (Banco→Caja) (sección 10) |
 | Corregir el saldo de Caja/Banco tras un arqueo o extracto | Caja y Bancos → "Ajustar saldos" (sección 10, solo Administrador) |
 | Generar un reporte de cartera o de cuentas | Reportes → elegir tarjeta → "Vista previa" (sección 12) |
-| Cambiar mi contraseña | Configuración → Seguridad (sección 13) |
-| Crear un usuario nuevo para otra persona | Configuración → Usuarios (sección 13, solo Administrador) |
-| Respaldar la información | Configuración → Copias de Seguridad (sección 13) |
+| Cambiar mi contraseña | Configuración → pestaña Seguridad (sección 13) |
+| Crear un usuario nuevo para otra persona | Configuración → pestaña Usuarios y Auditoría → Usuarios (sección 13, solo Administrador) |
+| Respaldar la información | Configuración → pestaña Respaldo → Copias de Seguridad (sección 13) |

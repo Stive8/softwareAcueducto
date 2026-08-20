@@ -115,7 +115,7 @@ const Pagos = {
             <th>Estado</th>
             <th>Saldo a Favor</th>
             <th>Conexión</th>
-            <th title="Avisos del modelo nuevo de cartera (en validación, ver detalle de la cuenta)">Cartera nueva</th>
+            <th title="Deuda anterior a 2024, conexión pendiente o saldo a favor disponible -- ver el detalle de la cuenta para más información">Avisos de Cartera</th>
             <th>Acciones</th>
           </tr>
         </thead>

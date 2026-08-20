@@ -213,9 +213,11 @@ arriba), sin corregir.
 - **`getSaldoCredito`/`getSaldoCreditoDisponible`** duplican la misma consulta en
   `PagoRepository.js` y `CarteraRepository.js` sin compartir código — riesgo de desincronización
   si una futura corrección se aplica en un solo lugar.
-- **Columna "Cartera nueva"** de la tabla de Pagos repite con iconos información que ya muestran
+- ~~**Columna "Cartera nueva"** de la tabla de Pagos repite con iconos información que ya muestran
   las columnas "Saldo a Favor" y "Conexión" de la misma fila. El tooltip "modelo nuevo de
-  cartera (en validación...)" también suena desactualizado.
+  cartera (en validación...)" también suena desactualizado.~~ RESUELTO 2026-08-20: los iconos se
+  cambiaron por badges de texto legibles sin hover, y la columna se renombró a "Avisos de
+  Cartera" con un tooltip sin lenguaje interno de validación (`pagos.js`).
 - **Confirmación de restauración es única, no doble** como afirma `docs/guia-instalacion.md`. El
   diálogo actual ya incluye más contexto (ruta del respaldo previo, cantidad de cuentas, avisos
   de migración pendiente) pero sigue siendo un solo diálogo de confirmación, no dos.
