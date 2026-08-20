@@ -1372,15 +1372,35 @@ function setupIpcHandlers() {
     }
   });
 
-  envolverHandle('recibos:imprimir', async (event, id) => {
+  // Chromium exige alto Y ancho fijos en pageSize (no hay "alto automático" como en una impresora
+  // térmica física de papel continuo). Como el recibo térmico varía de largo según cuántos
+  // conceptos tenga, se mide el contenido ya cargado en la ventana oculta y se calcula el alto en
+  // micrones a partir de eso, en vez de asumir un tamaño fijo que podría cortar el recibo o
+  // desperdiciar papel.
+  const ANCHO_TERMICO_MICRONES = 80000; // 80mm
+  const MARGEN_ALTURA_TERMICO_MICRONES = 10000; // 10mm de margen de seguridad
+  const MICRONES_POR_PX = 25400 / 96; // 1 CSS px = 1/96 pulgada = 25400/96 micrones
+
+  async function calcularPageSizeTermico(ventana) {
+    const alturaPx = await ventana.webContents.executeJavaScript('document.body.scrollHeight');
+    const alturaMicrones = Math.round(alturaPx * MICRONES_POR_PX) + MARGEN_ALTURA_TERMICO_MICRONES;
+    return { width: ANCHO_TERMICO_MICRONES, height: alturaMicrones };
+  }
+
+  envolverHandle('recibos:imprimir', async (event, id, formato) => {
     let ventanaImpresion;
     try {
-      const html = reciboService.generarHTML(id);
+      const html = reciboService.generarHTML(id, formato);
       ventanaImpresion = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
       await ventanaImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
+      const opcionesImpresion = { silent: false };
+      if (formato === 'termico_80mm') {
+        opcionesImpresion.pageSize = await calcularPageSizeTermico(ventanaImpresion);
+      }
+
       return await new Promise((resolve) => {
-        ventanaImpresion.webContents.print({ silent: false }, (success, errorType) => {
+        ventanaImpresion.webContents.print(opcionesImpresion, (success, errorType) => {
           ventanaImpresion.close();
           // El diálogo nativo de impresión deja a veces el foco de teclado sin volver
           // correctamente a la ventana principal; se restaura explícitamente.
@@ -1398,7 +1418,7 @@ function setupIpcHandlers() {
     }
   });
 
-  envolverHandle('recibos:exportarPDF', async (event, id) => {
+  envolverHandle('recibos:exportarPDF', async (event, id, formato) => {
     let ventanaImpresion;
     try {
       const recibo = reciboService.getById(id);
@@ -1416,11 +1436,16 @@ function setupIpcHandlers() {
         return { success: false, canceled: true };
       }
 
-      const html = reciboService.generarHTML(id);
+      const html = reciboService.generarHTML(id, formato);
       ventanaImpresion = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
       await ventanaImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
-      const pdfBuffer = await ventanaImpresion.webContents.printToPDF({});
+      const opcionesPDF = {};
+      if (formato === 'termico_80mm') {
+        opcionesPDF.pageSize = await calcularPageSizeTermico(ventanaImpresion);
+      }
+
+      const pdfBuffer = await ventanaImpresion.webContents.printToPDF(opcionesPDF);
       fs.writeFileSync(filePath, pdfBuffer);
       ventanaImpresion.close();
       if (mainWindow) mainWindow.focus();
