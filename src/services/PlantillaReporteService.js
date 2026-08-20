@@ -1,6 +1,6 @@
-const fs = require('fs');
 const path = require('path');
 const ConfiguracionRepository = require('../repositories/ConfiguracionRepository');
+const { obtenerLogoBase64 } = require('./shared/logoBase64');
 
 function escapeHtml(value) {
   if (value === null || value === undefined) return '';
@@ -46,16 +46,7 @@ class PlantillaReporteService {
 
   obtenerConfiguracionInstitucional() {
     const config = this.configuracionRepository.getAll();
-    let logoBase64 = null;
-
-    if (config.logo_path) {
-      const logoFile = path.join(this.dataDir, config.logo_path);
-      if (fs.existsSync(logoFile)) {
-        const ext = path.extname(logoFile).toLowerCase().replace('.', '');
-        const mime = ext === 'png' ? 'image/png' : 'image/jpeg';
-        logoBase64 = `data:${mime};base64,${fs.readFileSync(logoFile).toString('base64')}`;
-      }
-    }
+    const logoBase64 = obtenerLogoBase64(this.dataDir, config.logo_path);
 
     return {
       nombreAsociacion: config.nombre_asociacion || 'Acueducto Veredal',
