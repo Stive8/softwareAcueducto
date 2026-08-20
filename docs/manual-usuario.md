@@ -2,7 +2,7 @@
 
 Guía para el personal administrativo de la asociación (tesorería, secretaría, junta directiva). No se necesitan conocimientos de informática para usar este manual.
 
-_Versión del documento: 2026-07-27 (agrega Registrar Retiro y Ajustar Saldos en Caja y Bancos, edición parcial de Gastos, corrige el permiso de Reembolsar Caja Menor, explica en detalle la cuenta de Google Drive del Respaldo en la Nube, y documenta la cuenta de recuperación `recuperacion`)._
+_Versión del documento: 2026-08-20 (documenta el Reajuste retroactivo de tarifa y el aviso de cargos desalineados en Categorías, el filtro de estado y el uso del saldo a favor guardado en Aportes, y corrige el paso de "Registrar Aporte" que decía que el saldo a favor se descontaba solo)._
 
 ---
 
@@ -191,6 +191,8 @@ Las categorías son los tipos de predio (por ejemplo: Finca, Finca con piscina, 
 
 [CAPTURA DE PANTALLA AQUÍ: listado de Categorías con su tarifa actual]
 
+> El listado solo muestra las categorías activas. Si necesitas ver también las que ya no se usan (por ejemplo, categorías heredadas de una carga inicial de datos), marca la casilla **"Mostrar inactivas"** junto al botón "+ Nueva Categoría".
+
 ### Cómo crear una categoría nueva
 
 1. Haz clic en **"+ Nueva Categoría"**.
@@ -210,9 +212,24 @@ Las categorías son los tipos de predio (por ejemplo: Finca, Finca con piscina, 
 
 [CAPTURA DE PANTALLA AQUÍ: formulario "Configurar Tarifa" mostrando la tarifa actual y los campos de la nueva]
 
+> **Si la Fecha de Vigencia es una fecha pasada** y a alguna cuenta de esa categoría ya se le habían cobrado meses desde esa fecha (a la tarifa anterior), el sistema guarda igual la tarifa y, apenas termina, muestra automáticamente un aviso — **"La tarifa nueva dejó cargos desalineados"** — con la lista de cuentas y meses afectados y la diferencia total. Desde ahí puedes elegir **"Aplicar reajuste ahora"** (corrige esos meses de una vez) o **"Dejarlo así por ahora"** (los deja para corregir después, ver el punto siguiente). No se corrige nada solo, sin que tú decidas.
+
 ### Ver el historial de tarifas de una categoría
 
 Botón **"Ver"**: muestra todas las tarifas que ha tenido esa categoría a lo largo del tiempo (con las fechas de vigencia de cada una) y las cuentas que actualmente pertenecen a esa categoría.
+
+### Cómo hacer un reajuste retroactivo de tarifa
+
+Úsalo cuando la asamblea aprueba una tarifa nueva **con efecto retroactivo** (por ejemplo, "la tarifa sube desde enero de este año, aunque estamos en marzo") y hace falta corregir de una vez los meses que ya se cobraron a esos predios con la tarifa vieja. A diferencia del botón "Tarifa" (que solo registra la tarifa nueva hacia adelante), "Reajuste retroactivo" registra la tarifa **y** corrige lo ya cobrado en el mismo paso.
+
+1. Botón **"Reajuste retroactivo"** en la fila de la categoría.
+2. Indica la **Tarifa nueva**, la fecha **Vigente desde** (puede ser una fecha pasada) y, si quieres, el **Acta / motivo** (por ejemplo: "Aprobado en asamblea del 15 de marzo de 2026").
+3. Haz clic en **"Ver cuentas afectadas"**. El sistema muestra una vista previa: cuántas cuentas de esa categoría tienen meses ya cobrados desde esa fecha, cuántos meses cada una, y cuánto suma la diferencia total. Si ninguna cuenta se ve afectada, lo dice igual — la tarifa se guarda de todas formas para cobrar los meses futuros.
+4. Revisa la vista previa y haz clic en **"Confirmar y aplicar"**.
+
+[CAPTURA DE PANTALLA AQUÍ: vista previa de "Confirmar reajuste" con la tabla de cuentas y meses afectados]
+
+El ajuste queda registrado en el detalle de cada cuenta afectada — no reescribe ni borra los cargos que ya se habían generado, agrega el ajuste correspondiente al lado.
 
 ---
 
@@ -224,7 +241,7 @@ Este es el módulo donde se registran los pagos que hacen los propietarios por e
 
 ### Cómo ver el estado de cartera
 
-La tabla principal muestra, por cada cuenta: hasta qué mes está pagada, si está **Al día**, **En mora** (y cuántos meses debe), o si tiene **Saldo a Favor**. Puedes filtrar para ver solo las cuentas al día, solo las morosas, o solo las que tienen saldo a favor.
+La tabla principal muestra, por cada cuenta: hasta qué mes está pagada, si está **Al día**, **En mora** (y cuántos meses debe), o si tiene **Saldo a Favor**. Puedes filtrar por estado de pago (todas / solo al día / solo en mora / solo con saldo a favor) y, aparte, por estado de la cuenta (Activas — lo que se ve por defecto —, todos los estados, solo suspendidas, o solo inactivas): una cuenta Suspendida no aparece en el filtro por defecto, así que si buscas a alguien y no lo encuentras, revisa este segundo filtro.
 
 ### Cómo registrar un aporte (cobro) — paso a paso
 
@@ -232,16 +249,26 @@ La tabla principal muestra, por cada cuenta: hasta qué mes está pagada, si est
 2. El sistema te muestra automáticamente hasta qué mes está pagada la cuenta y cuál sería el siguiente mes a cobrar.
 3. Elige el **Mes y Año de Inicio** del pago (viene sugerido, pero lo puedes cambiar si vas a cobrar un período distinto).
 4. Indica la **Cantidad de Meses a Aportar** — puede ser 1 o varios meses seguidos, incluso de años distintos.
-5. Haz clic en **"Calcular Total"** para que el sistema te muestre qué meses exactos se van a cubrir y el valor total a cobrar (si la cuenta tenía saldo a favor, se descuenta automáticamente).
-6. Si la cuenta tiene un cargo de conexión pendiente, puedes incluir un **abono a esa conexión** en el mismo pago (opcional).
-7. Confirma la **Fecha de Aporte** (por defecto es hoy) y el **Método de Pago** (Efectivo o Transferencia).
-8. Haz clic en **"Registrar Aporte y Generar Recibo"**.
+5. Si la cuenta tiene saldo a favor guardado de un pago anterior, aparece la casilla **"Aplicar saldo a favor disponible"** — solo se descuenta del total si la marcas, no es automático.
+6. Haz clic en **"Calcular Total"** para que el sistema te muestre qué meses exactos se van a cubrir y el valor total a cobrar.
+7. Si la cuenta tiene un cargo de conexión pendiente, puedes incluir un **abono a esa conexión** en el mismo pago (opcional).
+8. Confirma la **Fecha de Aporte** (por defecto es hoy) y el **Método de Pago** (Efectivo o Transferencia).
+9. Haz clic en **"Registrar Aporte y Generar Recibo"**.
 
 [CAPTURA DE PANTALLA AQUÍ: formulario de registro de aporte, mostrando el cálculo del total y los meses a cubrir]
 
 Al confirmar, el sistema genera automáticamente el **recibo** correspondiente (ver módulo Recibos).
 
 > Si la cuenta no tiene un propietario asignado, el sistema no deja registrar el pago hasta que se le asigne uno (ver módulo Propietarios).
+
+### Deuda anterior a 2024 y saldo a favor guardado
+
+Dentro del detalle de una cuenta (botón "Ver"), debajo del recuadro de "A pagar" puede aparecer alguno de estos dos avisos:
+
+- **Deuda anterior al corte (2024)**: informa cuánto debe la cuenta de antes de 2024, pero es solo informativo — no tiene botón de acción todavía. Para cobrar esa deuda vieja, hazlo como un aporte normal (§"Cómo registrar un aporte") eligiendo como mes de inicio uno de esos meses atrasados.
+- **Saldo a favor disponible**: si la cuenta tiene plata guardada de un pago anterior que quedó sin usar (por ejemplo, pagó de más o pagó por adelantado más de lo que alcanzó a cubrir), aparece aquí con un botón **"Usar"**. Al hacer clic, se abre el formulario de "Registrar Aporte" con la casilla "Aplicar saldo a favor disponible" ya marcada y el total ya calculado — solo falta confirmar el método de pago y la fecha.
+
+[CAPTURA DE PANTALLA AQUÍ: detalle de una cuenta mostrando el aviso de saldo a favor con el botón "Usar"]
 
 ### Conexiones nuevas (cargo de conexión)
 
@@ -615,7 +642,9 @@ Haz clic en el botón de cerrar sesión en la parte inferior del menú lateral, 
 | Quiero... | Dónde voy |
 |---|---|
 | Registrar un predio nuevo | Cuentas → "+ Nueva Cuenta" (sección 4) |
+| Reajustar una tarifa con efecto retroactivo (subida aprobada en asamblea) | Categorías → "Reajuste retroactivo" (sección 6) |
 | Cobrar el sostenimiento de un mes | Aportes → "Registrar Aporte" (sección 7) |
+| Usar un saldo a favor guardado de un pago anterior | Aportes → "Ver" la cuenta → botón "Usar" junto al saldo a favor (sección 7) |
 | Imprimir o reimprimir un recibo | Recibos → buscar el número → "Imprimir" o "PDF" (sección 8) |
 | Registrar una compra o pago del acueducto | Gastos → "+ Nuevo Gasto" (sección 9) |
 | Ver cuánto hay en caja y en banco | Caja y Bancos (sección 10) |
