@@ -139,10 +139,10 @@ const Pagos = {
               <td>${c.saldo_favor > 0 ? `<span class="badge badge-favor">$${this.formatNumber(c.saldo_favor)}</span>` : '-'}</td>
               <td>${c.conexion_pendiente > 0 ? `<span class="badge badge-mora">🔧 $${this.formatNumber(c.conexion_pendiente)}</span>` : '-'}</td>
               <td>${ind ? [
-                ind.deudaAntes2024 ? '<span title="Deuda anterior al corte (2024)">⏳</span>' : '',
-                ind.puntoConexion ? '<span title="Punto de conexión pendiente">🔧</span>' : '',
-                ind.saldoCreditoDisponible ? '<span title="Saldo a favor disponible">💰</span>' : ''
-              ].join(' ') : '-'}</td>
+                ind.deudaAntes2024 ? '<span class="badge badge-warning" title="Deuda anterior al corte (2024)">Deuda 2024</span>' : '',
+                ind.puntoConexion ? '<span class="badge badge-warning" title="Punto de conexión pendiente">Conexión</span>' : '',
+                ind.saldoCreditoDisponible ? '<span class="badge badge-favor" title="Saldo a favor disponible">Saldo a favor</span>' : ''
+              ].filter(Boolean).join(' ') : '-'}</td>
               <td>
                 <div class="table-actions">
                   <button class="btn btn-primary btn-icon" onclick="Pagos.showDetalleModal(${c.id})">Ver</button>
@@ -664,9 +664,9 @@ const Pagos = {
         const response = await window.api.nuevosPuntos.registrarAbono(payload);
         if (response.success) {
           App.closeModal();
-          App.toast(`Abono de conexión registrado. Recibo No. ${response.data.numeroRecibo}`);
-          this.showDetalleModal(cuentaId);
           this.loadCuentas();
+          this.mostrarConfirmacionRecibo(response.data.reciboId, response.data.numeroRecibo, 'Abono de conexión registrado',
+            () => this.showDetalleModal(cuentaId));
         } else {
           errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
         }
@@ -845,9 +845,9 @@ const Pagos = {
 
     App.openModal(content, 'large');
     this.setupRegistrarPagoModal(cuentaId, conexionPendiente);
-    if (prefillUsarSaldoFavor && estado.saldoAFavor > 0) {
-      this.simularPago(cuentaId);
-    }
+    // Cálculo inicial automático: sin esto, el total quedaba en blanco hasta que alguien
+    // apretara "Calcular Total" a mano.
+    this.simularPago(cuentaId);
   },
 
   setupRegistrarPagoModal(cuentaId, conexionPendiente) {
@@ -859,8 +859,15 @@ const Pagos = {
       await this.simularPago(cuentaId);
     });
 
-    // Marcar/desmarcar cambia el total a cobrar -- recalcula en el acto en vez de esperar a
-    // que alguien vuelva a apretar "Calcular Total" y se lleve una sorpresa al confirmar.
+    // Recalcula en el acto ante cualquier cambio que afecte el total -- antes solo el checkbox
+    // de saldo a favor lo hacía, y cambiar el mes/año/cantidad de meses dejaba el total mostrado
+    // desactualizado hasta que alguien recordara apretar "Calcular Total" de nuevo.
+    const recalcular = App.debounce(() => this.simularPago(cuentaId), 400);
+    ['mes_inicio', 'anio_inicio', 'cantidad_meses'].forEach(id => {
+      document.getElementById(id).addEventListener('input', recalcular);
+      document.getElementById(id).addEventListener('change', recalcular);
+    });
+
     const usarSaldoFavorInput = document.getElementById('usar_saldo_favor');
     if (usarSaldoFavorInput) {
       usarSaldoFavorInput.addEventListener('change', () => this.simularPago(cuentaId));
@@ -936,7 +943,7 @@ const Pagos = {
       if (response.success) {
         App.closeModal();
         this.loadCuentas();
-        App.toast(`Aporte registrado con éxito. Recibo No. ${response.data.numeroRecibo}`);
+        this.mostrarConfirmacionRecibo(response.data.reciboId, response.data.numeroRecibo, 'Aporte registrado con éxito');
       } else {
         errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
       }
@@ -944,6 +951,29 @@ const Pagos = {
       console.error('Error:', error);
       errorDiv.innerHTML = `<div class="error-message">Error al registrar el aporte</div>`;
     }
+  },
+
+  // Modal de confirmación tras registrar un aporte o un abono de conexión -- son los dos únicos
+  // flujos de esta pantalla que generan un recibo. Reemplaza al toast de solo texto: antes, para
+  // imprimir o descargar el PDF había que cerrar, ir al módulo Recibos y buscar el número a mano.
+  // alCerrar (opcional): se ejecuta al cerrar el modal, sea con el botón, Escape o clic afuera
+  // (vía App.alCerrarModalSinResolver, el mismo mecanismo que usa confirmDialog) -- lo usa el
+  // abono de conexión para volver al detalle de la cuenta, igual que hacía antes de este cambio.
+  mostrarConfirmacionRecibo(reciboId, numeroRecibo, mensaje, alCerrar = null) {
+    const content = `
+      <div class="modal-header"><h2>✓ ${mensaje}</h2></div>
+      <p style="margin-bottom: 24px; color: #334155; font-size: 14px;">
+        Recibo No. <strong>${numeroRecibo}</strong>
+      </p>
+      <div class="form-actions">
+        <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+        <button type="button" class="btn btn-secondary btn-icon" onclick="Recibos.imprimir(${reciboId})">Imprimir Recibo</button>
+        <button type="button" class="btn btn-success btn-icon" onclick="Recibos.exportarPDF(${reciboId})">Descargar PDF</button>
+      </div>
+    `;
+
+    App.openModal(content);
+    if (alCerrar) App.alCerrarModalSinResolver = alCerrar;
   },
 
   async imprimirEstadoCuenta(cuentaId) {

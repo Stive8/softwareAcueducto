@@ -541,33 +541,35 @@ const Cuentas = {
           <input type="text" id="nombre_predio" name="nombre_predio" value="${cuenta?.nombre_predio ?? ''}" placeholder="Ej. Finca La Esperanza">
         </div>
 
-        <h3 style="color: #1e40af; font-size: 16px; margin: 24px 0 16px 0; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">Ubicación (Coordenadas GPS)</h3>
-        <small style="color: #64748b; font-size: 0.875rem; display: block; margin-bottom: 12px;">
-          Opcional. Para copiarlas desde Google Maps: mantenga presionado el punto exacto en el mapa, toque las coordenadas que aparecen arriba y péguelas aquí (un número en cada campo).
-        </small>
+        <details style="margin: 24px 0 16px 0;" ${cuenta && cuenta.lat_acometida != null ? 'open' : ''}>
+          <summary style="cursor: pointer; color: #1e40af; font-size: 16px; padding-bottom: 8px; border-bottom: 2px solid #e2e8f0;">Ubicación (Coordenadas GPS) — opcional</summary>
+          <small style="color: #64748b; font-size: 0.875rem; display: block; margin: 12px 0;">
+            Para copiarlas desde Google Maps: mantenga presionado el punto exacto en el mapa, toque las coordenadas que aparecen arriba y péguelas aquí (un número en cada campo).
+          </small>
 
-        <div class="form-group">
-          <label>Punto de Conexión de Agua (Acometida)</label>
-          <div style="display: flex; gap: 12px;">
-            <input type="number" step="any" id="lat_acometida" placeholder="Latitud" value="${cuenta?.lat_acometida ?? ''}">
-            <input type="number" step="any" id="lon_acometida" placeholder="Longitud" value="${cuenta?.lon_acometida ?? ''}">
+          <div class="form-group">
+            <label>Punto de Conexión de Agua (Acometida)</label>
+            <div style="display: flex; gap: 12px;">
+              <input type="number" step="any" id="lat_acometida" placeholder="Latitud" value="${cuenta?.lat_acometida ?? ''}">
+              <input type="number" step="any" id="lon_acometida" placeholder="Longitud" value="${cuenta?.lon_acometida ?? ''}">
+            </div>
           </div>
-        </div>
 
-        <div class="form-group">
-          <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
-            <input type="checkbox" id="mismo_punto" style="width: auto;" ${cuenta && cuenta.lat_acometida != null && cuenta.lat_acometida === cuenta.lat_vivienda && cuenta.lon_acometida === cuenta.lon_vivienda ? 'checked' : ''}>
-            El punto de la vivienda es el mismo que la acometida
-          </label>
-        </div>
-
-        <div class="form-group" id="grupoPuntoVivienda" style="${cuenta && cuenta.lat_acometida != null && cuenta.lat_acometida === cuenta.lat_vivienda && cuenta.lon_acometida === cuenta.lon_vivienda ? 'display: none;' : ''}">
-          <label>Punto de la Vivienda</label>
-          <div style="display: flex; gap: 12px;">
-            <input type="number" step="any" id="lat_vivienda" placeholder="Latitud" value="${cuenta?.lat_vivienda ?? ''}">
-            <input type="number" step="any" id="lon_vivienda" placeholder="Longitud" value="${cuenta?.lon_vivienda ?? ''}">
+          <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: normal;">
+              <input type="checkbox" id="mismo_punto" style="width: auto;" ${cuenta && cuenta.lat_acometida != null && cuenta.lat_acometida === cuenta.lat_vivienda && cuenta.lon_acometida === cuenta.lon_vivienda ? 'checked' : ''}>
+              El punto de la vivienda es el mismo que la acometida
+            </label>
           </div>
-        </div>
+
+          <div class="form-group" id="grupoPuntoVivienda" style="${cuenta && cuenta.lat_acometida != null && cuenta.lat_acometida === cuenta.lat_vivienda && cuenta.lon_acometida === cuenta.lon_vivienda ? 'display: none;' : ''}">
+            <label>Punto de la Vivienda</label>
+            <div style="display: flex; gap: 12px;">
+              <input type="number" step="any" id="lat_vivienda" placeholder="Latitud" value="${cuenta?.lat_vivienda ?? ''}">
+              <input type="number" step="any" id="lon_vivienda" placeholder="Longitud" value="${cuenta?.lon_vivienda ?? ''}">
+            </div>
+          </div>
+        </details>
 
         ${!id ? `
           <div class="form-group">

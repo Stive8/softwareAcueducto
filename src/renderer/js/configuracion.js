@@ -1,5 +1,27 @@
-// Módulo de Configuración
+// Módulo de Configuración: 4 pestañas dentro de la propia página (no en el sidebar, a
+// diferencia de Contabilidad/Gastos) -- antes era un solo scroll de 8-9 tarjetas apiladas.
 const Configuracion = {
+  tabActual: 'general',
+
+  TAB_LABELS: {
+    general: 'General',
+    seguridad: 'Seguridad',
+    respaldo: 'Respaldo',
+    usuarios: 'Usuarios y Auditoría'
+  },
+
+  // Datos de la Asociación, Caja Menor y Usuarios/Auditoría son solo para Administrador (igual
+  // que antes); si tabActual quedó en una pestaña que ya no existe para este rol (ej. volvió a
+  // entrar un Usuario después de que un Administrador dejó "usuarios" activa), se cae a la
+  // primera disponible.
+  getTabsDisponibles() {
+    return this.esAdmin() ? ['general', 'seguridad', 'respaldo', 'usuarios'] : ['seguridad', 'respaldo'];
+  },
+
+  esAdmin() {
+    return App.currentUser.rol === 'Administrador';
+  },
+
   async load() {
     const content = document.getElementById('page-content');
     content.innerHTML = `
@@ -7,27 +29,51 @@ const Configuracion = {
         <h1>Configuración</h1>
         <p>Datos de la asociación, parámetros generales, seguridad y copias de seguridad</p>
       </div>
+      <div class="config-tabs" id="configTabs"></div>
       <div id="configContent">
         ${App.renderSkeletonTable()}
       </div>
     `;
 
-    await this.renderForm();
+    const tabs = this.getTabsDisponibles();
+    if (!tabs.includes(this.tabActual)) this.tabActual = tabs[0];
+
+    document.getElementById('configTabs').innerHTML = tabs.map(t => `
+      <button type="button" class="config-tab" data-tab="${t}">${this.TAB_LABELS[t]}</button>
+    `).join('');
+
+    document.querySelectorAll('.config-tab').forEach(btn => {
+      btn.addEventListener('click', () => this.mostrarTab(btn.dataset.tab));
+    });
+
+    await this.mostrarTab(this.tabActual);
   },
 
-  async renderForm() {
-    const esAdmin = App.currentUser.rol === 'Administrador';
+  async mostrarTab(tab) {
+    this.tabActual = tab;
+    document.querySelectorAll('.config-tab').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.tab === tab);
+    });
+
+    if (tab === 'general') await this.renderTabGeneral();
+    else if (tab === 'seguridad') await this.renderTabSeguridad();
+    else if (tab === 'respaldo') await this.renderTabRespaldo();
+    else if (tab === 'usuarios') await this.renderTabUsuarios();
+  },
+
+  // --- General: Datos de la Asociación + Caja Menor (solo Administrador) ---
+
+  async renderTabGeneral() {
+    const container = document.getElementById('configContent');
     const response = await window.api.config.getAll();
     const config = response.success ? response.data : {};
-    const container = document.getElementById('configContent');
 
-    const cajaMenorResponse = esAdmin ? await window.api.cajaMenor.getEstado() : { success: false };
+    const cajaMenorResponse = await window.api.cajaMenor.getEstado();
     const cajaMenorEstado = cajaMenorResponse.success
       ? cajaMenorResponse.data
       : { activa: false, saldoObjetivo: 0, saldoActual: 0, responsable: null, montoReembolso: 0 };
 
     container.innerHTML = `
-      ${esAdmin ? `
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header"><h2>Datos de la Asociación</h2></div>
         <div style="padding: 24px;">
@@ -148,8 +194,39 @@ const Configuracion = {
           </div>
         </div>
       </div>
-      ` : ''}
+    `;
 
+    App.attachMoneyInput(document.getElementById('valor_nuevo_punto'));
+    App.attachMoneyInput(document.getElementById('saldo_caja_inicial'));
+    App.attachMoneyInput(document.getElementById('saldo_banco_inicial'));
+
+    document.getElementById('configForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      this.guardarConfiguracion();
+    });
+
+    App.attachMoneyInput(document.getElementById('caja_menor_saldo_objetivo'));
+    document.getElementById('cajaMenorConfigForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      this.guardarCajaMenorConfig();
+    });
+    document.getElementById('btnCambiarResponsableCajaMenor').addEventListener('click', () => {
+      this.showCambiarResponsableCajaMenorModal();
+    });
+    document.getElementById('btnHistorialResponsablesCajaMenor').addEventListener('click', () => {
+      this.showHistorialResponsablesCajaMenorModal();
+    });
+
+    document.getElementById('btnSubirLogo').addEventListener('click', () => this.subirLogo());
+    document.getElementById('btnQuitarLogo').addEventListener('click', () => this.quitarLogo());
+    this.cargarLogoPreview();
+  },
+
+  // --- Seguridad: cambiar contraseña (todos los roles) ---
+
+  async renderTabSeguridad() {
+    const container = document.getElementById('configContent');
+    container.innerHTML = `
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header"><h2>Seguridad</h2></div>
         <div style="padding: 24px;">
@@ -176,7 +253,21 @@ const Configuracion = {
           </form>
         </div>
       </div>
+    `;
 
+    document.getElementById('passwordForm').addEventListener('submit', (e) => {
+      e.preventDefault();
+      this.cambiarPassword();
+    });
+  },
+
+  // --- Respaldo: copia manual, respaldo automático y respaldo en la nube (todos los roles,
+  // con algunos botones puntuales solo para Administrador dentro de cada tarjeta) ---
+
+  async renderTabRespaldo() {
+    const esAdmin = this.esAdmin();
+    const container = document.getElementById('configContent');
+    container.innerHTML = `
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header"><h2>Copias de Seguridad</h2></div>
         <div style="padding: 24px;">
@@ -194,8 +285,22 @@ const Configuracion = {
       <div id="backupAutomaticoContainer" style="margin-bottom: 24px;"></div>
 
       <div id="respaldoNubeContainer" style="margin-bottom: 24px;"></div>
+    `;
 
-      ${esAdmin ? `
+    document.getElementById('btnCrearBackup').addEventListener('click', () => this.crearBackup());
+    if (esAdmin) {
+      document.getElementById('btnRestaurarBackup').addEventListener('click', () => this.restaurarBackup());
+    }
+
+    await this.renderBackupAutomatico();
+    await this.renderRespaldoNube();
+  },
+
+  // --- Usuarios y Auditoría (solo Administrador) ---
+
+  async renderTabUsuarios() {
+    const container = document.getElementById('configContent');
+    container.innerHTML = `
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header">
           <h2>Usuarios</h2>
@@ -208,52 +313,12 @@ const Configuracion = {
         <div class="table-header"><h2>Auditoría</h2></div>
         <div id="auditoriaContent">${App.renderSkeletonTable()}</div>
       </div>
-
-      ` : ''}
     `;
 
-    if (esAdmin) {
-      App.attachMoneyInput(document.getElementById('valor_nuevo_punto'));
-      App.attachMoneyInput(document.getElementById('saldo_caja_inicial'));
-      App.attachMoneyInput(document.getElementById('saldo_banco_inicial'));
+    document.getElementById('btnNuevoUsuario').addEventListener('click', () => this.showNuevoUsuarioModal());
 
-      document.getElementById('configForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        this.guardarConfiguracion();
-      });
-
-      App.attachMoneyInput(document.getElementById('caja_menor_saldo_objetivo'));
-      document.getElementById('cajaMenorConfigForm').addEventListener('submit', (e) => {
-        e.preventDefault();
-        this.guardarCajaMenorConfig();
-      });
-      document.getElementById('btnCambiarResponsableCajaMenor').addEventListener('click', () => {
-        this.showCambiarResponsableCajaMenorModal();
-      });
-      document.getElementById('btnHistorialResponsablesCajaMenor').addEventListener('click', () => {
-        this.showHistorialResponsablesCajaMenorModal();
-      });
-
-      document.getElementById('btnRestaurarBackup').addEventListener('click', () => this.restaurarBackup());
-      document.getElementById('btnNuevoUsuario').addEventListener('click', () => this.showNuevoUsuarioModal());
-
-      document.getElementById('btnSubirLogo').addEventListener('click', () => this.subirLogo());
-      document.getElementById('btnQuitarLogo').addEventListener('click', () => this.quitarLogo());
-      this.cargarLogoPreview();
-
-      await this.renderUsuarios();
-      await this.renderAuditoria();
-    }
-
-    document.getElementById('passwordForm').addEventListener('submit', (e) => {
-      e.preventDefault();
-      this.cambiarPassword();
-    });
-
-    document.getElementById('btnCrearBackup').addEventListener('click', () => this.crearBackup());
-
-    await this.renderBackupAutomatico();
-    await this.renderRespaldoNube();
+    await this.renderUsuarios();
+    await this.renderAuditoria();
   },
 
   formatMoney(value) {
@@ -352,7 +417,7 @@ const Configuracion = {
 
       if (response.success) {
         App.toast('Configuración de Caja Menor guardada con éxito');
-        await this.renderForm();
+        await this.renderTabGeneral();
       } else {
         errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
       }
@@ -423,7 +488,7 @@ const Configuracion = {
         if (response.success) {
           App.closeModal();
           App.toast('Responsable de Caja Menor asignado con éxito');
-          await this.renderForm();
+          await this.renderTabGeneral();
         } else {
           errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
         }
