@@ -13,6 +13,7 @@ config/google-credentials.json
 # Salidas de las herramientas de import: contienen datos reales (nombres, cédulas, montos, códigos de cuenta, deuda)
 scripts/import-gastos/output/
 scripts/import-cartera/output/*
+scripts/import-datos-propietarios/output/
 # Únicos reportes de esta carpeta pensados para quedar en el repo como referencia permanente --
 # cualquier otro .md que se genere ahí (notas de trabajo, cruces contra el talonario, etc.) queda
 # afuera por defecto, aunque contenga nombres/montos reales.
