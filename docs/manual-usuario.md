@@ -2,7 +2,7 @@
 
 Guía para el personal administrativo de la asociación (tesorería, secretaría, junta directiva). No se necesitan conocimientos de informática para usar este manual.
 
-_Versión del documento: 2026-08-20 (documenta el modal de confirmación con Imprimir/Descargar PDF al registrar un aporte o un abono de conexión, el cálculo automático del total en "Registrar Aporte", las coordenadas GPS colapsadas en "Nueva Cuenta", las 4 pestañas de Configuración, y los cambios de nombre en "Cartera y Movimientos"/"Avisos de Cartera" y en el Dashboard Financiero de Contabilidad)._
+_Versión del documento: 2026-08-20 (documenta el selector de formato de impresión de recibos —Carta o Térmica 80mm— junto a Imprimir/Descargar PDF y el nuevo campo de formato predeterminado en Configuración, el modal de confirmación con Imprimir/Descargar PDF al registrar un aporte o un abono de conexión, el cálculo automático del total en "Registrar Aporte", las coordenadas GPS colapsadas en "Nueva Cuenta", las 4 pestañas de Configuración, y los cambios de nombre en "Cartera y Movimientos"/"Avisos de Cartera" y en el Dashboard Financiero de Contabilidad)._
 
 ---
 
@@ -259,9 +259,11 @@ La columna **"Avisos de Cartera"** (al final de la tabla, junto a "Acciones") mu
 
 [CAPTURA DE PANTALLA AQUÍ: formulario de registro de aporte, mostrando el cálculo del total y los meses a cubrir]
 
-Al confirmar, el sistema genera automáticamente el **recibo** correspondiente y muestra una ventana de confirmación con el número de recibo y dos botones: **"Imprimir Recibo"** y **"Descargar PDF"** — ya no hace falta ir después al módulo Recibos a buscarlo a mano. Puedes usar ambos botones (por ejemplo, imprimir para entregar en mano y además guardar el PDF) antes de cerrar la ventana con **"Cerrar"**.
+Al confirmar, el sistema genera automáticamente el **recibo** correspondiente y muestra una ventana de confirmación con el número de recibo, un selector de **formato de impresión** y dos botones: **"Imprimir Recibo"** y **"Descargar PDF"** — ya no hace falta ir después al módulo Recibos a buscarlo a mano. Puedes usar ambos botones (por ejemplo, imprimir para entregar en mano y además guardar el PDF) antes de cerrar la ventana con **"Cerrar"**.
 
-[CAPTURA DE PANTALLA AQUÍ: ventana de confirmación tras registrar un aporte, con los botones Imprimir Recibo y Descargar PDF]
+El selector de formato ofrece tres opciones: **"Usar predeterminado"** (el que esté configurado para la asociación, ver sección 13), **"Carta"** (el diseño completo, tamaño carta/A4) o **"Térmica 80mm"** (un ticket angosto para impresoras térmicas POS de rollo continuo). Es el mismo recibo en cualquiera de los dos formatos — mismo número, mismo valor — solo cambia cómo se ve/imprime.
+
+[CAPTURA DE PANTALLA AQUÍ: ventana de confirmación tras registrar un aporte, con el selector de formato y los botones Imprimir Recibo y Descargar PDF]
 
 > Si la cuenta no tiene un propietario asignado, el sistema no deja registrar el pago hasta que se le asigne uno (ver módulo Propietarios).
 
@@ -295,8 +297,13 @@ Cada pago genera automáticamente un recibo. Este módulo sirve para buscarlos, 
 
 1. Escribe en el buscador el número de recibo, código de cuenta o dirección.
 2. Botón **"Ver"** para ver el detalle completo (conceptos y valores cobrados).
-3. Botón **"Imprimir"** para imprimirlo directamente.
-4. Botón **"PDF"** para guardarlo como archivo PDF en el computador.
+3. Junto a los botones de imprimir/exportar hay un selector de **formato de impresión**: "Usar predeterminado", "Carta" o "Térmica 80mm" (ver sección 7 para el detalle de las tres opciones).
+4. Botón **"Imprimir"** para imprimirlo directamente, en el formato elegido en el selector.
+5. Botón **"PDF"** para guardarlo como archivo PDF en el computador, también en el formato elegido.
+
+Este selector aparece tanto en la fila del listado como en el detalle del recibo (botón "Ver"). Cambiar de formato no crea otro recibo ni modifica el número o el valor — es exactamente el mismo recibo, solo cambia la presentación.
+
+[CAPTURA DE PANTALLA AQUÍ: listado de Recibos con el selector de formato junto a los botones Imprimir/PDF]
 
 [CAPTURA DE PANTALLA AQUÍ: detalle de un recibo con el desglose de conceptos]
 
@@ -555,7 +562,7 @@ Es decir: los roles Usuario y Consulta solo ven dos pestañas, **Seguridad** y *
 
 ### Pestaña General 🔒
 
-**Datos de la Asociación**: Nombre, NIT, dirección, ciudad, teléfono, correo y logo de la asociación (el logo aparece en el encabezado de los reportes exportados). También los **Parámetros Generales**: próximo número de recibo, valor por defecto de un cargo de conexión nuevo, y los saldos iniciales de caja y banco (para cuando se empieza a usar el sistema con saldos que ya existían).
+**Datos de la Asociación**: Nombre, NIT, dirección, ciudad, teléfono, correo y logo de la asociación (el logo aparece en el encabezado de los reportes exportados, y también en el recibo si se imprime en formato Carta o Térmica 80mm). También los **Parámetros Generales**: próximo número de recibo, **formato de impresión predeterminado de los recibos** (Carta o Térmica 80mm — es el que se usa cuando alguien elige "Usar predeterminado" al imprimir, ver secciones 7 y 8), valor por defecto de un cargo de conexión nuevo, y los saldos iniciales de caja y banco (para cuando se empieza a usar el sistema con saldos que ya existían).
 
 **Caja Menor**: activar/desactivar la Caja Menor, definir su saldo objetivo, y asignar quién es el responsable de manejarla — ver el detalle completo en la sección 10.
 
@@ -664,6 +671,8 @@ Haz clic en el botón de cerrar sesión en la parte inferior del menú lateral, 
 | Usar un saldo a favor guardado de un pago anterior | Aportes → "Ver" la cuenta → botón "Usar" junto al saldo a favor, en azul (sección 7) |
 | Imprimir o descargar en PDF el recibo justo después de cobrar | Aparece solo, en la ventana de confirmación al registrar el aporte o el abono (sección 7) |
 | Imprimir o reimprimir un recibo ya registrado antes | Recibos → buscar el número → "Imprimir" o "PDF" (sección 8) |
+| Imprimir un recibo en formato térmico (impresora POS de 80mm) en vez de carta | Elegir "Térmica 80mm" en el selector de formato, junto a Imprimir/PDF (secciones 7 y 8) |
+| Configurar qué formato se usa por defecto al imprimir recibos | Configuración → pestaña General → Parámetros Generales → "Formato de Impresión de Recibos" (sección 13) |
 | Registrar una compra o pago del acueducto | Gastos → "+ Nuevo Gasto" (sección 9) |
 | Ver cuánto hay en caja y en banco | Caja y Bancos (sección 10) |
 | Trasladar dinero entre Caja y Banco | Caja y Bancos → "+ Registrar Consignación" (Caja→Banco) o "+ Registrar Retiro" (Banco→Caja) (sección 10) |
