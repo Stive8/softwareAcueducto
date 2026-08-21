@@ -592,6 +592,123 @@ function sembrarTodas(db) {
   });
   ids.abonoS0312AdelantadoId = abonoS0312AdelantadoId;
 
+  // --- Corrección 32: 15 recibos históricos faltantes (ver comentario junto a
+  // RECIBOS_FALTANTES_2026 en paso9b-correcciones.js). Se pre-siembra directamente el
+  // CargoMensual de cada rango -- mismo patrón que el resto de este archivo -- para no depender
+  // de categoria_tarifas: asegurarCausacion salta de largo cualquier mes que ya exista, así que
+  // no hace falta una tarifa real para que la corrección corra limpia en la prueba.
+  const sembrarRangoCargos = (cuentaId, anioDesde, mesDesde, anioHasta, mesHasta, monto) => {
+    for (let c = anioDesde * 12 + mesDesde; c <= anioHasta * 12 + mesHasta; c++) {
+      const anio = Math.floor((c - 1) / 12);
+      const mes = ((c - 1) % 12) + 1;
+      repo.crearMovimiento({ cuentaId, fecha: `${anio}-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto, anio, mes });
+    }
+  };
+  const sembrarPropietarioDeCuenta = (cuentaId) => db.prepare(
+    `INSERT INTO cuenta_propietarios (cuenta_id, propietario_id, fecha_inicio) VALUES (?, ?, '2020-01-01')`
+  ).run(cuentaId, propietarioId);
+
+  // 2548 S010 (ya sembrada arriba, corrección "recalculoS010")
+  sembrarPropietarioDeCuenta(ids.S010);
+  sembrarRangoCargos(ids.S010, 2026, 1, 2026, 12, 20000);
+
+  // 2552/2553 C004/C0041
+  ids.C004 = sembrarCuenta(db, 'C004');
+  sembrarPropietarioDeCuenta(ids.C004);
+  sembrarRangoCargos(ids.C004, 2026, 1, 2026, 12, 20000);
+
+  ids.C0041 = sembrarCuenta(db, 'C0041');
+  sembrarPropietarioDeCuenta(ids.C0041);
+  sembrarRangoCargos(ids.C0041, 2026, 1, 2026, 12, 10000);
+
+  // 2554/2555 R0131/R013
+  ids.R0131 = sembrarCuenta(db, 'R0131');
+  sembrarPropietarioDeCuenta(ids.R0131);
+  sembrarRangoCargos(ids.R0131, 2026, 6, 2026, 9, 10000);
+
+  ids.R013 = sembrarCuenta(db, 'R013');
+  sembrarPropietarioDeCuenta(ids.R013);
+  sembrarRangoCargos(ids.R013, 2026, 4, 2026, 9, 10000);
+
+  // 2556 C016
+  ids.C016 = sembrarCuenta(db, 'C016');
+  sembrarPropietarioDeCuenta(ids.C016);
+  sembrarRangoCargos(ids.C016, 2026, 7, 2026, 12, 10000);
+
+  // 2557/2558 S0334/S039 (ya sembradas arriba, corrección 19) -- su ancla de facturación real
+  // (MIN(fecha) de su CargoMensual más viejo) es anterior a 2026, así que asegurarCausacion
+  // intenta causar TODO el hueco desde ahí. Se rellena ese hueco (2025 completo y, para S039,
+  // también enero-mayo 2024) YA PAGADO -- no hay ninguna evidencia real de deuda sin resolver
+  // ahí, así que dejarlo sin pagar sería inventar un hueco que no existe y rompería la prueba de
+  // la corrección 19 ("deudaExigible queda en 0"), que sigue siendo cierta hoy.
+  const pagarRangoCargos = (cuentaId, fecha, anioDesde, mesDesde, anioHasta, mesHasta) => {
+    const cargos = db.prepare(`
+      SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual'
+        AND (anio*12+mes) BETWEEN ? AND ? ORDER BY anio, mes
+    `).all(cuentaId, anioDesde * 12 + mesDesde, anioHasta * 12 + mesHasta);
+    const total = cargos.reduce((s, c) => s + c.monto, 0);
+    const abonoId = repo.crearMovimiento({ cuentaId, fecha, tipo: 'Abono', exigible: 1, monto: -total });
+    for (const c of cargos) repo.crearImputacion({ abonoId, cargoId: c.id, monto: c.monto });
+  };
+
+  sembrarPropietarioDeCuenta(ids.S0334);
+  sembrarRangoCargos(ids.S0334, 2025, 1, 2025, 12, 10000);
+  pagarRangoCargos(ids.S0334, '2025-12-15', 2025, 1, 2025, 12);
+  sembrarRangoCargos(ids.S0334, 2026, 1, 2026, 12, 10000);
+
+  sembrarPropietarioDeCuenta(ids.S039);
+  sembrarRangoCargos(ids.S039, 2024, 1, 2024, 5, 10000);
+  pagarRangoCargos(ids.S039, '2024-06-01', 2024, 1, 2024, 5);
+  sembrarRangoCargos(ids.S039, 2025, 1, 2025, 12, 10000);
+  pagarRangoCargos(ids.S039, '2025-12-15', 2025, 1, 2025, 12);
+  sembrarRangoCargos(ids.S039, 2026, 1, 2026, 12, 10000);
+
+  // 2559 S0338
+  ids.S0338 = sembrarCuenta(db, 'S0338');
+  sembrarPropietarioDeCuenta(ids.S0338);
+  sembrarRangoCargos(ids.S0338, 2026, 1, 2026, 6, 16000);
+
+  // 2561 S042
+  ids.S042 = sembrarCuenta(db, 'S042');
+  sembrarPropietarioDeCuenta(ids.S042);
+  sembrarRangoCargos(ids.S042, 2026, 1, 2026, 12, 10000);
+
+  // 2564 R047
+  ids.R047 = sembrarCuenta(db, 'R047');
+  sembrarPropietarioDeCuenta(ids.R047);
+  sembrarRangoCargos(ids.R047, 2024, 10, 2025, 12, 10000);
+
+  // 2549 S015: enero-julio 2026 ya pagados (simula el sobrante-por-FIFO real de otro recibo,
+  // ver corrección 31), agosto-diciembre genuinamente pendiente.
+  ids.S015 = sembrarCuenta(db, 'S015');
+  sembrarPropietarioDeCuenta(ids.S015);
+  sembrarRangoCargos(ids.S015, 2026, 1, 2026, 12, 10000);
+  const cargosPagadosS015 = db.prepare(
+    `SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=2026 AND mes BETWEEN 1 AND 7 ORDER BY mes`
+  ).all(ids.S015);
+  const abonoPreviaS015Id = repo.crearMovimiento({ cuentaId: ids.S015, fecha: '2025-10-11', tipo: 'Abono', exigible: 1, monto: -70000 });
+  for (const c of cargosPagadosS015) repo.crearImputacion({ abonoId: abonoPreviaS015Id, cargoId: c.id, monto: 10000 });
+
+  // 2551 S0292: abono a un punto de conexión ya existente, no sostenimiento.
+  ids.S0292 = sembrarCuenta(db, 'S0292');
+  sembrarPropietarioDeCuenta(ids.S0292);
+  ids.nuevoPuntoS0292Id = db.prepare(
+    `INSERT INTO nuevos_puntos (cuenta_id, valor_total, saldo_pendiente, fecha_registro, estado) VALUES (?, 500000, 300000, '2025-04-19', 'Pendiente')`
+  ).run(ids.S0292).lastInsertRowid;
+
+  // 2563 R0942 (ya sembrada arriba, corrección 14 -- ese mismo fixture deja el crédito de
+  // $4.000 listo para que esta corrección lo consuma).
+  sembrarPropietarioDeCuenta(ids.R0942);
+  sembrarRangoCargos(ids.R0942, 2026, 3, 2026, 12, 16000);
+
+  // 2550 S0383 (código real de la cuenta -- el talonario tenía "S038" por error de
+  // transcripción, ver comentario de la corrección 32 en paso9b-correcciones.js).
+  ids.S0383 = sembrarCuenta(db, 'S0383');
+  sembrarPropietarioDeCuenta(ids.S0383);
+  sembrarRangoCargos(ids.S0383, 2026, 7, 2026, 12, 10000);
+
+  // 1167 no necesita fixture propio -- recibos_anulados_fisicos empieza vacío.
+
   return ids;
 }
 
@@ -909,8 +1026,10 @@ test('paso9b: S010 -- recalcula los 3 abonos restantes en orden cronológico (18
       SELECT m.id, m.anio, m.mes, m.monto, COALESCE((SELECT SUM(i.monto) FROM cartera_imputaciones i WHERE i.cargo_id=m.id),0) AS cubierto
       FROM cartera_movimientos m WHERE m.cuenta_id=? AND m.tipo='CargoMensual'
     `).all(ids.S010);
-    assert.equal(cargos.length, 24);
-    assert.ok(cargos.every(c => c.cubierto === c.monto), 'los 24 cargos deben quedar totalmente cubiertos');
+    // 24 de 2024-2025 (este test) + 12 de 2026 a $20.000 que agrega la corrección 32 (recibo
+    // 2548) -- ambos tramos quedan totalmente cubiertos, cada uno por su propio mecanismo.
+    assert.equal(cargos.length, 36);
+    assert.ok(cargos.every(c => c.cubierto === c.monto), 'todos los cargos (2024-2025 de este test + 2026 de la corrección 32) deben quedar totalmente cubiertos');
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -1946,9 +2065,13 @@ test('paso9b: R0942 -- crea el saldo a favor de $4.000 que el recibo 2246 no reg
 
     assert.equal(r.creditoR0942.yaCorregido, false);
     assert.equal(r.creditoR0942.monto, CREDITO_R0942.monto);
-    assert.equal(repo.getSaldoCreditoDisponible(ids.R0942), 4000);
+    // La corrección 32 (recibo 2563, "TENIA $4.000 A FAVOR") consume este mismo crédito en la
+    // misma corrida -- el saldo disponible al final de ejecutarPaso9b ya no es 4.000, es 0. La
+    // fila 'Abono' de abajo sigue existiendo tal cual (nunca se reescribe), solo queda
+    // compensada por la fila 'Aplicado' que crea la corrección 32.
+    assert.equal(repo.getSaldoCreditoDisponible(ids.R0942), 0);
 
-    const credito = db.prepare(`SELECT * FROM cuenta_creditos WHERE cuenta_id=?`).get(ids.R0942);
+    const credito = db.prepare(`SELECT * FROM cuenta_creditos WHERE cuenta_id=? AND tipo='Abono'`).get(ids.R0942);
     assert.equal(credito.tipo, 'Abono');
     assert.equal(credito.monto, 4000);
     assert.equal(credito.fecha, '2025-06-19');
@@ -1975,9 +2098,12 @@ test('paso9b: R0942 -- idempotente, correr dos veces no duplica el crédito', ()
     const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
 
     assert.equal(r2.creditoR0942.yaCorregido, true);
+    // 2 filas -- el 'Abono' original de esta corrección y el 'Aplicado' que deja la corrección
+    // 32 al consumirlo contra el recibo 2563 (ver comentario en el test anterior) -- y ninguna
+    // de las dos se duplica al correr por segunda vez.
     const creditos = db.prepare(`SELECT COUNT(*) n FROM cuenta_creditos WHERE cuenta_id=?`).get(ids.R0942).n;
-    assert.equal(creditos, 1);
-    assert.equal(repo.getSaldoCreditoDisponible(ids.R0942), 4000);
+    assert.equal(creditos, 2);
+    assert.equal(repo.getSaldoCreditoDisponible(ids.R0942), 0);
   } finally {
     cerrarDbTemporal(ctx);
   }

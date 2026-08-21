@@ -700,6 +700,181 @@ const CUENTAS_NUEVAS_2026 = [
   { codigo: 'R0949', nombre: 'ALFONSO TORRES VASQUEZ', numeroRecibo: 2562 }
 ];
 
+// 32. 15 recibos reales del talonario físico (encontrados por el cruce automático completo,
+// ronda 3, 2026-08-19 -- ver scripts/import-cartera/output/cruce-colillas-vs-db.md, sección
+// "no_encontrado_en_db") que nunca se dieron de alta en el sistema. Confirmado por el usuario
+// 2026-08-21: "todos los recibos deben de estar".
+//
+// 12 de los 15 (todos menos S015/2549, S0292/2551 y R0942/2563) coinciden EXACTO contra lo que
+// de verdad falta causar en cada cuenta -- verificado mes a mes contra `cartera_movimientos`, no
+// solo contra el texto del recibo (ver RECIBOS_FALTANTES_2026, campo `monto` vs. lo que arroja
+// sumar los cargos pendientes del rango declarado). Los otros tres necesitaron revisión aparte:
+//
+// - 2549 (S015, "Enero a Diciembre 2026", $120.000): enero-julio ya estaban pagados por otros
+//   dos recibos (2152 y 2301) cuyo sobrante llegó ahí por FIFO -- mismo patrón investigado toda
+//   la sesión, no un error (ver corrección 31). Solo agosto-diciembre ($50.000) estaba
+//   realmente pendiente dentro del rango declarado; el resto ($70.000) del efectivo recibido
+//   queda como saldo a favor real -- mismo mecanismo que cualquier sobrante de `registrarAbono`,
+//   no se inventa ni se pierde.
+// - 2551 (S0292, "Abono a Punto Nuevo"): no es sostenimiento, es un abono al punto de conexión
+//   ya existente de esta cuenta (saldo pendiente $300.000 antes de este abono).
+// - 2563 (R0942, "Marzo a Diciembre 2026 (TENIA $4.000 A FAVOR)"): el paréntesis del propio
+//   recibo coincide exacto con el crédito de $4.000 que ya se había encontrado y documentado en
+//   la corrección 14 de esta misma sesión -- $156.000 en efectivo + esos $4.000 = $160.000, el
+//   valor exacto de los 10 meses (mar-dic 2026 a $16.000/mes).
+//
+// 2550 (código crudo del talonario "S038", $60.000): al principio se dejó afuera porque la
+// tarifa de S038 (Finca con piscina, $16.000/mes) necesitaba $80.000 para julio-diciembre 2026,
+// $20.000 más de lo que trae el recibo. Confirmado por el usuario 2026-08-21: el código
+// "S038" es un error de transcripción del talonario/Excel -- la cuenta real es **S0383**
+// (propietaria "Galindo Jhon Eduardo", coincide exacto con el nombre del recibo "JHON EDUARD
+// GALINDO"), categoría Finca a $10.000/mes: 6 meses x $10.000 = $60.000, calza exacto. Se
+// incluye en RECIBOS_FALTANTES_2026 con el código correcto.
+//
+// Ninguno de estos recibos mueve el saldo de Caja/Banco (tabla `movimientos`): mismo criterio
+// que la corrección 30 -- esa reconciliación se hace aparte, en el checkpoint contable real
+// (arqueo físico + extracto bancario + "Ajustar saldos"), no recibo por recibo.
+const OBSERVACION_RECIBO_FALTANTE_2026 =
+  'Recibo físico ya escrito en el talonario que nunca se había dado de alta en el sistema -- ' +
+  'encontrado por el cruce automático del talonario completo (ronda 3, 2026-08-19), ver ' +
+  'scripts/import-cartera/output/cruce-colillas-vs-db.md.';
+
+const RECIBOS_FALTANTES_2026 = [
+  { numeroRecibo: 2548, codigo: 'S010', desde: { anio: 2026, mes: 1 }, hasta: { anio: 2026, mes: 12 }, monto: 240000, metodoPago: 'Efectivo', fecha: '2026-07-18', concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026' },
+  { numeroRecibo: 2552, codigo: 'C004', desde: { anio: 2026, mes: 1 }, hasta: { anio: 2026, mes: 12 }, monto: 240000, metodoPago: 'Efectivo', fecha: '2026-07-25', concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026' },
+  { numeroRecibo: 2553, codigo: 'C0041', desde: { anio: 2026, mes: 1 }, hasta: { anio: 2026, mes: 12 }, monto: 120000, metodoPago: 'Efectivo', fecha: '2026-07-25', concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DCIEMBRE 2026' },
+  { numeroRecibo: 2554, codigo: 'R0131', desde: { anio: 2026, mes: 6 }, hasta: { anio: 2026, mes: 9 }, monto: 40000, metodoPago: 'Transferencia', fecha: '2026-07-25', concepto: 'CUOTA DE SOSTENIMIENTO JUNIO A SEPTIEMBRE 2026 (TRANSFERENCIA 25/07/2026 $100,000)' },
+  { numeroRecibo: 2555, codigo: 'R013', desde: { anio: 2026, mes: 4 }, hasta: { anio: 2026, mes: 9 }, monto: 60000, metodoPago: 'Transferencia', fecha: '2026-07-25', concepto: 'CUOTA DE SOSTENIMIENTO ABRIL A SEPTIEMBRE 2026 (TRANSFERENCIA 25/07/2026 $100,000)' },
+  { numeroRecibo: 2556, codigo: 'C016', desde: { anio: 2026, mes: 7 }, hasta: { anio: 2026, mes: 12 }, monto: 60000, metodoPago: 'Efectivo', fecha: '2026-07-25', concepto: 'CUOTA DE SOSTENIMIENTO JULIO A DICIEMBRE 2026' },
+  { numeroRecibo: 2557, codigo: 'S0334', desde: { anio: 2026, mes: 1 }, hasta: { anio: 2026, mes: 12 }, monto: 120000, metodoPago: 'Efectivo', fecha: '2026-08-01', concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026' },
+  { numeroRecibo: 2558, codigo: 'S039', desde: { anio: 2026, mes: 1 }, hasta: { anio: 2026, mes: 12 }, monto: 120000, metodoPago: 'Efectivo', fecha: '2026-08-01', concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026' },
+  { numeroRecibo: 2559, codigo: 'S0338', desde: { anio: 2026, mes: 1 }, hasta: { anio: 2026, mes: 6 }, monto: 96000, metodoPago: 'Efectivo', fecha: '2026-08-01', concepto: 'CUOTA DE SOSTENIMIENTO ENERO A JUNIO 2026' },
+  { numeroRecibo: 2561, codigo: 'S042', desde: { anio: 2026, mes: 1 }, hasta: { anio: 2026, mes: 12 }, monto: 120000, metodoPago: 'Efectivo', fecha: '2026-08-08', concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026' },
+  { numeroRecibo: 2564, codigo: 'R047', desde: { anio: 2024, mes: 10 }, hasta: { anio: 2025, mes: 12 }, monto: 150000, metodoPago: 'Efectivo', fecha: '2026-06-27', concepto: 'CUOTA DE SOSTENIMIENTO OCTUBRE 2024 A DICIEMBRE 2025' },
+  // Código crudo del talonario "S038" -- error de transcripción, la cuenta real es S0383
+  // (confirmado por el usuario 2026-08-21, ver el comentario de la corrección 32 más arriba).
+  { numeroRecibo: 2550, codigo: 'S0383', desde: { anio: 2026, mes: 7 }, hasta: { anio: 2026, mes: 12 }, monto: 60000, metodoPago: 'Efectivo', fecha: '2026-07-24', concepto: 'CUOTA DE SOSTENIMIENTO JULIO A DICIEMBRE 2026' }
+];
+
+const RECIBO_1167_BLANCO_MOTIVO =
+  'Talonario en blanco -- hoja del talonario físico sin usar, encontrada por el cruce automático ' +
+  'del talonario completo (ronda 3, 2026-08-19). No representa un pago ni un recibo anulado con ' +
+  'pago previo: nunca se escribió nada en ella.';
+
+// 33. Los otros 96 huecos que quedaban en la numeración consecutiva (1 a 2564) tras las
+// correcciones 31 y 32, registrados uno por uno en recibos_anulados_fisicos -- mismo mecanismo
+// que el 1167. Confirmado por el usuario 2026-08-21: "es muy importante que estén TODOS los
+// recibos". Se clasificaron contra las 2.622 filas transcritas mecánicamente del talonario
+// físico completo (scripts/import-cartera/output/colillas-clasificadas-completo.json, cruce
+// ronda 3, 2026-08-19):
+//
+// - 90 están anulados EN EL PROPIO TALONARIO (la colilla física dice "ANULADO..." con su
+//   motivo) -- nunca representaron un cobro. El motivo se guarda tal cual está escrito en la
+//   colilla, no reinterpretado.
+// - 3 son hojas en blanco (mismo caso que el 1167): 1667, 2441, 2442.
+// - 3 (287, 1143, 1148) NO aparecen en ninguna de las 2.622 filas transcritas -- no hay colilla
+//   física con ese número. No se puede confirmar si el talonario los anuló, los usó y la colilla
+//   se perdió, o simplemente saltó esos números al numerar -- se registra la incertidumbre tal
+//   cual, no se inventa un motivo.
+const RECIBOS_ANULADOS_FALTANTES = [
+  { numeroRecibo: 4, fecha: null, motivo: 'NO ESPECIFICA EL MOTIVO DE LA ANULACIÒN DEL RECIBO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 18, fecha: '2017-10-13', motivo: 'NO ESPECIFICA EL MOTIVO DE LA ANULACIÒN DEL RECIBO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 40, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 41, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 42, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 43, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 44, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 45, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 46, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 47, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 48, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 49, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 50, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 51, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 52, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 53, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 54, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 55, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 56, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 57, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 58, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 59, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 60, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 61, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 62, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 63, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 64, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 65, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 66, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 67, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 68, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 69, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 70, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 71, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 72, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 73, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 74, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 75, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 76, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 77, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 78, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 79, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 80, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 81, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 82, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 83, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 84, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 85, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 86, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 87, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 88, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 89, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 90, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 91, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 92, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 93, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 94, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 95, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 96, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 97, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 98, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 99, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 100, fecha: null, motivo: 'ANULADO POR DEVOLUCIÒN SIN USO, SOLO APARECE COLILLA (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 102, fecha: null, motivo: 'NO ESPECIFICA EL MOTIVO DE LA ANULACIÒN DEL RECIBO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 287, fecha: null, motivo: 'Número no aparece en ninguna de las 2.622 filas transcritas mecánicamente del talonario físico completo -- no se puede confirmar si fue anulado, usado o simplemente saltado en la numeración original. Registrado para no dejar un hueco sin explicación (cruce automático del talonario, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 311, fecha: null, motivo: 'NO ESPECIFICA EL MOTIVO DE LA ANULACIÒN DEL RECIBO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 585, fecha: null, motivo: 'NO ESPECIFICA EL MOTIVO DE LA ANULACIÒN DEL RECIBO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 671, fecha: null, motivo: 'ANULADO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 700, fecha: null, motivo: 'ANULADO POR NO USO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 939, fecha: null, motivo: 'ANULADO ERROR EN EL DILIGENCIAMIENTO EN EL NOMBRE DEL USUARIO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 957, fecha: null, motivo: 'ANULADO ERROR EN EL DILIGENCIAMIENTO EN EL VALOR TOTAL A CANCELAR (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 959, fecha: null, motivo: 'ANULADO ERROR EN EL DILIGENCIAMIENTO EN EL VALOR DE LA CUOTA DE SOSTENIMIENTO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1043, fecha: null, motivo: 'ANULADO - ERROR EN EL DILIGENCIAMIENTO DEL NOMBRE DEL USUARIO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1044, fecha: null, motivo: 'ANULADO - ERROR EN EL DILIGENCIAMIENTO DEL NOMBRE DEL USUARIO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1143, fecha: null, motivo: 'Número no aparece en ninguna de las 2.622 filas transcritas mecánicamente del talonario físico completo -- no se puede confirmar si fue anulado, usado o simplemente saltado en la numeración original. Registrado para no dejar un hueco sin explicación (cruce automático del talonario, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1148, fecha: null, motivo: 'Número no aparece en ninguna de las 2.622 filas transcritas mecánicamente del talonario físico completo -- no se puede confirmar si fue anulado, usado o simplemente saltado en la numeración original. Registrado para no dejar un hueco sin explicación (cruce automático del talonario, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1152, fecha: null, motivo: 'ANULADO POR REPETICIÒN DE RECIBO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1188, fecha: null, motivo: 'RECIBO ANULADO POR ERROR DE VALOR TOTAL (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1197, fecha: null, motivo: 'ANULADO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1245, fecha: null, motivo: 'ANULADO POR ERROR EN MES DE PAGO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1256, fecha: null, motivo: 'ANULADO POR ERROR EN MES DE PAGO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1314, fecha: '2023-01-07', motivo: 'ANULADO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1348, fecha: null, motivo: 'ANULADO POR ERROR EN MES DE PAGO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1438, fecha: '2023-04-22', motivo: 'ANULADO POR ERROR EN MES DE PAGO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1458, fecha: null, motivo: 'ANULADO POR ERROR EN MES DE PAGO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1515, fecha: '2023-07-22', motivo: 'ANULADO POR ERROR EN MES DE PAGO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1554, fecha: '2023-09-30', motivo: 'ANULADO POR ERROR EN MES DE PAGO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1596, fecha: '2023-12-02', motivo: 'ANULADO POR ERROR EN MES DE PAGO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1647, fecha: '2024-01-27', motivo: 'ANULADO POR ERROR EN MES DE PAGO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1666, fecha: '2024-02-03', motivo: 'ANULADO POR ERROR EN NOMBRE DE USUARIO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1667, fecha: '2024-02-03', motivo: 'Talonario en blanco -- hoja del talonario físico sin usar, encontrada por el cruce automático del talonario completo (ronda 3, 2026-08-19). No representa un pago ni un recibo anulado con pago previo: nunca se escribió nada en ella.' },
+  { numeroRecibo: 1928, fecha: null, motivo: 'ANULADO POR ERROR EN CUOTA DE SOSTENIMIENTO (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 1995, fecha: null, motivo: 'ANULADO POR ERROR DE DATOS (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 2413, fecha: null, motivo: 'ANULADO POR ERROR DE DATOS (motivo tal cual anotado en el talonario físico; encontrado por el cruce automático, ronda 3, 2026-08-19).' },
+  { numeroRecibo: 2441, fecha: null, motivo: 'Talonario en blanco -- hoja del talonario físico sin usar, encontrada por el cruce automático del talonario completo (ronda 3, 2026-08-19). No representa un pago ni un recibo anulado con pago previo: nunca se escribió nada en ella.' },
+  { numeroRecibo: 2442, fecha: null, motivo: 'Talonario en blanco -- hoja del talonario físico sin usar, encontrada por el cruce automático del talonario completo (ronda 3, 2026-08-19). No representa un pago ni un recibo anulado con pago previo: nunca se escribió nada en ella.' }
+];
+
 const OBSERVACION_CREDITO_R0942 =
   'Saldo a favor no registrado: el recibo 2246 documenta una transferencia de $180.000 el ' +
   '19-jun-2025 ("CUOTA DE SOSTENIMIENTO ABRIL 2025 A FEBRERO 2026 (TRANSFERENCIA 19/06/2025 - ' +
@@ -1193,6 +1368,9 @@ function ejecutarPaso9b({ dbService }) {
   const aperturaIncobrables = [];
   const cuentasNuevas2026 = [];
   const periodosTextoCorregidos = [];
+  const recibosFaltantes2026 = [];
+  let recibo1167Blanco = null;
+  const recibosAnuladosFaltantes = [];
 
   const transaccion = db.transaction(() => {
     // 31. Ver comentario junto a derivarPeriodoCorrecto más arriba. Corre PRIMERO en la
@@ -2273,6 +2451,268 @@ function ejecutarPaso9b({ dbService }) {
       }
     }
 
+    // 32. Ver comentario junto a RECIBOS_FALTANTES_2026 más arriba.
+    {
+      const propietarioVigente = (cuentaId) => db.prepare(
+        `SELECT propietario_id FROM cuenta_propietarios WHERE cuenta_id=? AND fecha_fin IS NULL`
+      ).get(cuentaId);
+      const mesesEntre = (desde, hasta) => {
+        const lista = [];
+        for (let c = desde.anio * 12 + desde.mes; c <= hasta.anio * 12 + hasta.mes; c++) {
+          lista.push({ anio: Math.floor((c - 1) / 12), mes: ((c - 1) % 12) + 1 });
+        }
+        return lista;
+      };
+      const pendienteEnRango = (cuentaId, periodos) => repo.getCargosPendientes(cuentaId, 1)
+        .filter(c => periodos.some(p => p.anio === c.anio && p.mes === c.mes));
+
+      for (const item of RECIBOS_FALTANTES_2026) {
+        const yaExiste = db.prepare('SELECT id FROM recibos WHERE numero_recibo=?').get(item.numeroRecibo);
+        if (yaExiste) {
+          recibosFaltantes2026.push({ numeroRecibo: item.numeroRecibo, codigo: item.codigo, yaAplicado: true });
+          continue;
+        }
+
+        const cuentaId = idPorCodigo.get(normalizarCodigo(item.codigo));
+        if (!cuentaId) throw new Error(`Corrección 32 (${item.numeroRecibo}/${item.codigo}): la cuenta no existe`);
+        const propietario = propietarioVigente(cuentaId);
+        if (!propietario) throw new Error(`Corrección 32 (${item.numeroRecibo}/${item.codigo}): sin propietario vigente`);
+
+        const periodos = mesesEntre(item.desde, item.hasta);
+        const causacion = service.asegurarCausacion(cuentaId, item.hasta.anio, item.hasta.mes, item.desde);
+        if (causacion.omitidos.length > 0) {
+          throw new Error(`Corrección 32 (${item.numeroRecibo}/${item.codigo}): no se pudo causar -- ${JSON.stringify(causacion.omitidos)}`);
+        }
+
+        const cargosPendientes = pendienteEnRango(cuentaId, periodos);
+        if (cargosPendientes.length !== periodos.length) {
+          throw new Error(`Corrección 32 (${item.numeroRecibo}/${item.codigo}): se esperaban ${periodos.length} cargos pendientes, se encontraron ${cargosPendientes.length}`);
+        }
+
+        const reciboId = pagoRepo.crearRecibo({
+          numeroRecibo: item.numeroRecibo, cuentaId, propietarioId: propietario.propietario_id,
+          fechaRecibo: item.fecha, total: item.monto, metodoPago: item.metodoPago,
+          observaciones: OBSERVACION_RECIBO_FALTANTE_2026
+        });
+        const detalleId = pagoRepo.crearReciboDetalle({
+          reciboId, concepto: item.concepto,
+          periodoDesde: formatearPeriodoTexto(item.desde), periodoHasta: formatearPeriodoTexto(item.hasta),
+          valor: item.monto
+        });
+
+        const abono = service.registrarAbono({
+          cuentaId, fecha: item.fecha, monto: item.monto, modo: MODOS.MESES_ESPECIFICOS,
+          cargosElegidos: cargosPendientes.map(c => c.id), reciboDetalleId: detalleId,
+          observaciones: OBSERVACION_RECIBO_FALTANTE_2026
+        });
+        if (esMayor(abono.sobrante, 0)) {
+          throw new Error(`Corrección 32 (${item.numeroRecibo}/${item.codigo}): quedó sobrante sin imputar de $${abono.sobrante}`);
+        }
+        const pendienteFinal = pendienteEnRango(cuentaId, periodos).reduce((s, c) => s + c.pendiente, 0);
+        if (esMayor(pendienteFinal, 0)) {
+          throw new Error(`Corrección 32 (${item.numeroRecibo}/${item.codigo}): quedó pendiente de $${pendienteFinal} dentro del rango declarado`);
+        }
+
+        recibosFaltantes2026.push({
+          numeroRecibo: item.numeroRecibo, codigo: item.codigo, yaAplicado: false,
+          cuentaId, reciboId, monto: item.monto
+        });
+      }
+
+      // Caso especial 2549 (S015): enero-julio 2026 ya estaban pagados por otro recibo (FIFO,
+      // ver comentario arriba) -- solo agosto-diciembre estaba realmente pendiente. El resto del
+      // efectivo recibido ($70.000 de los $120.000) se banquea como saldo a favor real: mismo
+      // mecanismo que cualquier sobrante de `registrarAbono` (ver CarteraService.registrarAbono).
+      {
+        const numeroRecibo = 2549;
+        const yaExiste = db.prepare('SELECT id FROM recibos WHERE numero_recibo=?').get(numeroRecibo);
+        if (yaExiste) {
+          recibosFaltantes2026.push({ numeroRecibo, codigo: 'S015', yaAplicado: true });
+        } else {
+          const cuentaId = idPorCodigo.get(normalizarCodigo('S015'));
+          const propietario = propietarioVigente(cuentaId);
+          if (!propietario) throw new Error('Corrección 32 (2549/S015): sin propietario vigente');
+
+          service.asegurarCausacion(cuentaId, 2026, 12, { anio: 2026, mes: 1 });
+          const pendientes2026 = pendienteEnRango(cuentaId, mesesEntre({ anio: 2026, mes: 1 }, { anio: 2026, mes: 12 }));
+          if (pendientes2026.length !== 5) {
+            throw new Error(`Corrección 32 (2549/S015): se esperaban 5 meses pendientes de 2026 (ago-dic), se encontraron ${pendientes2026.length}`);
+          }
+
+          const reciboId = pagoRepo.crearRecibo({
+            numeroRecibo, cuentaId, propietarioId: propietario.propietario_id,
+            fechaRecibo: '2026-07-18', total: 120000, metodoPago: 'Efectivo',
+            observaciones: OBSERVACION_RECIBO_FALTANTE_2026 + ' Enero-julio 2026 ya estaban ' +
+              'pagados por los recibos 2152 y 2301 (el sobrante de esos abonos llegó ahí por ' +
+              'FIFO, ver corrección 31); de este recibo, $50.000 se aplican a agosto-diciembre ' +
+              '2026 (lo único pendiente dentro del rango) y $70.000 quedan como saldo a favor real.'
+          });
+          const detalleId = pagoRepo.crearReciboDetalle({
+            reciboId, concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026',
+            periodoDesde: 'Enero 2026', periodoHasta: 'Diciembre 2026', valor: 120000
+          });
+
+          const abono = service.registrarAbono({
+            cuentaId, fecha: '2026-07-18', monto: 120000, modo: MODOS.MESES_ESPECIFICOS,
+            cargosElegidos: pendientes2026.map(c => c.id), reciboDetalleId: detalleId,
+            observaciones: OBSERVACION_RECIBO_FALTANTE_2026
+          });
+          if (redondear(abono.sobrante) !== 70000) {
+            throw new Error(`Corrección 32 (2549/S015): se esperaba un sobrante de $70.000, salió $${abono.sobrante}`);
+          }
+
+          recibosFaltantes2026.push({
+            numeroRecibo, codigo: 'S015', yaAplicado: false, cuentaId, reciboId,
+            monto: 120000, sobranteCredito: abono.sobrante
+          });
+        }
+      }
+
+      // Caso especial 2551 (S0292): no es sostenimiento -- abono al punto de conexión ya
+      // existente de esta cuenta (nuevos_puntos).
+      {
+        const numeroRecibo = 2551;
+        const yaExiste = db.prepare('SELECT id FROM recibos WHERE numero_recibo=?').get(numeroRecibo);
+        if (yaExiste) {
+          recibosFaltantes2026.push({ numeroRecibo, codigo: 'S0292', yaAplicado: true });
+        } else {
+          const NuevoPuntoRepository = require('../../src/repositories/NuevoPuntoRepository');
+          const puntoRepo = new NuevoPuntoRepository(dbService);
+          const cuentaId = idPorCodigo.get(normalizarCodigo('S0292'));
+          const propietario = propietarioVigente(cuentaId);
+          if (!propietario) throw new Error('Corrección 32 (2551/S0292): sin propietario vigente');
+          const punto = db.prepare(`SELECT id, saldo_pendiente FROM nuevos_puntos WHERE cuenta_id=? AND estado='Pendiente'`).get(cuentaId);
+          if (!punto) throw new Error('Corrección 32 (2551/S0292): no hay un punto de conexión pendiente');
+          if (punto.saldo_pendiente < 100000) {
+            throw new Error(`Corrección 32 (2551/S0292): saldo pendiente ($${punto.saldo_pendiente}) menor al abono ($100.000)`);
+          }
+
+          const reciboId = pagoRepo.crearRecibo({
+            numeroRecibo, cuentaId, propietarioId: propietario.propietario_id,
+            fechaRecibo: '2026-07-25', total: 100000, metodoPago: 'Transferencia',
+            observaciones: OBSERVACION_RECIBO_FALTANTE_2026
+          });
+          const detalleId = pagoRepo.crearReciboDetalle({
+            reciboId, concepto: 'ABONO A PUNTO NUEVO (TRANSFERENCIA 18/07/2026)', valor: 100000,
+            tipoConceptoContable: 'AbonoPuntoNuevo'
+          });
+          puntoRepo.crearAbono({
+            nuevoPuntoId: punto.id, monto: 100000, fechaAbono: '2026-07-25',
+            reciboDetalleId: detalleId, observaciones: OBSERVACION_RECIBO_FALTANTE_2026
+          });
+          const { saldoPendiente, estado } = puntoRepo.actualizarSaldoYEstado(punto.id);
+
+          recibosFaltantes2026.push({
+            numeroRecibo, codigo: 'S0292', yaAplicado: false, cuentaId, reciboId,
+            monto: 100000, saldoPendienteConexion: saldoPendiente, estadoConexion: estado
+          });
+        }
+      }
+
+      // Caso especial 2563 (R0942): el paréntesis del propio recibo ("TENIA $4.000 A FAVOR")
+      // coincide exacto con el crédito ya documentado en la corrección 14 -- $156.000 en
+      // efectivo + $4.000 de ese crédito = $160.000, el valor exacto de marzo-diciembre 2026
+      // (10 meses x $16.000).
+      {
+        const numeroRecibo = 2563;
+        const yaExiste = db.prepare('SELECT id FROM recibos WHERE numero_recibo=?').get(numeroRecibo);
+        if (yaExiste) {
+          recibosFaltantes2026.push({ numeroRecibo, codigo: 'R0942', yaAplicado: true });
+        } else {
+          const cuentaId = idPorCodigo.get(normalizarCodigo('R0942'));
+          const propietario = propietarioVigente(cuentaId);
+          if (!propietario) throw new Error('Corrección 32 (2563/R0942): sin propietario vigente');
+
+          service.asegurarCausacion(cuentaId, 2026, 12, { anio: 2026, mes: 3 });
+          const periodos = mesesEntre({ anio: 2026, mes: 3 }, { anio: 2026, mes: 12 });
+          const cargosPendientes = pendienteEnRango(cuentaId, periodos);
+          if (cargosPendientes.length !== 10) {
+            throw new Error(`Corrección 32 (2563/R0942): se esperaban 10 cargos pendientes (mar-dic 2026), se encontraron ${cargosPendientes.length}`);
+          }
+          const cargosElegidosIds = cargosPendientes.map(c => c.id);
+
+          const reciboId = pagoRepo.crearRecibo({
+            numeroRecibo, cuentaId, propietarioId: propietario.propietario_id,
+            fechaRecibo: '2026-08-08', total: 156000, metodoPago: 'Efectivo',
+            observaciones: OBSERVACION_RECIBO_FALTANTE_2026 + ' Incluye el uso del saldo a ' +
+              'favor de $4.000 ya documentado en la corrección 14 -- el propio recibo lo anota ' +
+              '("TENIA $4.000 A FAVOR").'
+          });
+          const detalleId = pagoRepo.crearReciboDetalle({
+            reciboId, concepto: 'CUOTA DE SOSTENIMIENTO MARZO A DICIEMBRE 2026 (TENIA $4,000 A FAVOR)',
+            periodoDesde: 'Marzo 2026', periodoHasta: 'Diciembre 2026', valor: 160000
+          });
+
+          const abonoEfectivo = service.registrarAbono({
+            cuentaId, fecha: '2026-08-08', monto: 156000, modo: MODOS.MESES_ESPECIFICOS,
+            cargosElegidos: cargosElegidosIds, reciboDetalleId: detalleId,
+            observaciones: OBSERVACION_RECIBO_FALTANTE_2026
+          });
+          if (esMayor(abonoEfectivo.sobrante, 0)) {
+            throw new Error(`Corrección 32 (2563/R0942): sobrante inesperado de efectivo: $${abonoEfectivo.sobrante}`);
+          }
+
+          const detalleCreditoId = pagoRepo.crearReciboDetalle({
+            reciboId, concepto: 'Aplicación de saldo a favor', valor: -4000,
+            tipoConceptoContable: 'AplicacionSaldoFavor'
+          });
+          const abonoCredito = service.aplicarCreditoAMeses({
+            cuentaId, monto: 4000, cargosElegidos: cargosElegidosIds,
+            fecha: '2026-08-08', reciboDetalleId: detalleCreditoId
+          });
+          if (esMayor(abonoCredito.sobrante, 0)) {
+            throw new Error(`Corrección 32 (2563/R0942): sobrante inesperado de crédito: $${abonoCredito.sobrante}`);
+          }
+          const pendienteFinal = pendienteEnRango(cuentaId, periodos).reduce((s, c) => s + c.pendiente, 0);
+          if (esMayor(pendienteFinal, 0)) {
+            throw new Error(`Corrección 32 (2563/R0942): quedó pendiente de $${pendienteFinal} dentro del rango declarado`);
+          }
+
+          recibosFaltantes2026.push({
+            numeroRecibo, codigo: 'R0942', yaAplicado: false, cuentaId, reciboId, monto: 156000
+          });
+        }
+      }
+
+      // 1167: hoja en blanco del talonario físico -- no representa ningún pago, se registra en
+      // recibos_anulados_fisicos para no dejar un hueco sin explicación en la numeración.
+      {
+        const yaExiste = db.prepare('SELECT id FROM recibos_anulados_fisicos WHERE numero_recibo=?').get(1167);
+        if (yaExiste) {
+          recibo1167Blanco = { yaAplicado: true };
+        } else {
+          db.prepare(`INSERT INTO recibos_anulados_fisicos (numero_recibo, motivo) VALUES (?, ?)`)
+            .run(1167, RECIBO_1167_BLANCO_MOTIVO);
+          recibo1167Blanco = { yaAplicado: false };
+        }
+      }
+
+      // 33. Ver comentario junto a RECIBOS_ANULADOS_FALTANTES más arriba.
+      for (const item of RECIBOS_ANULADOS_FALTANTES) {
+        const yaExiste = db.prepare('SELECT id FROM recibos_anulados_fisicos WHERE numero_recibo=?').get(item.numeroRecibo);
+        if (yaExiste) {
+          recibosAnuladosFaltantes.push({ numeroRecibo: item.numeroRecibo, yaAplicado: true });
+          continue;
+        }
+        db.prepare(`INSERT INTO recibos_anulados_fisicos (numero_recibo, fecha, motivo) VALUES (?, ?, ?)`)
+          .run(item.numeroRecibo, item.fecha, item.motivo);
+        recibosAnuladosFaltantes.push({ numeroRecibo: item.numeroRecibo, yaAplicado: false });
+      }
+
+      // Después de insertar los recibos históricos (hasta el 2564), el consecutivo debe quedar
+      // apuntando al primer número realmente libre -- si no, el próximo pago registrado desde la
+      // app chocaría con un UNIQUE constraint al intentar reusar un número que esta corrección ya
+      // ocupó.
+      {
+        const MAX_NUMERO_RECIBO_CORRECCION_32 = 2565;
+        const actual = parseInt(db.prepare("SELECT valor FROM configuracion WHERE clave='consecutivo_recibos'").get().valor, 10);
+        if (actual < MAX_NUMERO_RECIBO_CORRECCION_32) {
+          db.prepare("UPDATE configuracion SET valor=?, fecha_actualizacion=CURRENT_TIMESTAMP WHERE clave='consecutivo_recibos'")
+            .run(String(MAX_NUMERO_RECIBO_CORRECCION_32));
+        }
+      }
+    }
+
   });
   transaccion();
 
@@ -2285,7 +2725,8 @@ function ejecutarPaso9b({ dbService }) {
     limpiezaSuspendidas, creditoR0942, recalculoR0831, pagosAdelantados, pendientesManuales,
     mergeR0081S058, reimputacionS0312,
     redencionR049, reasignacion458, suspensionIncobrables, reciboFaltanteS0244,
-    aperturaIncobrables, cuentasNuevas2026, periodosTextoCorregidos
+    aperturaIncobrables, cuentasNuevas2026, periodosTextoCorregidos,
+    recibosFaltantes2026, recibo1167Blanco, recibosAnuladosFaltantes
   };
 }
 
@@ -2307,5 +2748,7 @@ module.exports = {
   SUSPENSION_INCOBRABLES, OBSERVACION_SUSPENSION_INCOBRABLES, RECIBO_FALTANTE_S0244, OBSERVACION_RECIBO_S0244,
   APERTURA_INCOBRABLES, OBSERVACION_APERTURA_INCOBRABLES,
   CUENTAS_NUEVAS_2026, OBSERVACION_CUENTA_NUEVA_2026, VALOR_PUNTO_NUEVO_2026, FECHA_CUENTAS_NUEVAS_2026,
-  inferirPeriodoDeTexto, derivarPeriodoCorrecto, formatearPeriodoTexto, SOBRESCRITURA_PERIODO_MANUAL
+  inferirPeriodoDeTexto, derivarPeriodoCorrecto, formatearPeriodoTexto, SOBRESCRITURA_PERIODO_MANUAL,
+  RECIBOS_FALTANTES_2026, OBSERVACION_RECIBO_FALTANTE_2026, RECIBO_1167_BLANCO_MOTIVO,
+  RECIBOS_ANULADOS_FALTANTES
 };

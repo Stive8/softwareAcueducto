@@ -40,6 +40,12 @@ function main() {
   }
   const corregidos = r.periodosTextoCorregidos.filter(p => p.corregido);
   console.log(`Períodos de texto (Historial de Aportes): ${corregidos.length} recibo_detalles corregidos de ${r.periodosTextoCorregidos.length} evaluados`);
+  for (const f of r.recibosFaltantes2026) {
+    console.log(`Recibo ${f.numeroRecibo} (${f.codigo}): ${f.yaAplicado ? 'ya existía' : `creado por $${f.monto}${f.sobranteCredito ? ` (${f.sobranteCredito} quedan como saldo a favor)` : ''}`}`);
+  }
+  console.log(`Recibo 1167 (talonario en blanco): ${r.recibo1167Blanco.yaAplicado ? 'ya estaba registrado' : 'registrado en recibos_anulados_fisicos'}`);
+  const anuladosNuevos = r.recibosAnuladosFaltantes.filter(x => !x.yaAplicado).length;
+  console.log(`Recibos anulados/en blanco faltantes: ${anuladosNuevos} registrados de ${r.recibosAnuladosFaltantes.length} evaluados`);
 
   const outDir = path.join(__dirname, 'output');
   fs.mkdirSync(outDir, { recursive: true });
