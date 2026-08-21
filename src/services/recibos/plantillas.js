@@ -111,7 +111,9 @@ function renderCarta(datos) {
 // Diseño propio para impresoras térmicas POS de 80mm: una sola columna, sin tablas, tipografía
 // más grande para el número de recibo y el total (lo más visible del ticket), texto envuelto por
 // palabra para que conceptos largos ("CUOTA DE SOSTENIMIENTO DE ENERO A DICIEMBRE 2024") no
-// rompan el layout. Sin logo a propósito (ver decisión del spec) -- solo texto institucional.
+// rompan el layout. El logo es opcional y pequeño (ausente = igual que antes): la mayoría de
+// impresoras térmicas imprimen en blanco y negro, así que un logo con mucho detalle o color puede
+// salir borroso -- queda a criterio del acueducto tener uno simple/alto contraste si lo usa aquí.
 function renderTermico80mm(datos) {
   const config = datos.config;
 
@@ -135,6 +137,7 @@ function renderTermico80mm(datos) {
   body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111827; width: 80mm; margin: 0; padding: 3mm; }
   .centro { text-align: center; }
   .separador { border: none; border-top: 1px dashed #111827; margin: 6px 0; }
+  .logo-termico { display: block; max-width: 50mm; max-height: 20mm; object-fit: contain; margin: 0 auto 4px auto; }
   .nombre-asociacion { font-size: 13px; font-weight: bold; margin: 0 0 2px 0; }
   .dato-institucional { font-size: 10px; margin: 1px 0; color: #374151; }
   .recibo-numero { font-size: 15px; font-weight: bold; margin: 6px 0 0 0; }
@@ -155,6 +158,7 @@ function renderTermico80mm(datos) {
 </head>
 <body>
   <div class="centro">
+    ${config.logoBase64 ? `<img class="logo-termico" src="${config.logoBase64}" alt="Logo">` : ''}
     <p class="nombre-asociacion">${escapeHtml(config.nombre_asociacion || 'Acueducto Veredal')}</p>
     ${config.nit ? `<p class="dato-institucional">NIT: ${escapeHtml(config.nit)}</p>` : ''}
     ${config.direccion ? `<p class="dato-institucional">${escapeHtml(config.direccion)}</p>` : ''}

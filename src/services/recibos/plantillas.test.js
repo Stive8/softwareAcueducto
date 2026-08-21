@@ -51,9 +51,14 @@ test('carta: escapa HTML en campos de texto libre (observaciones, concepto)', ()
   assert.doesNotMatch(html, /<b>malicioso<\/b>/);
 });
 
-test('termico_80mm: nunca incluye logo aunque logoBase64 venga presente', () => {
-  const html = PLANTILLAS.termico_80mm(datosFixture({ config: { ...datosFixture().config, logoBase64: 'data:image/png;base64,ABC' } }));
+test('termico_80mm: sin logoBase64, no inserta ningún <img>', () => {
+  const html = PLANTILLAS.termico_80mm(datosFixture());
   assert.doesNotMatch(html, /<img/);
+});
+
+test('termico_80mm: con logoBase64, inserta la imagen del logo', () => {
+  const html = PLANTILLAS.termico_80mm(datosFixture({ config: { ...datosFixture().config, logoBase64: 'data:image/png;base64,ABC' } }));
+  assert.match(html, /<img[^>]+src="data:image\/png;base64,ABC"/);
 });
 
 test('termico_80mm: incluye número de recibo, total y concepto largo completo', () => {
