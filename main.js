@@ -1390,13 +1390,15 @@ function setupIpcHandlers() {
   envolverHandle('recibos:imprimir', async (event, id, formato) => {
     let ventanaImpresion;
     try {
-      const html = reciboService.generarHTML(id, formato);
+      const formatoEfectivo = reciboService.resolverFormato(formato);
+      const html = reciboService.generarHTML(id, formatoEfectivo);
       ventanaImpresion = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
       await ventanaImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
       const opcionesImpresion = { silent: false };
-      if (formato === 'termico_80mm') {
+      if (formatoEfectivo === 'termico_80mm') {
         opcionesImpresion.pageSize = await calcularPageSizeTermico(ventanaImpresion);
+        opcionesImpresion.margins = { marginType: 'none' };
       }
 
       return await new Promise((resolve) => {
@@ -1436,13 +1438,15 @@ function setupIpcHandlers() {
         return { success: false, canceled: true };
       }
 
-      const html = reciboService.generarHTML(id, formato);
+      const formatoEfectivo = reciboService.resolverFormato(formato);
+      const html = reciboService.generarHTML(id, formatoEfectivo);
       ventanaImpresion = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
       await ventanaImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
 
       const opcionesPDF = {};
-      if (formato === 'termico_80mm') {
+      if (formatoEfectivo === 'termico_80mm') {
         opcionesPDF.pageSize = await calcularPageSizeTermico(ventanaImpresion);
+        opcionesPDF.margins = { marginType: 'none' };
       }
 
       const pdfBuffer = await ventanaImpresion.webContents.printToPDF(opcionesPDF);

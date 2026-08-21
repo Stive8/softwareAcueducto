@@ -88,6 +88,25 @@ test('generarHTML refleja el valor VIGENTE (post-corrección), no el original', 
   }
 });
 
+test('resolverFormato: usa el override cuando viene, si no el predeterminado configurado', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarRecibo(db);
+    db.prepare(`
+      INSERT INTO configuracion (clave, valor) VALUES ('formato_impresion_recibo', 'termico_80mm')
+      ON CONFLICT(clave) DO UPDATE SET valor = 'termico_80mm'
+    `).run();
+    const service = new ReciboService(ctx.dbService);
+
+    assert.equal(service.resolverFormato(''), 'termico_80mm');
+    assert.equal(service.resolverFormato(undefined), 'termico_80mm');
+    assert.equal(service.resolverFormato('carta'), 'carta');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('obtenerDatosParaImprimir lanza si el recibo no existe', () => {
   const ctx = crearDbTemporal();
   try {

@@ -12,7 +12,7 @@ const Recibos = {
 
   renderSelectorFormato(idPrefix) {
     return `
-      <select id="formato_${idPrefix}" class="selector-formato-recibo" style="padding: 4px 6px; font-size: 0.8rem; border: 1px solid #cbd5e1; border-radius: 4px;">
+      <select id="formato_${idPrefix}" class="selector-formato-recibo" title="Formato de impresión" style="padding: 4px 6px; font-size: 0.8rem; border: 1px solid #cbd5e1; border-radius: 4px;">
         ${this.FORMATOS_IMPRESION.map(f => `<option value="${f.value}">${f.label}</option>`).join('')}
       </select>
     `;

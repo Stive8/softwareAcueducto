@@ -184,6 +184,13 @@ class ReciboService {
     const numeroRecibo = this.repository.getValorVigente(id, 'numero_recibo') ?? recibo.numero_recibo;
     const fechaRecibo = this.repository.getValorVigente(id, 'fecha_recibo') ?? recibo.fecha_recibo;
 
+    // El valor VIGENTE se aplica por línea (detalle), pero datos.total se deja igual al total
+    // original de la tabla recibos -- a propósito. recibo.total es el valor real de caja/banco:
+    // anular() y corregirMetodoPago() lo leen directamente para revertir/crear movimientos y
+    // asientos contables reales. Recalcularlo a partir de los valores corregidos de línea
+    // desacoplaría el total impreso del movimiento de dinero real que representa -- sería peor
+    // que la inconsistencia visual que esto documenta. Si un recibo tiene una corrección de
+    // valor, las líneas impresas pueden no sumar exactamente el TOTAL: es esperado.
     const detalles = recibo.detalles.map(d => ({
       ...d,
       concepto: this.repository.getValorVigente(id, 'concepto', d.id) ?? d.concepto,
@@ -202,12 +209,20 @@ class ReciboService {
     };
   }
 
+  // Resuelve el formato EFECTIVO (nunca vacío/undefined): el override si vino uno, si no el
+  // predeterminado configurado. main.js necesita este mismo valor resuelto -- no el override
+  // crudo -- para decidir si aplicar pageSize térmico; de lo contrario "Usar predeterminado" con
+  // un acueducto configurado en térmica imprimiría en tamaño carta por accidente.
+  resolverFormato(formatoOverride) {
+    return formatoOverride || this.repository.getFormatoImpresionPredeterminado();
+  }
+
   // Genera el documento HTML imprimible de un recibo, en el formato pedido (usado tanto para
   // imprimir como para exportar a PDF). formatoOverride ausente/vacío = usar el predeterminado
   // configurado para el acueducto (configuracion.formato_impresion_recibo).
   generarHTML(id, formatoOverride) {
     const datos = this.obtenerDatosParaImprimir(id);
-    const formato = formatoOverride || this.repository.getFormatoImpresionPredeterminado();
+    const formato = this.resolverFormato(formatoOverride);
     const render = PLANTILLAS[formato] || PLANTILLAS.carta;
     return render(datos);
   }

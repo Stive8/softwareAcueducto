@@ -127,10 +127,16 @@ del cargo/abono" hoy se sostiene únicamente porque todo el código de escritura
 corrección manual, que inserte en `cartera_imputaciones` sin pasar por ese tope no sería
 detectada por la base de datos — el único síntoma sería un saldo incorrecto descubierto después.
 
-### `generarHTML` de recibos no lee la corrección vigente
-`ReciboService.generarHTML` — nota de código ya agregada, junto a la función. Hoy es inofensivo
-porque `corregirCampo` no está conectado a la UI. Corregir antes de exponer esa función, no
-después.
+### `getById`/`getDetalles` de recibos no leen la corrección vigente (a diferencia de `generarHTML`)
+`ReciboService.generarHTML` (vía `obtenerDatosParaImprimir`) YA lee el valor vigente de cada campo
+corregido -- corregido en la rama de formatos de impresión (2026-08-20, tarea 6). Pero
+`getById`/`getDetalles`, que alimentan el modal de detalle de recibo en `src/renderer/js/recibos.js`,
+siguen devolviendo el valor ORIGINAL sin aplicar `getValorVigente`. Hoy sigue siendo inofensivo
+porque `corregirCampo` no está conectado a ningún canal IPC ni a la UI (verificado 2026-08-20). Pero
+si `corregirCampo` se conecta en el futuro, un recibo corregido mostraría el concepto/valor
+CORREGIDO al imprimirse pero el ORIGINAL al verse en el modal de detalle, sin ningún aviso en
+pantalla de esa inconsistencia. Corregir `getById`/`getDetalles` (o el modal) antes de exponer
+`corregirCampo` a la UI, no después.
 
 ### No hay mensaje de reserva genérico para errores no contemplados
 ~40 sitios en `src/renderer/js/` (pagos.js, cuentas.js, gastos.js, caja.js, categorias.js,

@@ -72,3 +72,13 @@ test('termico_80mm: escapa HTML en campos de texto libre', () => {
   const html = PLANTILLAS.termico_80mm(datosFixture({ observaciones: '<script>alert(1)</script>' }));
   assert.doesNotMatch(html, /<script>/);
 });
+
+test('carta: escapa HTML en numero_recibo (posible valor corregido vía recibo_correcciones)', () => {
+  const html = PLANTILLAS.carta(datosFixture({ numero_recibo: '<script>alert(1)</script>' }));
+  assert.doesNotMatch(html, /<script>/);
+});
+
+test('termico_80mm: escapa HTML en numero_recibo (posible valor corregido vía recibo_correcciones)', () => {
+  const html = PLANTILLAS.termico_80mm(datosFixture({ numero_recibo: '<script>alert(1)</script>' }));
+  assert.doesNotMatch(html, /<script>/);
+});

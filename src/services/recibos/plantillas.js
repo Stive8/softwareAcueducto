@@ -47,7 +47,7 @@ function renderCarta(datos) {
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>Recibo No. ${datos.numero_recibo}</title>
+<title>Recibo No. ${escapeHtml(datos.numero_recibo)}</title>
 <style>
   * { box-sizing: border-box; }
   body { font-family: Arial, Helvetica, sans-serif; padding: 32px; color: #1f2937; }
@@ -78,11 +78,11 @@ function renderCarta(datos) {
     ` : bloqueTexto}
   </div>
 
-  <div class="recibo-numero">Recibo No. ${datos.numero_recibo}${datos.estado === 'Anulado' ? ' <span style="color:#dc2626;">— ANULADO</span>' : ''}</div>
+  <div class="recibo-numero">Recibo No. ${escapeHtml(datos.numero_recibo)}${datos.estado === 'Anulado' ? ' <span style="color:#dc2626;">— ANULADO</span>' : ''}</div>
   ${datos.estado === 'Anulado' ? `<p style="color:#dc2626; font-size: 12px; text-align: center; margin: -12px 0 16px 0;">Este recibo fue anulado${datos.motivo_anulacion ? ': ' + escapeHtml(datos.motivo_anulacion) : ''}</p>` : ''}
 
   <div class="info-grid">
-    <div>Fecha: <span>${formatFecha(datos.fecha_recibo)}</span></div>
+    <div>Fecha: <span>${escapeHtml(formatFecha(datos.fecha_recibo))}</span></div>
     <div>Método de pago: <span>${escapeHtml(datos.metodo_pago)}</span></div>
     <div>Cuenta: <span>${escapeHtml(datos.cuenta_codigo)}</span></div>
     <div>Dirección: <span>${escapeHtml(datos.cuenta_direccion)}</span></div>
@@ -128,11 +128,11 @@ function renderTermico80mm(datos) {
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<title>Recibo No. ${datos.numero_recibo}</title>
+<title>Recibo No. ${escapeHtml(datos.numero_recibo)}</title>
 <style>
   * { box-sizing: border-box; }
-  @page { size: 80mm auto; margin: 3mm; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111827; width: 74mm; margin: 0; padding: 0; }
+  @page { size: 80mm auto; margin: 0; }
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111827; width: 80mm; margin: 0; padding: 3mm; }
   .centro { text-align: center; }
   .separador { border: none; border-top: 1px dashed #111827; margin: 6px 0; }
   .nombre-asociacion { font-size: 13px; font-weight: bold; margin: 0 0 2px 0; }
@@ -164,8 +164,8 @@ function renderTermico80mm(datos) {
   <hr class="separador">
 
   <div class="centro">
-    <p class="recibo-numero">RECIBO No. ${datos.numero_recibo}</p>
-    <p class="recibo-fecha">${formatFecha(datos.fecha_recibo)}</p>
+    <p class="recibo-numero">RECIBO No. ${escapeHtml(datos.numero_recibo)}</p>
+    <p class="recibo-fecha">${escapeHtml(formatFecha(datos.fecha_recibo))}</p>
     ${datos.estado === 'Anulado' ? `<p class="anulado">ANULADO${datos.motivo_anulacion ? ': ' + escapeHtml(datos.motivo_anulacion) : ''}</p>` : ''}
   </div>
 
@@ -196,9 +196,9 @@ function renderTermico80mm(datos) {
   `;
 }
 
-const PLANTILLAS = {
+const PLANTILLAS = Object.assign(Object.create(null), {
   carta: renderCarta,
   termico_80mm: renderTermico80mm
-};
+});
 
 module.exports = { PLANTILLAS };
