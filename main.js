@@ -1380,11 +1380,24 @@ function setupIpcHandlers() {
   const ANCHO_TERMICO_MICRONES = 80000; // 80mm
   const MARGEN_ALTURA_TERMICO_MICRONES = 10000; // 10mm de margen de seguridad
   const MICRONES_POR_PX = 25400 / 96; // 1 CSS px = 1/96 pulgada = 25400/96 micrones
+  const MICRONES_POR_PULGADA = 25400;
 
   async function calcularPageSizeTermico(ventana) {
     const alturaPx = await ventana.webContents.executeJavaScript('document.body.scrollHeight');
     const alturaMicrones = Math.round(alturaPx * MICRONES_POR_PX) + MARGEN_ALTURA_TERMICO_MICRONES;
     return { width: ANCHO_TERMICO_MICRONES, height: alturaMicrones };
+  }
+
+  // webContents.print() y webContents.printToPDF() usan unidades DISTINTAS para pageSize pese a
+  // aceptar la misma forma { width, height }: print() espera micrones (mismo pipeline nativo de
+  // impresión de Chromium), printToPDF() espera PULGADAS (documentado explícitamente en los docs
+  // de Electron). Pasar micrones a printToPDF sin convertir generaba una página de ~2 km de ancho
+  // (80000 interpretado como pulgadas), con el recibo real reducido a un punto en la esquina.
+  function pageSizeMicronesAPulgadas(pageSizeMicrones) {
+    return {
+      width: pageSizeMicrones.width / MICRONES_POR_PULGADA,
+      height: pageSizeMicrones.height / MICRONES_POR_PULGADA
+    };
   }
 
   envolverHandle('recibos:imprimir', async (event, id, formato) => {
@@ -1445,8 +1458,11 @@ function setupIpcHandlers() {
 
       const opcionesPDF = {};
       if (formatoEfectivo === 'termico_80mm') {
-        opcionesPDF.pageSize = await calcularPageSizeTermico(ventanaImpresion);
-        opcionesPDF.margins = { marginType: 'none' };
+        const pageSizeMicrones = await calcularPageSizeTermico(ventanaImpresion);
+        opcionesPDF.pageSize = pageSizeMicronesAPulgadas(pageSizeMicrones);
+        // printToPDF no tiene marginType (a diferencia de print()): solo acepta top/bottom/left/
+        // right en pulgadas, por eso van en 0 explícitos en vez de 'none'.
+        opcionesPDF.margins = { top: 0, bottom: 0, left: 0, right: 0 };
       }
 
       const pdfBuffer = await ventanaImpresion.webContents.printToPDF(opcionesPDF);
