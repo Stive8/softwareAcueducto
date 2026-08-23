@@ -709,6 +709,37 @@ function sembrarTodas(db) {
 
   // 1167 no necesita fixture propio -- recibos_anulados_fisicos empieza vacío.
 
+  // --- R031/R0301: código mal digitalizado en el recibo 1819 (corrección 34) -- se reproduce
+  // el estado real: R0301 con un hueco real de 6 meses sin imputar, y R031 como cuenta fantasma
+  // con el recibo, más la huella exacta que dejó el retrofit del modelo nuevo (abono en $0 y
+  // crédito de $60.000 sin aplicar, porque R031 nunca tuvo causación contra qué imputarlo).
+  ids.R0301 = sembrarCuenta(db, 'R0301');
+  sembrarPropietarioDeCuenta(ids.R0301);
+  sembrarRangoCargos(ids.R0301, 2024, 1, 2024, 6, 10000);
+
+  ids.R031 = sembrarCuenta(db, 'R031');
+  db.prepare(`INSERT INTO cuenta_estados (cuenta_id, estado, fecha_inicio, motivo) VALUES (?, 'Suspendido', '2024-06-01', 'No localizada en el barrido de campo')`).run(ids.R031);
+  db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2024-05-04')`).run(ids.R031, financaCategoriaId);
+  sembrarPropietarioDeCuenta(ids.R031);
+  const r1819 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 1819, cuentaId: ids.R031, fecha: '2024-05-04', valor: 60000,
+    concepto: 'CUOTA DE SOSTENIMIENTO ENERO A JUNIO 2024'
+  });
+  ids.recibo1819Id = r1819.reciboId;
+  ids.detalle1819Id = r1819.detalleId;
+  repo.crearMovimiento({
+    cuentaId: ids.R031, fecha: '2024-05-04', tipo: 'Abono', exigible: 1, monto: 0, reciboDetalleId: r1819.detalleId
+  });
+  repo.crearCredito({
+    cuentaId: ids.R031, tipo: 'Abono', monto: 60000, fecha: '2024-05-04', reciboDetalleId: r1819.detalleId,
+    observaciones: 'Sobrante de imputación: crédito no aplicado (retrofit)'
+  });
+  for (let mes = 1; mes <= 6; mes++) {
+    db.prepare(`
+      INSERT INTO pago_periodos (cuenta_id, anio, mes, valor, recibo_detalle_id, fecha_pago) VALUES (?, 2024, ?, 10000, ?, '2024-05-04')
+    `).run(ids.R031, mes, r1819.detalleId);
+  }
+
   return ids;
 }
 
@@ -1183,6 +1214,52 @@ test('paso9b: R0081/S058 -- idempotente, correr dos veces no falla aunque S058 y
   }
 });
 
+test('paso9b: R031/R0301 -- mueve el recibo 1819 a R0301, imputa el hueco enero-junio 2024 y elimina R031', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.resolucionR031R0301.yaAplicado, false);
+    assert.equal(r.resolucionR031R0301.reciboMovido, ids.recibo1819Id);
+    assert.equal(r.resolucionR031R0301.cuentaOrigenEliminada, ids.R031);
+    assert.equal(r.resolucionR031R0301.montoImputado, 60000);
+
+    assert.equal(db.prepare(`SELECT COUNT(*) n FROM cuentas WHERE id=?`).get(ids.R031).n, 0, 'R031 queda eliminada');
+
+    const recibo = db.prepare(`SELECT cuenta_id FROM recibos WHERE numero_recibo=1819`).get();
+    assert.equal(recibo.cuenta_id, ids.R0301);
+
+    const pendienteEneJun = db.prepare(`
+      SELECT COALESCE(SUM(m.monto - COALESCE((SELECT SUM(i.monto) FROM cartera_imputaciones i WHERE i.cargo_id=m.id), 0)), 0) p
+      FROM cartera_movimientos m WHERE m.cuenta_id=? AND m.tipo='CargoMensual' AND m.anio=2024 AND m.mes BETWEEN 1 AND 6
+    `).get(ids.R0301).p;
+    assert.equal(pendienteEneJun, 0, 'el hueco de enero a junio 2024 queda totalmente imputado');
+
+    const pagoPeriodosMovidos = db.prepare(`SELECT COUNT(*) n FROM pago_periodos WHERE cuenta_id=? AND anio=2024 AND mes BETWEEN 1 AND 6`).get(ids.R0301).n;
+    assert.equal(pagoPeriodosMovidos, 6, 'los pago_periodos históricos se mueven a R0301, no se descartan');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R031/R0301 -- idempotente, correr dos veces no falla aunque R031 ya no exista', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.resolucionR031R0301.yaAplicado, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('paso9b: S0312 -- reimputa 2191 y 2362 en orden cronológico tras liberarse los meses que ocupaba el 2137', () => {
   const ctx = crearDbTemporal();
   try {
@@ -1491,7 +1568,7 @@ test('paso9b: R0948/R0949 -- idempotente, correr dos veces no las vuelve a crear
   }
 });
 
-test('paso9b: las 7 cuentas sin cartera quedan Suspendidas desde el mes siguiente a su último recibo, sin causar nada', () => {
+test('paso9b: las 6 cuentas sin cartera quedan Suspendidas desde el mes siguiente a su último recibo, sin causar nada', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();
@@ -1499,7 +1576,7 @@ test('paso9b: las 7 cuentas sin cartera quedan Suspendidas desde el mes siguient
 
     const r = ejecutarPaso9b({ dbService: ctx.dbService });
 
-    assert.equal(r.suspensionesSinCartera.length, 7);
+    assert.equal(r.suspensionesSinCartera.length, 6);
     assert.ok(r.suspensionesSinCartera.every(s => s.corregido === true));
 
     for (const item of SUSPENSIONES_SIN_CARTERA) {
@@ -1523,7 +1600,7 @@ test('paso9b: las 7 cuentas sin cartera quedan Suspendidas desde el mes siguient
   }
 });
 
-test('paso9b: las 7 suspensiones son idempotentes -- correr dos veces no duplica cuenta_estados', () => {
+test('paso9b: las 6 suspensiones son idempotentes -- correr dos veces no duplica cuenta_estados', () => {
   const ctx = crearDbTemporal();
   try {
     const db = ctx.dbService.getDb();

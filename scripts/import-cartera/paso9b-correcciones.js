@@ -287,10 +287,15 @@ const OBSERVACION_SUSPENSION_SIN_CARTERA =
 
 // Fecha de suspensión = mes siguiente al último recibo real de cada cuenta (ver comentario de
 // la corrección 11 arriba para el porqué).
+//
+// R031 YA NO está en esta lista: se creía una cuenta real sin fila en CARTERA, pero es un
+// código mal digitalizado de R0301 (ver corrección 34) -- no una cuenta que deba suspenderse,
+// sino una que no debería existir. La corrección 34 la elimina directamente; dejarla aquí
+// también haría que esta corrección fallara ("no existe en la base") en cualquier corrida
+// posterior a que la 34 ya la haya borrado.
 const SUSPENSIONES_SIN_CARTERA = [
   { codigoCuenta: 'O40-1', fechaInicio: '2018-01-01' },
   { codigoCuenta: 'R0103', fechaInicio: '2020-01-01' },
-  { codigoCuenta: 'R031', fechaInicio: '2024-06-01' },
   { codigoCuenta: 'R0401', fechaInicio: '2018-05-01' },
   { codigoCuenta: 'S0101', fechaInicio: '2020-09-01' },
   { codigoCuenta: 'S061', fechaInicio: '2021-05-01' },
@@ -875,6 +880,30 @@ const RECIBOS_ANULADOS_FALTANTES = [
   { numeroRecibo: 2442, fecha: null, motivo: 'Talonario en blanco -- hoja del talonario físico sin usar, encontrada por el cruce automático del talonario completo (ronda 3, 2026-08-19). No representa un pago ni un recibo anulado con pago previo: nunca se escribió nada en ella.' }
 ];
 
+// 34. Cuenta fantasma "R031": el talonario físico digitalizó mal el código del recibo 1819
+// (2024-05-04, $60.000, "CUOTA DE SOSTENIMIENTO ENERO A JUNIO 2024") -- el importador creó una
+// cuenta nueva "R031" solo para ese recibo (sin fila en CARTERA.xlsx, por eso quedó Suspendido
+// "no localizada en el barrido de campo"). Confirmado por el usuario 2026-08-22: el código real
+// es R0301, y coincide en todo: mismo propietario vigente (FLOREZ FLORENTINO, id 265, dueño de
+// R0301 desde 2019-08-08, sin interrupción) y, sobre todo, R0301 tiene exactamente un hueco de
+// enero a junio 2024 (6 meses x $10.000 = $60.000) totalmente sin imputar entre el recibo 1687
+// (que cierra 2023) y el 2287 (que abre en julio 2024) -- el monto y el período calzan exacto.
+// Se mueve el recibo a R0301 y se imputa de verdad contra ese hueco (antes el retrofit del
+// modelo nuevo lo había dejado como saldo a favor sin aplicar, precisamente porque R031 nunca
+// tuvo causación contra la cual imputarlo). El resto de la huella de R031 (categoría, estado,
+// propietario, movimiento y crédito parcial del retrofit) se descarta -- R0301 ya tiene su
+// propia versión correcta de cada una desde 2019, mismo mecanismo que la corrección 23
+// (R0081/S058). pago_periodos SÍ se mueve (no se descarta): no hay fila de R0301 para esos 6
+// meses todavía, así que representa historial real, no un duplicado.
+const RESOLUCION_R031_R0301 = {
+  codigoOrigen: 'R031', codigoDestino: 'R0301', numeroRecibo: 1819,
+  periodoDesde: { anio: 2024, mes: 1 }, periodoHasta: { anio: 2024, mes: 6 }, monto: 60000
+};
+const OBSERVACION_RESOLUCION_R031_R0301 =
+  'Cuenta reasignada de R031 (código mal digitalizado en el talonario) a R0301 -- confirmado ' +
+  'por el usuario 2026-08-22. Cubre el hueco de enero a junio 2024 en R0301, sin imputar hasta ' +
+  'esta corrección.';
+
 const OBSERVACION_CREDITO_R0942 =
   'Saldo a favor no registrado: el recibo 2246 documenta una transferencia de $180.000 el ' +
   '19-jun-2025 ("CUOTA DE SOSTENIMIENTO ABRIL 2025 A FEBRERO 2026 (TRANSFERENCIA 19/06/2025 - ' +
@@ -1371,6 +1400,7 @@ function ejecutarPaso9b({ dbService }) {
   const recibosFaltantes2026 = [];
   let recibo1167Blanco = null;
   const recibosAnuladosFaltantes = [];
+  let resolucionR031R0301 = null;
 
   const transaccion = db.transaction(() => {
     // 31. Ver comentario junto a derivarPeriodoCorrecto más arriba. Corre PRIMERO en la
@@ -2699,6 +2729,77 @@ function ejecutarPaso9b({ dbService }) {
         recibosAnuladosFaltantes.push({ numeroRecibo: item.numeroRecibo, yaAplicado: false });
       }
 
+      // 34. Ver comentario junto a RESOLUCION_R031_R0301 más arriba.
+      {
+        const cuentaDestino = idPorCodigo.get(normalizarCodigo(RESOLUCION_R031_R0301.codigoDestino));
+        if (cuentaDestino === undefined) {
+          throw new Error(`${RESOLUCION_R031_R0301.codigoDestino}: no existe en la base -- ¿corrieron los pasos 1-2?`);
+        }
+
+        const cuentaOrigen = idPorCodigo.get(normalizarCodigo(RESOLUCION_R031_R0301.codigoOrigen));
+        if (cuentaOrigen === undefined) {
+          // R031 ya no existe -- esta corrección ya corrió.
+          resolucionR031R0301 = { yaAplicado: true };
+        } else {
+          const { reciboId, detalleId } = getReciboDetalle(db, RESOLUCION_R031_R0301.numeroRecibo);
+          const reciboActual = db.prepare('SELECT cuenta_id, observaciones FROM recibos WHERE id=?').get(reciboId);
+          if (reciboActual.cuenta_id !== cuentaOrigen) {
+            throw new Error(
+              `Recibo ${RESOLUCION_R031_R0301.numeroRecibo}: se esperaba en cuenta_id=${cuentaOrigen} ` +
+              `(${RESOLUCION_R031_R0301.codigoOrigen}), está en cuenta_id=${reciboActual.cuenta_id} -- revisar antes de mover a ciegas`
+            );
+          }
+
+          const observacionesNuevas = (reciboActual.observaciones ? reciboActual.observaciones + ' | ' : '') + OBSERVACION_RESOLUCION_R031_R0301;
+          db.prepare('UPDATE recibos SET cuenta_id=?, observaciones=? WHERE id=?')
+            .run(cuentaDestino, observacionesNuevas, reciboId);
+
+          service.asegurarCausacion(
+            cuentaDestino, RESOLUCION_R031_R0301.periodoHasta.anio, RESOLUCION_R031_R0301.periodoHasta.mes,
+            RESOLUCION_R031_R0301.periodoDesde
+          );
+          const pendientes = cargosPendientesEnRango(
+            db, cuentaDestino, RESOLUCION_R031_R0301.periodoDesde, RESOLUCION_R031_R0301.periodoHasta
+          );
+          if (pendientes.length !== 6) {
+            throw new Error(`Corrección 34: se esperaban 6 cargos pendientes (ene-jun 2024) en R0301, se encontraron ${pendientes.length}`);
+          }
+
+          const abono = service.registrarAbono({
+            cuentaId: cuentaDestino, fecha: '2024-05-04', monto: RESOLUCION_R031_R0301.monto,
+            modo: MODOS.MESES_ESPECIFICOS, cargosElegidos: pendientes.map(c => c.id),
+            reciboDetalleId: detalleId, observaciones: OBSERVACION_RESOLUCION_R031_R0301
+          });
+          if (esMayor(abono.sobrante, 0)) {
+            throw new Error(`Corrección 34: quedó sobrante sin imputar de $${abono.sobrante}`);
+          }
+          const pendienteFinal = cargosPendientesEnRango(
+            db, cuentaDestino, RESOLUCION_R031_R0301.periodoDesde, RESOLUCION_R031_R0301.periodoHasta
+          ).reduce((s, c) => s + c.pendiente, 0);
+          if (esMayor(pendienteFinal, 0)) {
+            throw new Error(`Corrección 34: quedó pendiente de $${pendienteFinal} en el rango declarado`);
+          }
+
+          // Limpieza de la huella de la cuenta fantasma: se descarta lo que R0301 ya tiene por su
+          // cuenta (categoría, estado, propietario), y lo que el retrofit del modelo nuevo había
+          // dejado sin aplicar (el abono en $0 y el crédito de $60.000 sin imputar de R031) -- ya
+          // no hace falta, la imputación real de arriba lo reemplaza. pago_periodos SÍ se mueve:
+          // es historial real que R0301 todavía no tiene para esos 6 meses (no un duplicado).
+          db.prepare('DELETE FROM cartera_movimientos WHERE cuenta_id=?').run(cuentaOrigen);
+          db.prepare('DELETE FROM cuenta_creditos WHERE cuenta_id=?').run(cuentaOrigen);
+          db.prepare('UPDATE pago_periodos SET cuenta_id=? WHERE cuenta_id=?').run(cuentaDestino, cuentaOrigen);
+          db.prepare('DELETE FROM cuenta_propietarios WHERE cuenta_id=?').run(cuentaOrigen);
+          db.prepare('DELETE FROM cuenta_estados WHERE cuenta_id=?').run(cuentaOrigen);
+          db.prepare('DELETE FROM cuenta_categorias WHERE cuenta_id=?').run(cuentaOrigen);
+          db.prepare('DELETE FROM cuentas WHERE id=?').run(cuentaOrigen);
+
+          resolucionR031R0301 = {
+            yaAplicado: false, reciboMovido: reciboId, cuentaOrigenEliminada: cuentaOrigen,
+            montoImputado: RESOLUCION_R031_R0301.monto
+          };
+        }
+      }
+
       // Después de insertar los recibos históricos (hasta el 2564), el consecutivo debe quedar
       // apuntando al primer número realmente libre -- si no, el próximo pago registrado desde la
       // app chocaría con un UNIQUE constraint al intentar reusar un número que esta corrección ya
@@ -2726,7 +2827,7 @@ function ejecutarPaso9b({ dbService }) {
     mergeR0081S058, reimputacionS0312,
     redencionR049, reasignacion458, suspensionIncobrables, reciboFaltanteS0244,
     aperturaIncobrables, cuentasNuevas2026, periodosTextoCorregidos,
-    recibosFaltantes2026, recibo1167Blanco, recibosAnuladosFaltantes
+    recibosFaltantes2026, recibo1167Blanco, recibosAnuladosFaltantes, resolucionR031R0301
   };
 }
 
@@ -2750,5 +2851,5 @@ module.exports = {
   CUENTAS_NUEVAS_2026, OBSERVACION_CUENTA_NUEVA_2026, VALOR_PUNTO_NUEVO_2026, FECHA_CUENTAS_NUEVAS_2026,
   inferirPeriodoDeTexto, derivarPeriodoCorrecto, formatearPeriodoTexto, SOBRESCRITURA_PERIODO_MANUAL,
   RECIBOS_FALTANTES_2026, OBSERVACION_RECIBO_FALTANTE_2026, RECIBO_1167_BLANCO_MOTIVO,
-  RECIBOS_ANULADOS_FALTANTES
+  RECIBOS_ANULADOS_FALTANTES, RESOLUCION_R031_R0301, OBSERVACION_RESOLUCION_R031_R0301
 };

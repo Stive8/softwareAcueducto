@@ -46,6 +46,7 @@ function main() {
   console.log(`Recibo 1167 (talonario en blanco): ${r.recibo1167Blanco.yaAplicado ? 'ya estaba registrado' : 'registrado en recibos_anulados_fisicos'}`);
   const anuladosNuevos = r.recibosAnuladosFaltantes.filter(x => !x.yaAplicado).length;
   console.log(`Recibos anulados/en blanco faltantes: ${anuladosNuevos} registrados de ${r.recibosAnuladosFaltantes.length} evaluados`);
+  console.log(`Recibo 1819 (R031 -> R0301): ${r.resolucionR031R0301.yaAplicado ? 'ya estaba movido' : `movido, imputado contra enero-junio 2024, cuenta R031 eliminada`}`);
 
   const outDir = path.join(__dirname, 'output');
   fs.mkdirSync(outDir, { recursive: true });
