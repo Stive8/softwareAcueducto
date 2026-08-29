@@ -33,6 +33,31 @@ function cuenta(overrides = {}, snapshotCaptura = { saldo_credito_disponible: 0,
   };
 }
 
+test('calcularConciliacion: omite R031 (cuenta fantasma fusionada con R0301 en la corrección 34) en vez de lanzar error porque ya no existe en la base', () => {
+  // Regresión: cuando se fusionó S058 con R0081 (corrección 23) se agregó el salto explícito
+  // "if (cuenta.codigo === 'S058') continue" para que la conciliación (que compara contra
+  // data/carga_inicial_cartera.json, con las cuentas originales) no reventara al no encontrar
+  // esa cuenta. La fusión de R031 con R0301 (corrección 34, commit 7c67d6d) no agregó el mismo
+  // salto: `npm run conciliacion` quedó rota (Error: "R031: no existe en la base") desde ese
+  // commit -- nadie la corrió después para notarlo.
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarCuenta(db, 'R0301');
+
+    const r = calcularConciliacion({
+      dbService: ctx.dbService,
+      cuentasJson: [cuenta({ codigo: 'R0301' }), cuenta({ codigo: 'R031' })],
+      recibosJson: []
+    });
+
+    assert.equal(r.filas.length, 1, 'solo R0301 debe evaluarse; R031 se omite');
+    assert.equal(r.filas[0].codigo, 'R0301');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('calcularConciliacion: diferencia cero cuando el saldo del sistema calza exacto con el objetivo', () => {
   const ctx = crearDbTemporal();
   try {

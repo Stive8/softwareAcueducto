@@ -91,6 +91,10 @@ function calcularConciliacion({ dbService, cuentasJson, recibosJson }) {
     // S058 se fusionó con R0081 (corrección 23, 2026-08-20): era una cuenta duplicada, ya no
     // existe en la base. Su historial (recibo del punto) vive ahora bajo R0081.
     if (cuenta.codigo === 'S058') continue;
+    // R031 se fusionó con R0301 (corrección 34, 2026-08-27): era una cuenta fantasma por un
+    // código mal digitalizado en el talonario, ya no existe en la base. Su historial (recibo
+    // 1819) vive ahora bajo R0301.
+    if (cuenta.codigo === 'R031') continue;
     const codigoNorm = normalizarCodigo(cuenta.codigo);
     const cuentaId = idPorCodigo.get(codigoNorm);
     if (cuentaId === undefined) throw new Error(`${cuenta.codigo}: no existe en la base`);
