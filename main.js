@@ -148,7 +148,7 @@ const CANALES_SIN_SESION = new Set([
 const CANALES_IDEMPOTENTES = new Set([
   'asientos:crearManual', 'gastos:create', 'caja:registrarConsignacion',
   'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento', 'pagos:registrarAbonoDeudaAnterior', 'caja:regularizarSaldos',
-  'caja:registrarRetiro', 'cartera:redimirCredito',
+  'caja:registrarRetiro', 'cartera:redimirCredito', 'cartera:suspender', 'cartera:reactivar', 'cartera:recategorizar',
   // Ambos crean un documento financiero real (un cargo de conexión con su valor, o un abono
   // con recibo propio) y no tenían protección -- mismo riesgo de doble clic que el resto de
   // esta lista (auditoría de entrega, hallazgo 8).
@@ -443,9 +443,16 @@ function setupIpcHandlers() {
         diasSinRespaldar = Math.floor((Date.now() - new Date(estadoNube.ultimaFechaExitosa).getTime()) / 86400000);
       }
 
+      // verificarConciliacionCajaBanco ya existía (conectado a IPC vía asientos:getConciliacionCajaBanco)
+      // pero ninguna pantalla lo llamaba -- su propio comentario decía "pensado para invocarse desde
+      // una pantalla de diagnóstico" y nunca se conectó a una (auditoría 2026-08-29). Se agrega acá,
+      // no como alerta aparte, para que quien abre el Dashboard vea sin buscarlo si Caja/Banco
+      // dejaron de cuadrar contra la contabilidad de doble partida.
+      const conciliacionCajaBanco = asientoContableService.verificarConciliacionCajaBanco();
+
       return {
         success: true,
-        data: { ...stats, respaldoNube: { conectado: estadoNube.conectado, diasSinRespaldar } }
+        data: { ...stats, respaldoNube: { conectado: estadoNube.conectado, diasSinRespaldar }, conciliacionCajaBanco }
       };
     } catch (error) {
       return { success: false, error: error.message };
@@ -517,15 +524,6 @@ function setupIpcHandlers() {
   envolverHandle('cuentas:update', async (event, id, cuentaData) => {
     try {
       cuentaService.update(id, cuentaData);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('cuentas:changeStatus', async (event, id, estado) => {
-    try {
-      cuentaService.changeStatus(id, estado);
       return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
@@ -744,15 +742,6 @@ function setupIpcHandlers() {
   envolverHandle('categorias:getCuentasConCategoria', async (event, categoriaId) => {
     try {
       return { success: true, data: categoriaService.getCuentasConCategoria(categoriaId) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('categorias:asignarACuenta', async (event, cuentaId, categoriaId, fechaInicio, observaciones) => {
-    try {
-      categoriaService.asignarACuenta(cuentaId, categoriaId, fechaInicio, observaciones);
-      return { success: true };
     } catch (error) {
       return { success: false, error: error.message };
     }
@@ -1195,6 +1184,29 @@ function setupIpcHandlers() {
   envolverHandle('cartera:redimirCredito', async (event, payload) => {
     try {
       return { success: true, data: carteraService.redimirCredito({ ...payload, usuarioId: sesionActual.id }) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Suspende/reactiva UNA cuenta anulando (suspender) o dejando anulados (reactivar, no
+  // recausa retroactivo) los cargos que correspondan. Reemplaza los botones "Suspender"/
+  // "Activar" de Cuentas (auditoría 2026-08-29): antes cambiaban cuentas.estado directo
+  // (cuentas:changeStatus, retirado) sin dejar rastro en cuenta_estados ni anular
+  // cartera_movimientos -- una cuenta marcada Suspendido en pantalla seguía causando y
+  // contando en mora en el motor nuevo, porque calcularAPagar/asegurarCausacion leen
+  // cuenta_estados, no cuentas.estado.
+  envolverHandle('cartera:suspender', async (event, payload) => {
+    try {
+      return { success: true, data: carteraService.suspender({ ...payload, usuarioId: sesionActual.id }) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('cartera:reactivar', async (event, payload) => {
+    try {
+      return { success: true, data: carteraService.reactivar({ ...payload, usuarioId: sesionActual.id }) };
     } catch (error) {
       return { success: false, error: error.message };
     }

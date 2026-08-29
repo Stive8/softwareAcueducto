@@ -124,9 +124,9 @@ Arriba de la tabla puedes buscar por código, dirección, propietario o identifi
 
 ### Cómo editar, suspender o activar una cuenta
 
-- Botón **"Editar"** en la fila de la cuenta: permite cambiar dirección, ubicación, estado y observaciones.
-- Botón **"Suspender"** (si está activa) o **"Activar"** (si está suspendida): cambia el estado con una confirmación previa.
-- **No existe un botón para eliminar una cuenta.** Solo se puede cambiar su estado (Activo / Inactivo / Suspendido).
+- Botón **"Editar"** en la fila de la cuenta: permite cambiar dirección, ubicación y observaciones.
+- Botón **"Suspender"** (si está activa) o **"Activar"** (si está suspendida): pide la fecha desde la que aplica y un motivo. Si la fecha es pasada, los cargos mensuales ya causados desde esa fecha se anulan automáticamente (con rastro, no se borran) — así una cuenta suspendida deja de aparecer en mora de verdad, no solo en la etiqueta de estado.
+- **No existe un botón para eliminar una cuenta.** Solo se puede cambiar su estado (Activo / Suspendido).
 
 ### Ver el detalle de una cuenta
 
@@ -140,6 +140,8 @@ Al hacer clic en **"Ver"** se abre toda la información de la cuenta: datos gene
 2. Elige la **Nueva Categoría** y la **Fecha de Inicio** desde la cual aplica.
 3. Puedes agregar una observación (por ejemplo, el motivo del cambio).
 4. Haz clic en **"Cambiar"**.
+
+Si la fecha de inicio es pasada, el sistema corrige automáticamente los meses que ya se cobraron con la tarifa de la categoría anterior (con un ajuste visible en el detalle de la cuenta) — no hace falta corregirlos a mano.
 
 La categoría anterior no se borra: queda registrada en el historial con la fecha en que dejó de aplicar.
 
@@ -482,9 +484,17 @@ Define a qué cuenta del Plan de Cuentas apunta cada concepto interno del sistem
 
 Define cómo se arma el asiento contable de cada tipo de operación (un gasto, un recibo, un traslado). Es una función avanzada, orientada más a quien configura el sistema que al uso diario.
 
+Botón **"Ver / Editar"** en la fila de una plantilla muestra sus líneas. Si es la versión vigente, tiene además una sección desplegable **"Editar líneas (JSON avanzado)"**: guardar ahí crea una nueva versión (la anterior queda cerrada, pero disponible para reconstruir asientos históricos) — botón **"Ver versiones anteriores"** para consultar ese historial. Editar el JSON de las líneas requiere conocer la estructura interna del motor contable; para lo cotidiano (cuáles cuentas usa cada tipo de gasto o recibo) usa **Mapeo de Conceptos** en vez de esto.
+
 ### Impuestos 🔒
 
 Catálogo de impuestos y retenciones (IVA, Retención en la Fuente, ICA, etc.) que se pueden asociar a las plantillas de contabilización mencionadas arriba, para que se descuenten automáticamente cuando corresponda.
+
+**Cómo asignar un impuesto a una plantilla** (para que empiece a descontarse de verdad — un impuesto creado pero sin asignar a ninguna plantilla no afecta ningún asiento):
+1. Botón **"Plantillas"** en la fila del impuesto.
+2. Elige la **Plantilla** y el **Orden** (si hay varios impuestos en la misma plantilla, define en qué orden se descuentan).
+3. Haz clic en **"Asignar"**.
+4. Para quitarlo, botón **"Quitar"** junto a la plantilla en esa misma pantalla.
 
 ### Mapeo de Conceptos 🔒
 

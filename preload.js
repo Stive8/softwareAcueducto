@@ -12,8 +12,7 @@ contextBridge.exposeInMainWorld('api', {
     getCategorias: () => ipcRenderer.invoke('cuentas:getCategorias'),
     getStats: () => ipcRenderer.invoke('cuentas:getStats'),
     create: (cuentaData) => ipcRenderer.invoke('cuentas:create', cuentaData),
-    update: (id, cuentaData) => ipcRenderer.invoke('cuentas:update', id, cuentaData),
-    changeStatus: (id, estado) => ipcRenderer.invoke('cuentas:changeStatus', id, estado)
+    update: (id, cuentaData) => ipcRenderer.invoke('cuentas:update', id, cuentaData)
   },
   propietarios: {
     getAll: (params) => ipcRenderer.invoke('propietarios:getAll', params),
@@ -36,7 +35,6 @@ contextBridge.exposeInMainWorld('api', {
     getHistorialTarifas: (categoriaId) => ipcRenderer.invoke('categorias:getHistorialTarifas', categoriaId),
     crearTarifa: (categoriaId, tarifa, fechaDesde, observaciones) => ipcRenderer.invoke('categorias:crearTarifa', categoriaId, tarifa, fechaDesde, observaciones),
     getCuentasConCategoria: (categoriaId) => ipcRenderer.invoke('categorias:getCuentasConCategoria', categoriaId),
-    asignarACuenta: (cuentaId, categoriaId, fechaInicio, observaciones) => ipcRenderer.invoke('categorias:asignarACuenta', cuentaId, categoriaId, fechaInicio, observaciones),
     getHistorialCategoriasCuenta: (cuentaId) => ipcRenderer.invoke('categorias:getHistorialCategoriasCuenta', cuentaId)
   },
   terceros: {
@@ -63,6 +61,8 @@ contextBridge.exposeInMainWorld('api', {
     getMotivoDiferencia: (cuentaId) => ipcRenderer.invoke('cartera:getMotivoDiferencia', cuentaId),
     getIndicadoresBulk: () => ipcRenderer.invoke('cartera:getIndicadoresBulk'),
     redimirCredito: (payload) => ipcRenderer.invoke('cartera:redimirCredito', payload),
+    suspender: (payload) => ipcRenderer.invoke('cartera:suspender', payload),
+    reactivar: (payload) => ipcRenderer.invoke('cartera:reactivar', payload),
     recategorizar: (payload) => ipcRenderer.invoke('cartera:recategorizar', payload),
     simularRecategorizarLote: (payload) => ipcRenderer.invoke('cartera:simularRecategorizarLote', payload),
     recategorizarLote: (payload) => ipcRenderer.invoke('cartera:recategorizarLote', payload),

@@ -1595,23 +1595,97 @@ const Contabilidad = {
     }).join('');
 
     const esSistema = p.es_sistema === 1;
+    const esVigente = !p.fecha_hasta;
+    const nombreJs = p.nombre.replace(/'/g, "\\'");
 
+    // Edición como JSON crudo de las líneas (no un formulario por campo): una línea de plantilla
+    // tiene 4 mecanismos de cuenta mutuamente excluyentes más el modo Expansión (ver
+    // PlantillaContabilizacionService._validarLineas) -- mismo criterio que ya usa "Simular" más
+    // abajo para el contexto del documento. actualizarLineas ya valida todo del lado del servicio
+    // y crea una versión nueva (nunca muta la vigente), así que un JSON mal armado no puede
+    // corromper nada, solo rebota con el mensaje de validación.
     App.openModal(`
       <div class="modal-header"><h2>${p.nombre} <small style="font-weight:normal;color:#64748b;">v${p.version}</small></h2></div>
       <div style="margin-bottom:12px;font-size:0.875rem;color:#64748b;">
         Módulo: <strong>${p.modulo}</strong> · Subtipo: <strong>${p.subtipo || '—'}</strong> ·
         Código: <code>${p.codigo}</code> · Vigencia: ${p.fecha_desde} → ${p.fecha_hasta || 'vigente'}
         ${esSistema ? ' · <span class="badge badge-warning">Sistema</span>' : ''}
+        ${!esVigente ? ' · <span class="badge badge-inactivo">Versión anterior, solo lectura</span>' : ''}
       </div>
       <table class="data-table" style="margin-bottom:20px;">
         <thead><tr><th>#</th><th>Cuenta</th><th>Monto</th><th>Lado</th><th>Flags</th><th>Descripción</th></tr></thead>
         <tbody>${filaLineas}</tbody>
       </table>
+
+      ${esVigente ? `
+        <details style="margin-bottom:20px;">
+          <summary style="cursor:pointer;color:#475569;font-size:0.875rem;">Editar líneas (JSON avanzado)</summary>
+          <p style="font-size:0.8125rem;color:#64748b;margin:8px 0;">
+            Guardar crea la <strong>versión ${p.version + 1}</strong>; esta (v${p.version}) queda cerrada
+            y sigue disponible para reconstruir asientos históricos anteriores a hoy.
+          </p>
+          <textarea id="plantillaLineasJson" class="form-control" rows="14" style="font-family:monospace;font-size:0.8rem;width:100%;">${JSON.stringify(p.lineas, null, 2)}</textarea>
+          <div id="plantillaEditError" style="margin-top:8px;"></div>
+          <div style="text-align:right;margin-top:8px;">
+            <button class="btn btn-primary" onclick="Contabilidad.guardarLineasPlantilla(${p.id})">Guardar como nueva versión</button>
+          </div>
+        </details>
+      ` : ''}
+
       <div style="text-align:right;">
         <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
-        <button class="btn btn-primary" style="margin-left:8px;" onclick="Contabilidad.abrirSimulacion(${p.id}, '${p.nombre.replace(/'/g, "\\'")}')">Simular</button>
+        <button class="btn btn-secondary" style="margin-left:8px;" onclick="App.closeModal(); Contabilidad.verVersionesPlantilla('${p.codigo}', '${nombreJs}')">Ver versiones anteriores</button>
+        <button class="btn btn-primary" style="margin-left:8px;" onclick="Contabilidad.abrirSimulacion(${p.id}, '${nombreJs}')">Simular</button>
       </div>
     `, 'large');
+  },
+
+  async guardarLineasPlantilla(id) {
+    const textarea = document.getElementById('plantillaLineasJson');
+    const errorDiv = document.getElementById('plantillaEditError');
+    if (!textarea || !errorDiv) return;
+
+    let nuevasLineas;
+    try {
+      nuevasLineas = JSON.parse(textarea.value);
+    } catch {
+      errorDiv.innerHTML = '<div class="alert alert-error">El JSON no es válido. Verifica la sintaxis.</div>';
+      return;
+    }
+
+    const res = await window.api.plantillas.actualizarLineas(id, nuevasLineas);
+    if (!res.success) {
+      errorDiv.innerHTML = `<div class="alert alert-error">${res.error}</div>`;
+      return;
+    }
+
+    App.closeModal();
+    App.toast(`Nueva versión guardada (v${res.data.version}).`, 'success');
+    this.verPlantilla(res.data.id);
+  },
+
+  async verVersionesPlantilla(codigo, nombrePlantilla) {
+    const res = await window.api.plantillas.getVersiones(codigo);
+    if (!res.success) { App.toast('Error: ' + res.error, 'error'); return; }
+
+    const filas = res.data.map(v => `
+      <tr>
+        <td>v${v.version}</td>
+        <td style="font-size:0.8rem;color:#64748b;">${v.fecha_desde} → ${v.fecha_hasta || 'vigente'}</td>
+        <td><button class="btn btn-secondary btn-sm" onclick="App.closeModal(); Contabilidad.verPlantilla(${v.id})">Ver</button></td>
+      </tr>
+    `).join('');
+
+    App.openModal(`
+      <div class="modal-header"><h2>Versiones de ${nombrePlantilla}</h2></div>
+      <table class="data-table">
+        <thead><tr><th>Versión</th><th>Vigencia</th><th></th></tr></thead>
+        <tbody>${filas || '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Sin versiones registradas</td></tr>'}</tbody>
+      </table>
+      <div style="text-align:right;margin-top:16px;">
+        <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+      </div>
+    `);
   },
 
   abrirSimulacion(plantillaId, nombrePlantilla) {
@@ -1726,6 +1800,7 @@ const Contabilidad = {
           <td><span class="badge ${i.activo ? 'badge-success' : ''}" style="${!i.activo ? 'background:#f1f5f9;color:#94a3b8;' : ''}">${i.activo ? 'Activo' : 'Inactivo'}</span></td>
           <td style="white-space:nowrap;">
             <button class="btn btn-secondary btn-sm" onclick="Contabilidad.editarImpuesto(${i.id})">Editar</button>
+            <button class="btn btn-secondary btn-sm" style="margin-left:4px;" onclick="Contabilidad.gestionarPlantillasImpuesto(${i.id}, '${i.nombre.replace(/'/g, "\\'")}')">Plantillas</button>
             <button class="btn btn-secondary btn-sm" style="margin-left:4px;" onclick="Contabilidad.toggleImpuesto(${i.id})">${i.activo ? 'Desactivar' : 'Activar'}</button>
           </td>
         </tr>
@@ -1836,5 +1911,80 @@ const Contabilidad = {
     if (!res.success) { App.toast('Error: ' + res.error, 'error'); return; }
     App.toast(`Impuesto ${res.data.activo ? 'activado' : 'desactivado'}`, 'success');
     await this.loadImpuestos();
+  },
+
+  // Un impuesto configurado no descuenta nada por sí solo -- solo se aplica cuando está asignado
+  // a una plantilla de contabilización (ver el motor en MotorContabilizacionService/_aplicarImpuestos).
+  // Antes de esto no había ningún botón para asignarlo: el impuesto quedaba creado pero inerte.
+  async gestionarPlantillasImpuesto(impuestoId, nombreImpuesto) {
+    const [asignadasRes, plantillasRes] = await Promise.all([
+      window.api.impuestos.getPlantillasAsignadas(impuestoId),
+      window.api.plantillas.getAll()
+    ]);
+    if (!asignadasRes.success) { App.toast('Error: ' + asignadasRes.error, 'error'); return; }
+    if (!plantillasRes.success) { App.toast('Error: ' + plantillasRes.error, 'error'); return; }
+
+    const asignadas = asignadasRes.data;
+    const asignadasIds = new Set(asignadas.map(p => p.id));
+    const disponibles = plantillasRes.data.filter(p => !asignadasIds.has(p.id));
+
+    const filasAsignadas = asignadas.map(p => `
+      <tr>
+        <td>${p.nombre} <small style="color:#64748b;">(${p.modulo}${p.subtipo ? ' · ' + p.subtipo : ''}, v${p.version})</small></td>
+        <td style="text-align:center;">${p.orden}</td>
+        <td><button class="btn btn-secondary btn-sm" onclick="Contabilidad.quitarImpuestoDePlantilla(${impuestoId}, ${p.id}, '${nombreImpuesto.replace(/'/g, "\\'")}')">Quitar</button></td>
+      </tr>
+    `).join('');
+
+    App.openModal(`
+      <div class="modal-header"><h2>Plantillas asignadas: ${nombreImpuesto}</h2></div>
+      <p style="font-size:0.875rem;color:#64748b;margin-bottom:12px;">
+        Este impuesto solo se descuenta automáticamente en las plantillas listadas abajo.
+      </p>
+      <table class="data-table" style="margin-bottom:20px;">
+        <thead><tr><th>Plantilla</th><th>Orden</th><th></th></tr></thead>
+        <tbody>${filasAsignadas || '<tr><td colspan="3" style="text-align:center;color:#94a3b8;">Sin plantillas asignadas todavía</td></tr>'}</tbody>
+      </table>
+
+      ${disponibles.length > 0 ? `
+        <div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px;">
+          <div class="form-group" style="flex:1;margin-bottom:0;">
+            <label>Plantilla</label>
+            <select id="selPlantillaAsignar" class="form-control">
+              ${disponibles.map(p => `<option value="${p.id}">${p.nombre} (${p.modulo}${p.subtipo ? ' · ' + p.subtipo : ''})</option>`).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="width:100px;margin-bottom:0;">
+            <label>Orden</label>
+            <input type="number" id="inpOrdenAsignar" class="form-control" value="100" min="1">
+          </div>
+          <button class="btn btn-primary" onclick="Contabilidad.asignarImpuestoAPlantilla(${impuestoId}, '${nombreImpuesto.replace(/'/g, "\\'")}')">Asignar</button>
+        </div>
+      ` : '<p style="font-size:0.8125rem;color:#94a3b8;margin-bottom:16px;">Ya está asignado a todas las plantillas existentes.</p>'}
+
+      <div style="text-align:right;">
+        <button class="btn btn-secondary" onclick="App.closeModal()">Cerrar</button>
+      </div>
+    `, 'large');
+  },
+
+  async asignarImpuestoAPlantilla(impuestoId, nombreImpuesto) {
+    const plantillaId = parseInt(document.getElementById('selPlantillaAsignar').value, 10);
+    const orden = parseInt(document.getElementById('inpOrdenAsignar').value, 10) || 100;
+
+    const res = await window.api.impuestos.asignarAPlantilla(plantillaId, impuestoId, orden);
+    if (!res.success) { App.toast('Error: ' + res.error, 'error'); return; }
+    App.toast('Impuesto asignado a la plantilla', 'success');
+    this.gestionarPlantillasImpuesto(impuestoId, nombreImpuesto);
+  },
+
+  async quitarImpuestoDePlantilla(impuestoId, plantillaId, nombreImpuesto) {
+    const confirmado = await App.confirmDialog('¿Quitar este impuesto de la plantilla? Dejará de descontarse en los asientos nuevos generados con ella.');
+    if (!confirmado) return;
+
+    const res = await window.api.impuestos.quitarDePlantilla(plantillaId, impuestoId);
+    if (!res.success) { App.toast('Error: ' + res.error, 'error'); return; }
+    App.toast('Impuesto quitado de la plantilla', 'success');
+    this.gestionarPlantillasImpuesto(impuestoId, nombreImpuesto);
   }
 };

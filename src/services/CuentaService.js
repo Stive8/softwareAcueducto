@@ -120,20 +120,6 @@ class CuentaService {
 
     this.repository.update(id, cuentaData);
   }
-
-  changeStatus(id, estado) {
-    const estadosValidos = ['Activo', 'Inactivo', 'Suspendido'];
-    if (!estadosValidos.includes(estado)) {
-      throw new Error('Estado inválido');
-    }
-
-    const cuenta = this.repository.findById(id);
-    if (!cuenta) {
-      throw new Error('Cuenta no encontrada');
-    }
-
-    this.repository.changeStatus(id, estado);
-  }
 }
 
 module.exports = CuentaService;

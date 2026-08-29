@@ -85,18 +85,6 @@ class CategoriaService {
     return this.repository.getCuentasConCategoria(categoriaId);
   }
 
-  asignarACuenta(cuentaId, categoriaId, fechaInicio, observaciones = null) {
-    if (!cuentaId || !categoriaId) {
-      throw new Error('Cuenta y categoría son obligatorios');
-    }
-
-    if (!fechaInicio) {
-      fechaInicio = new Date().toISOString().split('T')[0];
-    }
-
-    return this.repository.asignarACuenta(cuentaId, categoriaId, fechaInicio, observaciones);
-  }
-
   getCategoriaActualCuenta(cuentaId) {
     return this.repository.getCategoriaActualCuenta(cuentaId);
   }

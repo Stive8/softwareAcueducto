@@ -30,7 +30,7 @@ No es un ERP completo: el sistema está acotado a lo que necesita una junta de a
 
 | Módulo | Qué hace |
 |---|---|
-| Dashboard | Indicadores generales: cuentas al día/en mora/con saldo a favor, caja, banco |
+| Dashboard | Indicadores generales: cuentas al día/en mora/con saldo a favor, caja, banco, y alerta si Caja o Banco dejan de cuadrar contra la contabilidad de doble partida |
 | Cuentas | Alta y gestión de predios, código manual, historial de propietarios y categorías, y ubicación GPS opcional (acometida/vivienda) con enlace directo a Google Maps |
 | Propietarios | Personas/entidades asociadas a una o más cuentas a lo largo del tiempo |
 | Categorías | Tipos de cuenta (Finca, Tienda, etc.) y su tarifa histórica de sostenimiento, con reajuste retroactivo (con vista previa) cuando una tarifa nueva con fecha pasada deja meses ya cobrados a corregir |
@@ -43,6 +43,8 @@ No es un ERP completo: el sistema está acotado a lo que necesita una junta de a
 | Configuración | Datos de la asociación, parámetros, gestión de usuarios y roles (Administrador/Usuario/Consulta), Auditoría (bitácora de acciones), cambio de contraseña, copia de seguridad/restauración local, respaldo en la nube |
 
 En el detalle de una cuenta (Aportes → Ver → panel "Cartera y Movimientos"), el aviso "Deuda anterior al corte" tiene su propio botón **Abonar** (desde 2026-08-29): abre un modal con método de pago y genera su propio recibo (`PagoService.registrarAbonoDeudaAnterior`), igual que el aviso de saldo a favor ("Usar") abre Registrar Aporte con la casilla premarcada. Son dos flujos separados a propósito: "Usar" redime plata que la cuenta ya tenía guardada; "Abonar" recibe plata nueva contra la deuda de antes de 2024.
+
+Los botones **"Suspender"/"Activar"** y **"Cambiar Categoría"** de Cuentas pasan por `CarteraService.suspender`/`reactivar`/`recategorizar` (conectados 2026-08-29, auditoría): a diferencia del cambio directo de estado/categoría que usaban antes, estos corrigen con rastro (`AjusteCategoria`) los cargos ya causados que correspondan -- suspender una cuenta con fecha pasada anula lo cobrado de más desde esa fecha; cambiar de categoría con fecha pasada corrige los meses ya cobrados con la tarifa vieja. Sin esto, una cuenta marcada "Suspendido" en pantalla seguía generando cartera y apareciendo en mora en el motor nuevo (que decide por `cuenta_estados`, no por la columna `estado` de `cuentas`).
 
 ## Respaldo en la nube (opcional)
 

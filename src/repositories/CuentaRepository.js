@@ -160,16 +160,6 @@ class CuentaRepository {
     );
   }
 
-  changeStatus(id, estado) {
-    const stmt = this.db.prepare(`
-      UPDATE cuentas 
-      SET estado = ?, fecha_actualizacion = CURRENT_TIMESTAMP
-      WHERE id = ?
-    `);
-    
-    stmt.run(estado, id);
-  }
-
   getStats() {
     // COALESCE es necesario porque SUM() sobre una tabla vacía devuelve NULL (no 0),
     // sin importar que el CASE siempre evalúe a 0: simplemente no hay filas que sumar.

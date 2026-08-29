@@ -159,8 +159,8 @@ const Cuentas = {
                   <button class="btn btn-secondary btn-icon" onclick="Cuentas.showFormModal(${cuenta.id})">Editar</button>
                   <button class="btn btn-info btn-icon" onclick="Cuentas.showCambiarCategoriaModal(${cuenta.id})">Categoría</button>
                   ${cuenta.estado !== 'Suspendido' ?
-                    `<button class="btn btn-warning btn-icon" onclick="Cuentas.changeStatus(${cuenta.id}, 'Suspendido')">Suspender</button>` :
-                    `<button class="btn btn-success btn-icon" onclick="Cuentas.changeStatus(${cuenta.id}, 'Activo')">Activar</button>`
+                    `<button class="btn btn-warning btn-icon" onclick="Cuentas.showSuspenderModal(${cuenta.id})">Suspender</button>` :
+                    `<button class="btn btn-success btn-icon" onclick="Cuentas.showReactivarModal(${cuenta.id})">Activar</button>`
                   }
                 </div>
               </td>
@@ -388,6 +388,8 @@ const Cuentas = {
         <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
           <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
             <strong>Nota:</strong> La categoría actual será finalizada automáticamente. El historial nunca se sobrescribe.
+            Si la fecha es pasada, los meses ya cobrados con la tarifa vieja se corrigen automáticamente
+            (con un ajuste visible en el detalle de la cuenta, sin tocar lo ya causado).
           </p>
         </div>
 
@@ -400,27 +402,34 @@ const Cuentas = {
 
     App.openModal(content);
 
-    document.getElementById('cambiarCategoriaForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-
-      const categoriaId = document.getElementById('nueva_categoria_id').value;
-      const fechaInicio = document.getElementById('fecha_inicio_categoria').value;
-      const observaciones = document.getElementById('observaciones_categoria').value.trim();
+    // cartera.recategorizar (no categorias.asignarACuenta, retirado de acá 2026-08-29): a
+    // diferencia de ese cambio simple de vigencia, este corrige por diferencia los meses ya
+    // causados desde la fecha declarada -- sin esto, elegir una fecha pasada dejaba los cargos
+    // ya emitidos con la tarifa de la categoría vieja, sin ningún aviso.
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('cambiarCategoriaForm'), async () => {
+      const categoriaId = parseInt(document.getElementById('nueva_categoria_id').value, 10);
+      const fechaVigencia = document.getElementById('fecha_inicio_categoria').value;
+      const observaciones = document.getElementById('observaciones_categoria').value.trim() || null;
+      const errorDiv = document.getElementById('formError');
 
       try {
-        const response = await window.api.categorias.asignarACuenta(cuentaId, categoriaId, fechaInicio, observaciones);
+        const response = await window.api.cartera.recategorizar({
+          cuentaId, categoriaId, fechaVigencia, observaciones, opId
+        });
 
         if (response.success) {
           App.closeModal();
           this.loadCuentas();
-          App.toast('Categoría actualizada con éxito');
+          const { ajustes, totalAjustado } = response.data;
+          App.toast(ajustes.length > 0
+            ? `Categoría actualizada. Se corrigieron ${ajustes.length} ${ajustes.length === 1 ? 'mes' : 'meses'} ya cobrados (ajuste neto: $${this.formatNumber(totalAjustado)}).`
+            : 'Categoría actualizada con éxito');
         } else {
-          const errorDiv = document.getElementById('formError');
           errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
         }
       } catch (error) {
         console.error('Error:', error);
-        const errorDiv = document.getElementById('formError');
         errorDiv.innerHTML = `<div class="error-message">Error al cambiar la categoría</div>`;
       }
     });
@@ -633,17 +642,6 @@ const Cuentas = {
           </div>
         ` : ''}
 
-        ${id ? `
-          <div class="form-group">
-            <label for="estado">Estado</label>
-            <select id="estado" name="estado">
-              <option value="Activo" ${cuenta?.estado === 'Activo' ? 'selected' : ''}>Activo</option>
-              <option value="Inactivo" ${cuenta?.estado === 'Inactivo' ? 'selected' : ''}>Inactivo</option>
-              <option value="Suspendido" ${cuenta?.estado === 'Suspendido' ? 'selected' : ''}>Suspendido</option>
-            </select>
-          </div>
-        ` : ''}
-
         <div class="form-group">
           <label for="observaciones">Observaciones</label>
           <textarea id="observaciones" name="observaciones">${cuenta?.observaciones || ''}</textarea>
@@ -752,9 +750,7 @@ const Cuentas = {
     }
 
     let valorConexion = 0;
-    if (id) {
-      formData.estado = document.getElementById('estado').value;
-    } else {
+    if (!id) {
       formData.categoria_id = document.getElementById('categoria_id').value;
       formData.categoria_fecha_inicio = document.getElementById('categoria_fecha_inicio').value;
       valorConexion = App.parseMoneyValue(document.getElementById('valor_conexion').value);
@@ -821,23 +817,110 @@ const Cuentas = {
     }
   },
 
-  async changeStatus(id, nuevoEstado) {
-    const confirmado = await App.confirmDialog(`¿Está seguro de cambiar el estado de esta cuenta a ${nuevoEstado}?`);
-    if (!confirmado) return;
+  // Suspender/Reactivar pasan por CarteraService (cartera:suspender/reactivar), no por
+  // cuentas:changeStatus (retirado, auditoría 2026-08-29): a diferencia de ese cambio directo
+  // de cuentas.estado, estos dejan vigencia en cuenta_estados (lo que el motor de cartera
+  // realmente lee, ver calcularAPagar/asegurarCausacion) y, al suspender, anulan con rastro
+  // cualquier CargoMensual ya causado desde la fecha declarada -- sin esto, una cuenta marcada
+  // "Suspendido" en pantalla seguía generando cartera y apareciendo en mora en silencio.
+  showSuspenderModal(cuentaId) {
+    const hoy = new Date().toISOString().split('T')[0];
+    const content = `
+      <div class="modal-header"><h2>Suspender Cuenta</h2></div>
+      <div id="formError"></div>
+      <p style="color: #64748b; font-size: 0.875rem; margin-bottom: 16px;">
+        Los cargos mensuales ya causados desde la fecha declarada se anulan (con rastro, no se borran).
+        No se vuelven a causar mientras la cuenta siga suspendida.
+      </p>
+      <form id="suspenderForm">
+        <div class="form-group">
+          <label for="fecha_desde_suspension">Suspendida Desde <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_desde_suspension" name="fecha_desde_suspension" value="${hoy}" required>
+        </div>
+        <div class="form-group">
+          <label for="motivo_suspension">Motivo <span style="color: #ef4444;">*</span></label>
+          <textarea id="motivo_suspension" name="motivo_suspension" required></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-warning">Suspender</button>
+        </div>
+      </form>
+    `;
+    App.openModal(content);
 
-    try {
-      const response = await window.api.cuentas.changeStatus(id, nuevoEstado);
-
-      if (response.success) {
-        this.loadCuentas();
-        App.toast('Estado actualizado con éxito');
-      } else {
-        App.toast('Error al cambiar el estado: ' + response.error, 'error');
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('suspenderForm'), async () => {
+      const errorDiv = document.getElementById('formError');
+      try {
+        const response = await window.api.cartera.suspender({
+          cuentaId,
+          fechaDesde: document.getElementById('fecha_desde_suspension').value,
+          motivo: document.getElementById('motivo_suspension').value.trim(),
+          opId
+        });
+        if (response.success) {
+          App.closeModal();
+          this.loadCuentas();
+          App.toast('Cuenta suspendida con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al suspender la cuenta</div>`;
       }
-    } catch (error) {
-      console.error('Error:', error);
-      App.toast('Error al cambiar el estado', 'error');
-    }
+    });
+  },
+
+  showReactivarModal(cuentaId) {
+    const hoy = new Date().toISOString().split('T')[0];
+    const content = `
+      <div class="modal-header"><h2>Reactivar Cuenta</h2></div>
+      <div id="formError"></div>
+      <p style="color: #64748b; font-size: 0.875rem; margin-bottom: 16px;">
+        La causación se reanuda desde la fecha declarada. Los meses en que estuvo suspendida
+        NO se cobran retroactivamente.
+      </p>
+      <form id="reactivarForm">
+        <div class="form-group">
+          <label for="fecha_desde_reactivacion">Reactivada Desde <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_desde_reactivacion" name="fecha_desde_reactivacion" value="${hoy}" required>
+        </div>
+        <div class="form-group">
+          <label for="motivo_reactivacion">Motivo</label>
+          <textarea id="motivo_reactivacion" name="motivo_reactivacion"></textarea>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-success">Reactivar</button>
+        </div>
+      </form>
+    `;
+    App.openModal(content);
+
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('reactivarForm'), async () => {
+      const errorDiv = document.getElementById('formError');
+      try {
+        const response = await window.api.cartera.reactivar({
+          cuentaId,
+          fechaDesde: document.getElementById('fecha_desde_reactivacion').value,
+          motivo: document.getElementById('motivo_reactivacion').value.trim() || null,
+          opId
+        });
+        if (response.success) {
+          App.closeModal();
+          this.loadCuentas();
+          App.toast('Cuenta reactivada con éxito');
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al reactivar la cuenta</div>`;
+      }
+    });
   },
 
   async verEnMapa(lat, lon) {

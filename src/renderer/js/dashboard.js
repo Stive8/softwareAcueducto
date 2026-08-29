@@ -51,6 +51,18 @@ const Dashboard = {
     const container = document.getElementById('alertasContainer');
     const alertas = [];
 
+    // verificarConciliacionCajaBanco compara el saldo simple de Caja/Banco (el que muestra este
+    // mismo Dashboard) contra la contabilidad de doble partida -- si difieren, algo quedó
+    // desincronizado entre los dos libros (ver AsientoContableService.verificarConciliacionCajaBanco).
+    const desconciliadas = (stats.conciliacionCajaBanco || []).filter(c => !c.conciliado);
+    if (desconciliadas.length > 0) {
+      alertas.push(`
+        <strong>⚠️ ${desconciliadas.map(c => c.cuenta).join(' y ')} ${desconciliadas.length === 1 ? 'no cuadra' : 'no cuadran'} contra la contabilidad:</strong>
+        ${desconciliadas.map(c => `${c.cuenta}: saldo simple $${this.formatNumber(c.saldoLedgerSimple)} vs. contable $${this.formatNumber(c.saldoDoblePartida)} (diferencia $${this.formatNumber(c.diferencia)})`).join('; ')}.
+        Revise los movimientos y asientos manuales recientes de ${desconciliadas.length === 1 ? 'esa cuenta' : 'esas cuentas'}.
+      `);
+    }
+
     const sinTarifa = stats.categoriasSinTarifa || [];
     if (sinTarifa.length > 0) {
       alertas.push(`

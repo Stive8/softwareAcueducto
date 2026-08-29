@@ -154,27 +154,6 @@ class CategoriaRepository {
     `).all(categoriaId);
   }
 
-  asignarACuenta(cuentaId, categoriaId, fechaInicio, observaciones = null) {
-    const ejecutar = this.db.transaction(() => {
-      // Finalizar categoría actual si existe
-      this.db.prepare(`
-        UPDATE cuenta_categorias
-        SET fecha_fin = date(?, '-1 day')
-        WHERE cuenta_id = ? AND fecha_fin IS NULL
-      `).run(fechaInicio, cuentaId);
-
-      // Asignar nueva categoría
-      const result = this.db.prepare(`
-        INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio, observaciones)
-        VALUES (?, ?, ?, ?)
-      `).run(cuentaId, categoriaId, fechaInicio, observaciones);
-
-      return result.lastInsertRowid;
-    });
-
-    return ejecutar();
-  }
-
   getCategoriaActualCuenta(cuentaId) {
     return this.db.prepare(`
       SELECT cat.*, cc.fecha_inicio
