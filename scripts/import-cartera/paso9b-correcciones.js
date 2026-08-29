@@ -653,7 +653,17 @@ const SUSPENSION_INCOBRABLES = [
 //    FIFO con el sobrante) lo resuelva: el período no encuentra nada, así que el FIFO general lo
 //    aplica contra lo más viejo pendiente, que es exactamente la apertura opaca (fechada antes
 //    que cualquier CargoMensual) -- el resultado correcto para un recibo que paga deuda de 2021.
+// Corrección 35 (2026-08-29) acortó este texto: la referencia al proceso interno de
+// reconciliación ("encontrado por el cruce automático... ronda 3, 2026-08-19") no le aporta nada
+// a quien consulta el recibo desde la pantalla de Recibos -- esa trazabilidad ya queda
+// documentada en este script. OBSERVACION_RECIBO_S0244_ORIGINAL (más abajo) conserva el texto
+// viejo solo para localizar y corregir la fila que ya quedó escrita en producción con él.
 const OBSERVACION_RECIBO_S0244 =
+  'Recibo del talonario fisico que nunca se cargo a la base. Codigo en blanco en el talonario ' +
+  '("SIN CODIFICAR"), identificado por el nombre del propietario. Confirmado por el usuario ' +
+  '2026-08-20.';
+
+const OBSERVACION_RECIBO_S0244_ORIGINAL =
   'Recibo del talonario fisico que nunca se cargo a la base -- encontrado por el cruce automatico ' +
   'del talonario completo contra la base (ronda 3, 2026-08-19). Codigo en blanco en el talonario ' +
   '("SIN CODIFICAR"), identificado por el nombre del propietario. Confirmado por el usuario ' +
@@ -691,7 +701,17 @@ const APERTURA_INCOBRABLES = ['R002', 'R0501', 'S009', 'R0971'];
 //    sin ningún historial anterior a agosto 2026 -- la causación de sostenimiento sigue el curso
 //    normal del sistema (regla de negocio: el mes siguiente a la instalación), no algo que esta
 //    corrección deba anticipar.
+// Corrección 35 (2026-08-29) acortó este texto -- mismo motivo que OBSERVACION_RECIBO_S0244 y
+// OBSERVACION_RECIBO_FALTANTE_2026 más arriba. Este queda escrito en 5 tablas distintas (cuentas,
+// cuenta_estados, recibos, nuevos_puntos, nuevo_punto_abonos): la corrección 35 lo busca y
+// acorta en las 5.
 const OBSERVACION_CUENTA_NUEVA_2026 =
+  'Cuenta creada por una conexión nueva de 2026 que el talonario ya registraba pero que no ' +
+  'estaba dada de alta en el sistema. Mínima, sin cédula/teléfono/correo -- confirmado por el ' +
+  'usuario que se actualiza después. Categoría Finca por defecto, sin dato de campo que diga lo ' +
+  'contrario.';
+
+const OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL =
   'Cuenta creada por el cruce automatico del talonario completo (ronda 3, 2026-08-19): conexion ' +
   'nueva de 2026 que el talonario ya registraba pero que no estaba dada de alta en el sistema. ' +
   'Minima, sin cedula/telefono/correo -- confirmado por el usuario que se actualiza despues. ' +
@@ -739,7 +759,14 @@ const CUENTAS_NUEVAS_2026 = [
 // Ninguno de estos recibos mueve el saldo de Caja/Banco (tabla `movimientos`): mismo criterio
 // que la corrección 30 -- esa reconciliación se hace aparte, en el checkpoint contable real
 // (arqueo físico + extracto bancario + "Ajustar saldos"), no recibo por recibo.
+// Corrección 35 (2026-08-29) acortó este texto -- ver el comentario junto a
+// OBSERVACION_RECIBO_S0244 más arriba, mismo motivo. OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL
+// (más abajo) conserva el texto viejo solo para localizar y corregir las filas que ya quedaron
+// escritas en producción con él.
 const OBSERVACION_RECIBO_FALTANTE_2026 =
+  'Recibo físico ya escrito en el talonario que nunca se había dado de alta en el sistema.';
+
+const OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL =
   'Recibo físico ya escrito en el talonario que nunca se había dado de alta en el sistema -- ' +
   'encontrado por el cruce automático del talonario completo (ronda 3, 2026-08-19), ver ' +
   'scripts/import-cartera/output/cruce-colillas-vs-db.md.';
@@ -1401,6 +1428,7 @@ function ejecutarPaso9b({ dbService }) {
   let recibo1167Blanco = null;
   const recibosAnuladosFaltantes = [];
   let resolucionR031R0301 = null;
+  const observacionesAcortadas = [];
 
   const transaccion = db.transaction(() => {
     // 31. Ver comentario junto a derivarPeriodoCorrecto más arriba. Corre PRIMERO en la
@@ -1424,22 +1452,24 @@ function ejecutarPaso9b({ dbService }) {
         });
         if (!correcto) continue;
 
-        const guardadoDesde = parsearPeriodoAnioMes(fila.periodo_desde);
-        const guardadoHasta = parsearPeriodoAnioMes(fila.periodo_hasta);
-        const desdeIgual = guardadoDesde && guardadoDesde.anio === correcto.desde.anio && guardadoDesde.mes === correcto.desde.mes;
-        const hastaIgual = guardadoHasta && guardadoHasta.anio === correcto.hasta.anio && guardadoHasta.mes === correcto.hasta.mes;
-        if (desdeIgual && hastaIgual) {
+        // Comparación por STRING contra el texto ya formateado, no por {anio,mes} ya parseados:
+        // un valor guardado en ISO ("2026-08") puede tener el año/mes numéricamente correcto y
+        // aun así seguir en el formato equivocado -- comparar tuplas lo daba por "ya bien" y lo
+        // dejaba sin convertir (caso real: recibo 2528 de C010, carga inicial que quedó en ISO).
+        const desdeTexto = formatearPeriodoTexto(correcto.desde);
+        const hastaTexto = formatearPeriodoTexto(correcto.hasta);
+        if (fila.periodo_desde === desdeTexto && fila.periodo_hasta === hastaTexto) {
           periodosTextoCorregidos.push({ numeroRecibo: fila.numero_recibo, corregido: false });
           continue;
         }
 
         db.prepare('UPDATE recibo_detalles SET periodo_desde=?, periodo_hasta=? WHERE id=?').run(
-          formatearPeriodoTexto(correcto.desde), formatearPeriodoTexto(correcto.hasta), fila.detalleId
+          desdeTexto, hastaTexto, fila.detalleId
         );
         periodosTextoCorregidos.push({
           numeroRecibo: fila.numero_recibo, corregido: true,
           antes: [fila.periodo_desde, fila.periodo_hasta],
-          despues: [formatearPeriodoTexto(correcto.desde), formatearPeriodoTexto(correcto.hasta)]
+          despues: [desdeTexto, hastaTexto]
         });
       }
     }
@@ -2800,6 +2830,38 @@ function ejecutarPaso9b({ dbService }) {
         }
       }
 
+      // 35. Acorta observaciones/motivos que quedaron escritos en producción con el texto viejo
+      // (verboso, con referencia al proceso interno de reconciliación: ronda, archivo .md) de las
+      // correcciones 28, 30 y 32. Esa trazabilidad ya queda documentada en este script y en
+      // cruce-colillas-vs-db.md -- no le aporta nada a quien consulta el dato desde la pantalla
+      // de Recibos, de Cuentas, o el detalle de movimientos/puntos de conexión (recibos,
+      // cartera_movimientos, cuentas, cuenta_estados, nuevos_puntos, nuevo_punto_abonos).
+      // Busca por el texto viejo como substring (no por id fijo) para
+      // cubrir también los 3 casos especiales de la corrección 32 (2549/2551/2563) que le
+      // agregaron texto propio después del texto compartido: split/join conserva ese agregado,
+      // solo reemplaza el prefijo. Idempotente por construcción -- una fila ya acortada ya no
+      // contiene el texto viejo, así que una segunda corrida no encuentra nada que tocar.
+      for (const { textoViejo, textoNuevo, tabla, columna } of [
+        { textoViejo: OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL, textoNuevo: OBSERVACION_RECIBO_FALTANTE_2026, tabla: 'recibos', columna: 'observaciones' },
+        { textoViejo: OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL, textoNuevo: OBSERVACION_RECIBO_FALTANTE_2026, tabla: 'cartera_movimientos', columna: 'observaciones' },
+        { textoViejo: OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL, textoNuevo: OBSERVACION_RECIBO_FALTANTE_2026, tabla: 'nuevo_punto_abonos', columna: 'observaciones' },
+        { textoViejo: OBSERVACION_RECIBO_S0244_ORIGINAL, textoNuevo: OBSERVACION_RECIBO_S0244, tabla: 'recibos', columna: 'observaciones' },
+        { textoViejo: OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL, textoNuevo: OBSERVACION_CUENTA_NUEVA_2026, tabla: 'cuentas', columna: 'observaciones' },
+        { textoViejo: OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL, textoNuevo: OBSERVACION_CUENTA_NUEVA_2026, tabla: 'cuenta_estados', columna: 'motivo' },
+        { textoViejo: OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL, textoNuevo: OBSERVACION_CUENTA_NUEVA_2026, tabla: 'recibos', columna: 'observaciones' },
+        { textoViejo: OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL, textoNuevo: OBSERVACION_CUENTA_NUEVA_2026, tabla: 'nuevos_puntos', columna: 'observaciones' },
+        { textoViejo: OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL, textoNuevo: OBSERVACION_CUENTA_NUEVA_2026, tabla: 'nuevo_punto_abonos', columna: 'observaciones' }
+      ]) {
+        const filas = db.prepare(
+          `SELECT id, ${columna} AS valor FROM ${tabla} WHERE ${columna} LIKE '%' || ? || '%'`
+        ).all(textoViejo);
+        for (const fila of filas) {
+          db.prepare(`UPDATE ${tabla} SET ${columna} = ? WHERE id = ?`)
+            .run(fila.valor.split(textoViejo).join(textoNuevo), fila.id);
+          observacionesAcortadas.push({ tabla, id: fila.id });
+        }
+      }
+
       // Después de insertar los recibos históricos (hasta el 2564), el consecutivo debe quedar
       // apuntando al primer número realmente libre -- si no, el próximo pago registrado desde la
       // app chocaría con un UNIQUE constraint al intentar reusar un número que esta corrección ya
@@ -2827,7 +2889,8 @@ function ejecutarPaso9b({ dbService }) {
     mergeR0081S058, reimputacionS0312,
     redencionR049, reasignacion458, suspensionIncobrables, reciboFaltanteS0244,
     aperturaIncobrables, cuentasNuevas2026, periodosTextoCorregidos,
-    recibosFaltantes2026, recibo1167Blanco, recibosAnuladosFaltantes, resolucionR031R0301
+    recibosFaltantes2026, recibo1167Blanco, recibosAnuladosFaltantes, resolucionR031R0301,
+    observacionesAcortadas
   };
 }
 
@@ -2847,8 +2910,10 @@ module.exports = {
   OBSERVACION_REIMPUTACION_S0312_2191, OBSERVACION_REIMPUTACION_S0312_2362,
   REDENCION_R049, OBSERVACION_REDENCION_R049, REASIGNACION_RECIBO_458, OBSERVACION_REASIGNACION_458,
   SUSPENSION_INCOBRABLES, OBSERVACION_SUSPENSION_INCOBRABLES, RECIBO_FALTANTE_S0244, OBSERVACION_RECIBO_S0244,
+  OBSERVACION_RECIBO_S0244_ORIGINAL, OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL,
   APERTURA_INCOBRABLES, OBSERVACION_APERTURA_INCOBRABLES,
-  CUENTAS_NUEVAS_2026, OBSERVACION_CUENTA_NUEVA_2026, VALOR_PUNTO_NUEVO_2026, FECHA_CUENTAS_NUEVAS_2026,
+  CUENTAS_NUEVAS_2026, OBSERVACION_CUENTA_NUEVA_2026, OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL,
+  VALOR_PUNTO_NUEVO_2026, FECHA_CUENTAS_NUEVAS_2026,
   inferirPeriodoDeTexto, derivarPeriodoCorrecto, formatearPeriodoTexto, SOBRESCRITURA_PERIODO_MANUAL,
   RECIBOS_FALTANTES_2026, OBSERVACION_RECIBO_FALTANTE_2026, RECIBO_1167_BLANCO_MOTIVO,
   RECIBOS_ANULADOS_FALTANTES, RESOLUCION_R031_R0301, OBSERVACION_RESOLUCION_R031_R0301

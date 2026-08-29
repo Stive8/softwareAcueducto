@@ -44,21 +44,23 @@ const Recibos = {
         </div>
       </div>
 
-      <div class="table-container">
-        <div class="table-header">
-          <h2>Recibos Anulados del Talonario Físico</h2>
+      <details class="table-container">
+        <summary style="cursor: pointer; padding: 16px 24px; list-style: none;">
+          <h2 style="display: inline;">Recibos Anulados del Talonario Físico</h2>
+        </summary>
+        <div class="table-header" style="border-top: 1px solid #e2e8f0;">
+          <div style="font-size: 13px; color: #64748b;">
+            Para números de recibo del talonario en papel que se anularon antes de representar un cobro real
+            (error de escritura, tachón, etc.) y por eso nunca generaron cuenta ni valor en el sistema.
+          </div>
           <div class="table-controls">
             <button class="btn btn-warning" id="btnRegistrarAnuladoFisico">+ Registrar Recibo Anulado</button>
           </div>
         </div>
-        <div style="padding: 16px 24px; font-size: 13px; color: #64748b; border-bottom: 1px solid #e2e8f0;">
-          Para números de recibo del talonario en papel que se anularon antes de representar un cobro real
-          (error de escritura, tachón, etc.) y por eso nunca generaron cuenta ni valor en el sistema.
-        </div>
         <div id="anuladosFisicosContent">
           ${App.renderSkeletonTable()}
         </div>
-      </div>
+      </details>
     `;
 
     this.setupEventListeners();

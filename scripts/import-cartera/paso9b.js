@@ -47,6 +47,7 @@ function main() {
   const anuladosNuevos = r.recibosAnuladosFaltantes.filter(x => !x.yaAplicado).length;
   console.log(`Recibos anulados/en blanco faltantes: ${anuladosNuevos} registrados de ${r.recibosAnuladosFaltantes.length} evaluados`);
   console.log(`Recibo 1819 (R031 -> R0301): ${r.resolucionR031R0301.yaAplicado ? 'ya estaba movido' : `movido, imputado contra enero-junio 2024, cuenta R031 eliminada`}`);
+  console.log(`Observaciones acortadas (corrección 35): ${r.observacionesAcortadas.length} recibo(s)`);
 
   const outDir = path.join(__dirname, 'output');
   fs.mkdirSync(outDir, { recursive: true });

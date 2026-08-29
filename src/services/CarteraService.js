@@ -554,10 +554,25 @@ class CarteraService {
   // Para la lista de cuentas: qué cuentas tienen algún aviso pendiente (deuda anterior al
   // corte, punto de conexión, saldo a favor), en 3 consultas agregadas -- no una por cuenta --
   // para que listar 300 cuentas no dispare 300 lecturas de cartera_movimientos.
+  //
+  // La deuda opaca se calcula neta por imputación (mismo criterio que CarteraRepository.getSaldos,
+  // ver su comentario), no por SUM(monto) crudo de la etiqueta exigible=0: un abono de la carga
+  // histórica puede haber cubierto parte de la apertura opaca por FIFO combinado (cargosPendientes-
+  // Combinados en los scripts de corrección) quedando él mismo etiquetado exigible=1 porque la
+  // mayoría de su imputación fue contra deuda exigible. Sumar por la etiqueta del movimiento (como
+  // antes) dejaba la apertura opaca sin descontar y el aviso "Deuda 2024" quedaba pegado en el
+  // listado aunque el detalle de la cuenta (que sí mira cartera_imputaciones) ya mostrara $0.
   getIndicadoresBulk() {
+    const tiposCargo = CarteraRepository.TIPOS_CARGO.map(t => `'${t}'`).join(', ');
     const opacas = this.db.prepare(`
-      SELECT cuenta_id FROM cartera_movimientos WHERE exigible = 0
-      GROUP BY cuenta_id HAVING SUM(monto) > 0
+      SELECT m.cuenta_id AS cuenta_id
+      FROM cartera_movimientos m
+      LEFT JOIN (
+        SELECT cargo_id, SUM(monto) AS cubierto FROM cartera_imputaciones GROUP BY cargo_id
+      ) imp ON imp.cargo_id = m.id
+      WHERE m.exigible = 0 AND m.tipo IN (${tiposCargo})
+      GROUP BY m.cuenta_id
+      HAVING SUM(m.monto - COALESCE(imp.cubierto, 0)) > 0
     `).all().map(f => f.cuenta_id);
     const conCredito = this.db.prepare(`
       SELECT cuenta_id FROM cuenta_creditos

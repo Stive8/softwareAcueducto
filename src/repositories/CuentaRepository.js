@@ -68,7 +68,7 @@ class CuentaRepository {
     `;
     const total = this.db.prepare(countQuery).get(...queryParams).total;
 
-    query += ' ORDER BY c.id DESC LIMIT ? OFFSET ?';
+    query += ' ORDER BY c.codigo ASC LIMIT ? OFFSET ?';
     queryParams.push(limit, offset);
 
     const cuentas = this.db.prepare(query).all(...queryParams);

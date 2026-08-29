@@ -476,6 +476,83 @@ class PagoService {
     });
   }
 
+  // Registra un abono de dinero NUEVO específicamente contra la deuda anterior al corte (2024,
+  // el bucket opaco de CarteraService) y genera su propio recibo -- a diferencia de "Usar saldo a
+  // favor" (que redime un crédito que la cuenta YA tenía guardado, ver showRegistrarPagoModal en
+  // pagos.js), acá entra plata nueva, así que necesita el mismo flujo de cobro que un aporte de
+  // sostenimiento: recibo, movimiento de caja/banco y asiento contable. Antes de esto, el aviso
+  // "Deuda anterior al corte" en pantalla (renderCarteraDetalle en pagos.js) solo informaba el
+  // monto sin ninguna acción -- era funcionalidad pendiente documentada en README.md; el
+  // workaround era registrar el pago como sostenimiento de meses viejos, que la UI no sugería y
+  // mezclaba esa plata con la cuota corriente.
+  registrarAbonoDeudaAnterior({ cuentaId, monto, fecha, metodoPago, observaciones = null }, usuarioId = null) {
+    this.validarDatosComunes({ cuentaId, fechaPago: fecha, metodoPago });
+    if (!(monto > 0)) throw new Error('El monto del abono debe ser mayor a cero');
+
+    this.periodoContableService.validarFechaPermitida(fecha);
+
+    const { deudaAntes2024 } = this.carteraService.getEstadoCartera(cuentaId);
+    if (deudaAntes2024 <= 0) throw new Error('Esta cuenta no tiene deuda anterior al corte (2024) pendiente');
+    if (monto > deudaAntes2024) {
+      throw new Error(
+        `El abono ($${redondear(monto)}) no puede exceder la deuda anterior al corte disponible ($${deudaAntes2024})`
+      );
+    }
+
+    const propietario = this.obtenerPropietarioVigente(cuentaId);
+
+    return this.repository.transaccion(() => {
+      const numeroRecibo = this.repository.getConsecutivoRecibo();
+
+      const reciboId = this.repository.crearRecibo({
+        numeroRecibo,
+        cuentaId,
+        propietarioId: propietario.id,
+        fechaRecibo: fecha,
+        total: monto,
+        metodoPago,
+        observaciones
+      });
+
+      this.repository.incrementarConsecutivoRecibo(numeroRecibo + 1);
+
+      const detalleId = this.repository.crearReciboDetalle({
+        reciboId,
+        concepto: 'Abono a deuda anterior al corte (2024)',
+        valor: monto,
+        tipoConceptoContable: 'AbonoDeudaAnterior'
+      });
+
+      const resultadoAbono = this.carteraService.registrarAbono({
+        cuentaId, fecha, monto, modo: MODOS.ABONO_SALDO_OPACO,
+        reciboDetalleId: detalleId, observaciones, usuarioId
+      });
+      // Mismo criterio que registrarPagoSostenimiento: ya se validó arriba que el monto no excede
+      // deudaAntes2024, así que un sobrante acá delataría un desacuerdo entre esa lectura y lo que
+      // el motor de cartera encontró para imputar -- mejor no dejarlo pasar en silencio.
+      if (esMayor(resultadoAbono.sobrante, 0)) {
+        throw new Error(
+          'El motor de cartera no pudo imputar completo este abono contra la deuda anterior al ' +
+          `corte: sobraron $${resultadoAbono.sobrante} sin poder aplicarse`
+        );
+      }
+
+      this.repository.crearMovimiento({
+        tipo: 'Ingreso',
+        origen: metodoPago === 'Efectivo' ? 'Caja' : 'Banco',
+        monto,
+        concepto: `Recibo No. ${numeroRecibo} - Abono Deuda Anterior al Corte`,
+        referenciaId: reciboId,
+        referenciaTipo: 'Recibo',
+        fechaMovimiento: fecha
+      });
+
+      this.asientoContableService.generarDesdeRecibo(reciboId, usuarioId);
+
+      return { reciboId, numeroRecibo, total: monto };
+    });
+  }
+
   getHistorialPagos(cuentaId) {
     return this.repository.getHistorialRecibosSostenimiento(cuentaId);
   }

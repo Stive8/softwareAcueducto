@@ -11,7 +11,10 @@ const {
   CUENTAS_SUSPENDIDAS_SIN_RECAUSAR, FRAGMENTO_AJUSTE_ERRONEO_SUSPENDIDAS,
   CREDITO_R0942, RECALCULO_R0831, reimputarAbono, MERGE_R0081_S058, SUSPENSION_INCOBRABLES,
   APERTURA_INCOBRABLES, CUENTAS_NUEVAS_2026, VALOR_PUNTO_NUEVO_2026,
-  inferirPeriodoDeTexto, derivarPeriodoCorrecto, formatearPeriodoTexto
+  inferirPeriodoDeTexto, derivarPeriodoCorrecto, formatearPeriodoTexto,
+  OBSERVACION_RECIBO_FALTANTE_2026, OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL,
+  OBSERVACION_RECIBO_S0244, OBSERVACION_RECIBO_S0244_ORIGINAL,
+  OBSERVACION_CUENTA_NUEVA_2026, OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL
 } = require('./paso9b-correcciones');
 
 function sembrarCuenta(db, codigo) {
@@ -2532,6 +2535,40 @@ test('paso9b: período de texto (corrección 31) -- con Abono real y texto con a
   }
 });
 
+test('paso9b: período de texto (corrección 31) -- convierte a texto un período que ya está en formato ISO (YYYY-MM) aunque el año/mes ya sea el correcto (caso real: recibo 2528 de C010)', () => {
+  // Encontrado en producción: un lote de recibos de la carga inicial (2026-06/07) quedó con
+  // periodo_desde/hasta en formato ISO directo ("2026-08"), no en texto ("Agosto 2026") -- a
+  // diferencia del caso de arriba (parser legacy con un BUG real de valor), acá el año/mes
+  // guardado YA es el correcto; lo único que falta es el formato. La corrección comparaba
+  // {anio,mes} ya parseados, así que un ISO numéricamente correcto pasaba la comparación de
+  // "ya está bien" y quedaba sin convertir -- por eso el usuario veía "2026-08 - 2026-10" en
+  // Historial de Aportes en vez de "Agosto 2026 - Octubre 2026".
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T904');
+    const propietarioId = sembrarPropietario(db);
+    const { detalleId } = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9002, cuentaId, fecha: '2026-07-11', valor: 30000,
+      concepto: 'CUOTA DE SOSTENIMIENTO AGOSTO A OCTUBRE 2026',
+      periodoDesde: '2026-08', periodoHasta: '2026-10'
+    });
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const resultado = r.periodosTextoCorregidos.find(p => p.numeroRecibo === 9002);
+    assert.equal(resultado.corregido, true);
+    assert.deepEqual(resultado.despues, ['Agosto 2026', 'Octubre 2026']);
+
+    const detalle = db.prepare('SELECT periodo_desde, periodo_hasta FROM recibo_detalles WHERE id=?').get(detalleId);
+    assert.equal(detalle.periodo_desde, 'Agosto 2026');
+    assert.equal(detalle.periodo_hasta, 'Octubre 2026');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('paso9b: período de texto -- el sobrante desviado por FIFO hacia deuda vieja NO ensancha el período mostrado (caso real: recibo 2470 de R007)', () => {
   const ctx = crearDbTemporal();
   try {
@@ -2695,6 +2732,160 @@ test('paso9b: período de texto -- override manual del recibo 171 (único mes ab
 
     const resultado = r.periodosTextoCorregidos.find(p => p.numeroRecibo === 171);
     assert.deepEqual(resultado.despues, ['Enero 2010', 'Noviembre 2010']);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: corrección 35 -- acorta la observación de un recibo ya escrito en producción con el texto viejo (referencia al cruce automático del talonario)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T906');
+    const propietarioId = sembrarPropietario(db);
+    const { reciboId } = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9990, cuentaId, fecha: '2026-07-25', valor: 60000,
+      concepto: 'CUOTA DE SOSTENIMIENTO JULIO A DICIEMBRE 2026'
+    });
+    // Simula el estado real de producción antes de esta corrección: el recibo ya quedó escrito
+    // con el texto verboso de la corrección 32 (incluye la referencia interna al cruce
+    // automático, que es justo lo que esta corrección acorta).
+    db.prepare('UPDATE recibos SET observaciones = ? WHERE id = ?').run(OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL, reciboId);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const recibo = db.prepare('SELECT observaciones FROM recibos WHERE id = ?').get(reciboId);
+    assert.equal(recibo.observaciones, OBSERVACION_RECIBO_FALTANTE_2026);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: corrección 35 -- conserva el texto agregado después del texto viejo (casos especiales 2549/2551/2563), solo acorta el prefijo compartido', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T907');
+    const propietarioId = sembrarPropietario(db);
+    const { reciboId } = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9991, cuentaId, fecha: '2026-07-18', valor: 120000,
+      concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2026'
+    });
+    const textoConAgregado = OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL + ' Detalle específico de este caso.';
+    db.prepare('UPDATE recibos SET observaciones = ? WHERE id = ?').run(textoConAgregado, reciboId);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const recibo = db.prepare('SELECT observaciones FROM recibos WHERE id = ?').get(reciboId);
+    assert.equal(recibo.observaciones, OBSERVACION_RECIBO_FALTANTE_2026 + ' Detalle específico de este caso.');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: corrección 35 -- acorta también la variante del recibo faltante S0244 (corrección 28)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T908');
+    const propietarioId = sembrarPropietario(db);
+    const { reciboId } = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9992, cuentaId, fecha: '2022-12-03', valor: 60000,
+      concepto: 'CUOTA DE SOSTENIMIENTO ENERO A DICIEMBRE 2021'
+    });
+    db.prepare('UPDATE recibos SET observaciones = ? WHERE id = ?').run(OBSERVACION_RECIBO_S0244_ORIGINAL, reciboId);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const recibo = db.prepare('SELECT observaciones FROM recibos WHERE id = ?').get(reciboId);
+    assert.equal(recibo.observaciones, OBSERVACION_RECIBO_S0244);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: corrección 35 -- acorta OBSERVACION_RECIBO_FALTANTE_2026 también en cartera_movimientos y nuevo_punto_abonos (algunas correcciones puntuales la escriben ahí, no solo en recibos)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T911');
+    const repo = new CarteraRepository({ getDb: () => db });
+    const movId = repo.crearMovimiento({
+      cuentaId, fecha: '2026-07-25', tipo: 'Abono', exigible: 1, monto: -10000,
+      observaciones: OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL
+    });
+    const puntoId = db.prepare(
+      `INSERT INTO nuevos_puntos (cuenta_id, valor_total, saldo_pendiente, fecha_registro) VALUES (?, 500000, 400000, '2026-07-25')`
+    ).run(cuentaId).lastInsertRowid;
+    const abonoId = db.prepare(
+      `INSERT INTO nuevo_punto_abonos (nuevo_punto_id, monto, fecha_abono, observaciones) VALUES (?, 100000, '2026-07-25', ?)`
+    ).run(puntoId, OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL).lastInsertRowid;
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(db.prepare('SELECT observaciones FROM cartera_movimientos WHERE id = ?').get(movId).observaciones, OBSERVACION_RECIBO_FALTANTE_2026);
+    assert.equal(db.prepare('SELECT observaciones FROM nuevo_punto_abonos WHERE id = ?').get(abonoId).observaciones, OBSERVACION_RECIBO_FALTANTE_2026);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: corrección 35 -- acorta también OBSERVACION_CUENTA_NUEVA_2026 (corrección 30) en las 5 tablas donde queda escrita', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T910');
+    db.prepare('UPDATE cuentas SET observaciones = ? WHERE id = ?').run(OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL, cuentaId);
+    const propietarioId = sembrarPropietario(db);
+    const estadoId = db.prepare(
+      `INSERT INTO cuenta_estados (cuenta_id, estado, fecha_inicio, motivo) VALUES (?, 'Activo', '2026-08-08', ?)`
+    ).run(cuentaId, OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL).lastInsertRowid;
+    const { reciboId, detalleId } = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9994, cuentaId, fecha: '2026-08-08', valor: 100000, concepto: 'ABONO PUNTO NUEVO DE AGUA'
+    });
+    db.prepare('UPDATE recibos SET observaciones = ? WHERE id = ?').run(OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL, reciboId);
+    const puntoId = db.prepare(
+      `INSERT INTO nuevos_puntos (cuenta_id, valor_total, saldo_pendiente, fecha_registro, observaciones) VALUES (?, 500000, 400000, '2026-08-08', ?)`
+    ).run(cuentaId, OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL).lastInsertRowid;
+    const abonoId = db.prepare(
+      `INSERT INTO nuevo_punto_abonos (nuevo_punto_id, recibo_detalle_id, monto, fecha_abono, observaciones) VALUES (?, ?, 100000, '2026-08-08', ?)`
+    ).run(puntoId, detalleId, OBSERVACION_CUENTA_NUEVA_2026_ORIGINAL).lastInsertRowid;
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(db.prepare('SELECT observaciones FROM cuentas WHERE id = ?').get(cuentaId).observaciones, OBSERVACION_CUENTA_NUEVA_2026);
+    assert.equal(db.prepare('SELECT motivo FROM cuenta_estados WHERE id = ?').get(estadoId).motivo, OBSERVACION_CUENTA_NUEVA_2026);
+    assert.equal(db.prepare('SELECT observaciones FROM recibos WHERE id = ?').get(reciboId).observaciones, OBSERVACION_CUENTA_NUEVA_2026);
+    assert.equal(db.prepare('SELECT observaciones FROM nuevos_puntos WHERE id = ?').get(puntoId).observaciones, OBSERVACION_CUENTA_NUEVA_2026);
+    assert.equal(db.prepare('SELECT observaciones FROM nuevo_punto_abonos WHERE id = ?').get(abonoId).observaciones, OBSERVACION_CUENTA_NUEVA_2026);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: corrección 35 -- idempotente, correr dos veces no vuelve a tocar una observación ya acortada', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    sembrarTodas(db);
+    const cuentaId = sembrarCuenta(db, 'T909');
+    const propietarioId = sembrarPropietario(db);
+    const { reciboId } = sembrarRecibo(db, propietarioId, {
+      numeroRecibo: 9993, cuentaId, fecha: '2026-07-25', valor: 60000,
+      concepto: 'CUOTA DE SOSTENIMIENTO JULIO A DICIEMBRE 2026'
+    });
+    db.prepare('UPDATE recibos SET observaciones = ? WHERE id = ?').run(OBSERVACION_RECIBO_FALTANTE_2026_ORIGINAL, reciboId);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    ejecutarPaso9b({ dbService: ctx.dbService });
+
+    const recibo = db.prepare('SELECT observaciones FROM recibos WHERE id = ?').get(reciboId);
+    assert.equal(recibo.observaciones, OBSERVACION_RECIBO_FALTANTE_2026);
   } finally {
     cerrarDbTemporal(ctx);
   }

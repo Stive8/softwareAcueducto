@@ -44,7 +44,12 @@ class ReciboRepository {
     `;
     const total = this.db.prepare(countQuery).get(...queryParams).total;
 
-    query += ' ORDER BY r.numero_recibo DESC LIMIT ? OFFSET ?';
+    // Por fecha del recibo, no por número: los recibos del talonario físico reconstruidos por el
+    // cruce de correcciones (2026-08-19/20) usan numeración 9xxxx a propósito, para no chocar con
+    // la numeración real -- ordenar por número los ponía siempre de primeros pese a ser, en su
+    // mayoría, recibos viejos. r.id como segundo criterio para un orden estable entre recibos de
+    // la misma fecha.
+    query += ' ORDER BY r.fecha_recibo DESC, r.id DESC LIMIT ? OFFSET ?';
     queryParams.push(limit, offset);
 
     const data = this.db.prepare(query).all(...queryParams);

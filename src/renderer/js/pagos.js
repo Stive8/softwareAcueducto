@@ -374,15 +374,16 @@ const Pagos = {
     `;
   },
 
-  // Cartera (nuevo modelo) -- SOLO LECTURA salvo "Usar" (redimirCredito, conectado 2026-08-10).
+  // Cartera (nuevo modelo) -- SOLO LECTURA salvo "Usar" (redimirCredito, conectado 2026-08-10)
+  // y "Abonar" deuda anterior al corte (registrarAbonoDeudaAnterior, conectado 2026-08-29).
   // La cifra principal ("a pagar") responde solo "¿cuánto paga hoy por su cuota corriente?";
   // deuda anterior al corte y saldo a favor son avisos aparte que NUNCA se suman ni restan de
   // esa cifra (cambio de diseño 2026-08-04, ver CarteraService.getEstadoCartera).
   //
-  // "Abonar" deuda anterior al corte NO se conecta: a diferencia de redimirCredito (reasigna
-  // plata que la cuenta ya tiene guardada), esto sería plata nueva entrando y necesita su
-  // propio flujo de cobro (método de pago, recibo) -- ver README §"Funcionalidad pendiente
-  // conocida". El aviso se deja visible sin botón: informa, no promete una acción que no existe.
+  // "Abonar" deuda anterior al corte SÍ es plata nueva entrando (a diferencia de redimirCredito,
+  // que reasigna plata que la cuenta ya tiene guardada) -- por eso tiene su propio modal con
+  // método de pago y genera su propio recibo (ver showAbonarDeudaAnteriorModal más abajo y
+  // PagoService.registrarAbonoDeudaAnterior), en vez de reutilizar showRegistrarPagoModal.
   //
   // "Abonar" punto de conexión NO se muestra acá: ya existe un botón que hace exactamente eso
   // ("Abonar Conexión", ver renderConexionDetalle más arriba en esta misma pantalla) -- repetirlo
@@ -459,6 +460,7 @@ const Pagos = {
                 background: #fef3c7; border: 1px solid #f59e0b; border-radius: 6px;
                 padding: 10px 12px; margin-bottom: 8px;">
                 <span>⚠ Deuda anterior al corte (2024): <strong>$${this.formatNumber(deudaAntes2024)}</strong></span>
+                <button class="btn btn-warning btn-icon" onclick="App.closeModal(); Pagos.showAbonarDeudaAnteriorModal(${cuentaId}, ${deudaAntes2024})">Abonar</button>
               </div>
             ` : ''}
             ${saldoAFavorUsable > 0 ? `
@@ -672,6 +674,92 @@ const Pagos = {
           App.closeModal();
           this.loadCuentas();
           this.mostrarConfirmacionRecibo(response.data.reciboId, response.data.numeroRecibo, 'Abono de conexión registrado',
+            () => this.showDetalleModal(cuentaId));
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar el abono</div>`;
+      }
+    });
+  },
+
+  // Modal de "Abonar" la deuda anterior al corte (2024) -- ver renderCarteraDetalle. A diferencia
+  // de "Usar saldo a favor" (showRegistrarPagoModal con prefillUsarSaldoFavor), acá entra plata
+  // NUEVA, así que pide método de pago y genera su propio recibo, igual que Abonar Conexión
+  // arriba (mismo patrón). deudaDisponible llega ya calculada desde el botón para no repetir la
+  // llamada a getEstadoCartera solo para mostrar el tope en pantalla.
+  async showAbonarDeudaAnteriorModal(cuentaId, deudaDisponible) {
+    const hoy = new Date().toISOString().split('T')[0];
+
+    const content = `
+      <div class="modal-header"><h2>Abonar Deuda Anterior al Corte (2024)</h2></div>
+
+      <div style="padding: 12px; background: #fef3c7; border-left: 4px solid #f59e0b; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #92400e;">
+          <strong>Deuda Anterior al Corte Pendiente:</strong> $${this.formatNumber(deudaDisponible)}
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="abonoDeudaAnteriorForm">
+        <div class="form-group">
+          <label for="monto_abono_deuda_anterior">Monto del Abono <span style="color: #ef4444;">*</span></label>
+          <div class="input-currency">
+            <span class="currency-symbol">$</span>
+            <input type="text" inputmode="numeric" id="monto_abono_deuda_anterior" name="monto_abono_deuda_anterior" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="fecha_abono_deuda_anterior">Fecha <span style="color: #ef4444;">*</span></label>
+          <input type="date" id="fecha_abono_deuda_anterior" name="fecha_abono_deuda_anterior" value="${hoy}" required>
+        </div>
+
+        <div class="form-group">
+          <label for="metodo_pago_deuda_anterior">Método de Pago <span style="color: #ef4444;">*</span></label>
+          <select id="metodo_pago_deuda_anterior" name="metodo_pago_deuda_anterior" required>
+            <option value="Efectivo">Efectivo</option>
+            <option value="Transferencia">Transferencia</option>
+          </select>
+        </div>
+
+        <div class="form-group">
+          <label for="observaciones_abono_deuda_anterior">Observaciones</label>
+          <textarea id="observaciones_abono_deuda_anterior" name="observaciones_abono_deuda_anterior"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Registrar Abono y Generar Recibo</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+    App.attachMoneyInput(document.getElementById('monto_abono_deuda_anterior'));
+
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('abonoDeudaAnteriorForm'), async () => {
+      const payload = {
+        cuentaId,
+        monto: App.parseMoneyValue(document.getElementById('monto_abono_deuda_anterior').value),
+        fecha: document.getElementById('fecha_abono_deuda_anterior').value,
+        metodoPago: document.getElementById('metodo_pago_deuda_anterior').value,
+        observaciones: document.getElementById('observaciones_abono_deuda_anterior').value.trim(),
+        opId
+      };
+
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.pagos.registrarAbonoDeudaAnterior(payload);
+        if (response.success) {
+          App.closeModal();
+          this.loadCuentas();
+          this.mostrarConfirmacionRecibo(response.data.reciboId, response.data.numeroRecibo, 'Abono a deuda anterior registrado',
             () => this.showDetalleModal(cuentaId));
         } else {
           errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;

@@ -147,7 +147,7 @@ const CANALES_SIN_SESION = new Set([
 // lado del renderer.
 const CANALES_IDEMPOTENTES = new Set([
   'asientos:crearManual', 'gastos:create', 'caja:registrarConsignacion',
-  'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento', 'caja:regularizarSaldos',
+  'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento', 'pagos:registrarAbonoDeudaAnterior', 'caja:regularizarSaldos',
   'caja:registrarRetiro', 'cartera:redimirCredito',
   // Ambos crean un documento financiero real (un cargo de conexión con su valor, o un abono
   // con recibo propio) y no tenían protección -- mismo riesgo de doble clic que el resto de
@@ -1132,6 +1132,14 @@ function setupIpcHandlers() {
   envolverHandle('pagos:registrarPagoSostenimiento', async (event, payload) => {
     try {
       return { success: true, data: pagoService.registrarPagoSostenimiento(payload, sesionActual.id) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
+  envolverHandle('pagos:registrarAbonoDeudaAnterior', async (event, payload) => {
+    try {
+      return { success: true, data: pagoService.registrarAbonoDeudaAnterior(payload, sesionActual.id) };
     } catch (error) {
       return { success: false, error: error.message };
     }
