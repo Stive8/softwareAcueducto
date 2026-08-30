@@ -5,6 +5,11 @@ const Propietarios = {
   search: '',
 
   async load() {
+    // Se reinicia cada vez que se entra al módulo: sin esto, el buscador quedaba visualmente
+    // vacío tras salir y volver a entrar, pero el listado seguía filtrado por la última búsqueda.
+    this.currentPage = 1;
+    this.search = '';
+
     const content = document.getElementById('page-content');
     content.innerHTML = `
       <div class="page-header">
@@ -121,19 +126,14 @@ const Propietarios = {
         </tbody>
       </table>
 
-      <div class="pagination">
-        <div class="pagination-info">
-          Mostrando ${(data.pagination.page - 1) * data.pagination.limit + 1} - 
-          ${Math.min(data.pagination.page * data.pagination.limit, data.pagination.total)} 
-          de ${data.pagination.total} registros
-        </div>
-        <div class="pagination-controls">
-          <button ${data.pagination.page === 1 ? 'disabled' : ''} onclick="Propietarios.changePage(${data.pagination.page - 1})">Anterior</button>
-          <button disabled>${data.pagination.page} / ${data.pagination.totalPages}</button>
-          <button ${data.pagination.page >= data.pagination.totalPages ? 'disabled' : ''} onclick="Propietarios.changePage(${data.pagination.page + 1})">Siguiente</button>
-        </div>
-      </div>
+      ${App.renderPagination(data.pagination, 'Propietarios')}
     `;
+  },
+
+  changeLimit(limit) {
+    this.limit = limit;
+    this.currentPage = 1;
+    this.loadPropietarios();
   },
 
   changePage(page) {

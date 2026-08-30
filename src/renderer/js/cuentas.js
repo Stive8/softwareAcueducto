@@ -7,6 +7,15 @@ const Cuentas = {
   categoria: '',
 
   async load() {
+    // Se reinicia cada vez que se entra al módulo (no solo la primera vez): sin esto, el buscador
+    // y los filtros quedaban visualmente vacíos tras salir y volver a entrar, pero el listado
+    // seguía filtrado por lo último buscado (ej. una cuenta puntual), sin ningún indicio en
+    // pantalla de por qué el listado se veía incompleto.
+    this.currentPage = 1;
+    this.search = '';
+    this.estado = '';
+    this.categoria = '';
+
     const categorias = await this.getCategoriasOptions();
     const content = document.getElementById('page-content');
     content.innerHTML = `
@@ -169,23 +178,18 @@ const Cuentas = {
         </tbody>
       </table>
 
-      <div class="pagination">
-        <div class="pagination-info">
-          Mostrando ${(data.pagination.page - 1) * data.pagination.limit + 1} - 
-          ${Math.min(data.pagination.page * data.pagination.limit, data.pagination.total)} 
-          de ${data.pagination.total} registros
-        </div>
-        <div class="pagination-controls">
-          <button ${data.pagination.page === 1 ? 'disabled' : ''} onclick="Cuentas.changePage(${data.pagination.page - 1})">Anterior</button>
-          <button disabled>${data.pagination.page} / ${data.pagination.totalPages}</button>
-          <button ${data.pagination.page >= data.pagination.totalPages ? 'disabled' : ''} onclick="Cuentas.changePage(${data.pagination.page + 1})">Siguiente</button>
-        </div>
-      </div>
+      ${App.renderPagination(data.pagination, 'Cuentas')}
     `;
   },
 
   changePage(page) {
     this.currentPage = page;
+    this.loadCuentas();
+  },
+
+  changeLimit(limit) {
+    this.limit = limit;
+    this.currentPage = 1;
     this.loadCuentas();
   },
 

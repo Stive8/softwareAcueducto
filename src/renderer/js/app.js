@@ -380,6 +380,54 @@ const App = {
     `).join('');
   },
 
+  // Paginación estándar de las tablas de listado (Cuentas, Recibos, Pagos, Propietarios, Gastos,
+  // Caja): además de Anterior/Siguiente, agrega saltar directo a una página escribiendo el
+  // número, botones Primera/Última y un selector de registros por página -- sin esto, llegar a
+  // la página 100 de un listado de ~2500 registros paginado de a 10 exigía darle clic a
+  // "Siguiente" 99 veces. `moduleName` es el nombre global del módulo (ej. "Recibos"): sus
+  // botones llaman a `${moduleName}.changePage(n)` y `${moduleName}.changeLimit(n)`, que cada
+  // módulo ya expone (o debe exponer) junto a su propio método de recarga del listado.
+  renderPagination(pagination, moduleName, limitOptions = [10, 25, 50, 100]) {
+    const { page, limit, total, totalPages } = pagination;
+    const ultimaPagina = Math.max(totalPages, 1);
+    return `
+      <div class="pagination">
+        <div class="pagination-info">
+          Mostrando ${total === 0 ? 0 : (page - 1) * limit + 1} -
+          ${Math.min(page * limit, total)}
+          de ${total} registros
+        </div>
+        <div class="pagination-controls">
+          <select class="pagination-limit-select" title="Registros por página" onchange="App.cambiarLimitePagina('${moduleName}', this.value)">
+            ${limitOptions.map(n => `<option value="${n}" ${n === limit ? 'selected' : ''}>${n} / página</option>`).join('')}
+          </select>
+          <button ${page === 1 ? 'disabled' : ''} onclick="${moduleName}.changePage(1)" title="Primera página">&laquo;</button>
+          <button ${page === 1 ? 'disabled' : ''} onclick="${moduleName}.changePage(${page - 1})">Anterior</button>
+          <span class="pagination-jump">
+            Página
+            <input type="number" min="1" max="${ultimaPagina}" value="${page}" class="pagination-page-input"
+                   onchange="App.irAPagina(this, '${moduleName}', ${ultimaPagina})">
+            de ${ultimaPagina}
+          </span>
+          <button ${page >= totalPages ? 'disabled' : ''} onclick="${moduleName}.changePage(${page + 1})">Siguiente</button>
+          <button ${page >= totalPages ? 'disabled' : ''} onclick="${moduleName}.changePage(${ultimaPagina})" title="Última página">&raquo;</button>
+        </div>
+      </div>
+    `;
+  },
+
+  irAPagina(input, moduleName, ultimaPagina) {
+    let pagina = parseInt(input.value, 10);
+    if (!Number.isInteger(pagina) || pagina < 1) pagina = 1;
+    if (pagina > ultimaPagina) pagina = ultimaPagina;
+    input.value = pagina;
+    window[moduleName].changePage(pagina);
+  },
+
+  cambiarLimitePagina(moduleName, nuevoLimite) {
+    window[moduleName].changeLimit(parseInt(nuevoLimite, 10));
+  },
+
   // Retrasa la ejecución de fn hasta que pasen `espera` ms sin que se vuelva a llamar: se usa en
   // los buscadores de las tablas para no disparar una consulta por cada tecla presionada.
   debounce(fn, espera = 300) {

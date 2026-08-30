@@ -695,6 +695,32 @@ tr:hover {
   cursor: not-allowed;
 }
 
+.pagination-jump {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+  color: var(--color-secondary);
+}
+
+.pagination-page-input {
+  width: 56px;
+  padding: 5px 6px;
+  border: 1px solid var(--gray-300);
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  text-align: center;
+}
+
+.pagination-limit-select {
+  padding: 6px 8px;
+  border: 1px solid var(--gray-300);
+  background-color: white;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 14px;
+}
+
 /* Modal */
 .modal {
   display: none;

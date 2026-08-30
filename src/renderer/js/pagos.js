@@ -16,6 +16,15 @@ const Pagos = {
   MOSTRAR_COMPARACION_MODELO_VIEJO: false,
 
   async load() {
+    // Se reinicia cada vez que se entra al módulo: sin esto, el buscador y "Solo al día/en
+    // mora/con saldo a favor" quedaban visualmente en su estado por defecto tras salir y volver
+    // a entrar, pero el listado seguía filtrado por lo último elegido. `estado` no se reinicia:
+    // ya refleja correctamente su valor actual en el <select> (ver el `selected` de cada opción
+    // más abajo), así que no hay nada engañoso en dejarlo tal como estaba.
+    this.currentPage = 1;
+    this.search = '';
+    this.filtroPago = '';
+
     const content = document.getElementById('page-content');
     content.innerHTML = `
       <div class="page-header">
@@ -155,23 +164,18 @@ const Pagos = {
         </tbody>
       </table>
 
-      <div class="pagination">
-        <div class="pagination-info">
-          Mostrando ${(data.pagination.page - 1) * data.pagination.limit + 1} -
-          ${Math.min(data.pagination.page * data.pagination.limit, data.pagination.total)}
-          de ${data.pagination.total} registros
-        </div>
-        <div class="pagination-controls">
-          <button ${data.pagination.page === 1 ? 'disabled' : ''} onclick="Pagos.changePage(${data.pagination.page - 1})">Anterior</button>
-          <button disabled>${data.pagination.page} / ${data.pagination.totalPages}</button>
-          <button ${data.pagination.page >= data.pagination.totalPages ? 'disabled' : ''} onclick="Pagos.changePage(${data.pagination.page + 1})">Siguiente</button>
-        </div>
-      </div>
+      ${App.renderPagination(data.pagination, 'Pagos')}
     `;
   },
 
   changePage(page) {
     this.currentPage = page;
+    this.loadCuentas();
+  },
+
+  changeLimit(limit) {
+    this.limit = limit;
+    this.currentPage = 1;
     this.loadCuentas();
   },
 

@@ -13,6 +13,18 @@ const Gastos = {
   // tabInicial: a qué pestaña entrar (la elige el submenú del sidebar al pasar el cursor sobre
   // "Gastos"). Si no se indica, se mantiene en la última que estaba abierta.
   async load(tabInicial = null) {
+    // Se reinicia cada vez que se entra al módulo: sin esto, el buscador y los filtros de
+    // tipo/fecha quedaban visualmente vacíos tras salir y volver a entrar, pero el listado seguía
+    // filtrado por lo último elegido. `tabActual` NO se reinicia a propósito: `load()` está
+    // diseñado para volver a la última pestaña abierta si no se indica una explícita (ver el
+    // comentario junto a la definición del método).
+    this.currentPage = 1;
+    this.search = '';
+    this.tipoGasto = '';
+    this.fechaDesde = '';
+    this.fechaHasta = '';
+    this.proveedoresSearch = '';
+
     const content = document.getElementById('page-content');
 
     content.innerHTML = `
@@ -73,13 +85,13 @@ const Gastos = {
       <div class="table-header">
         <h2>Listado de Gastos</h2>
         <div class="table-controls">
-          <input type="text" id="searchInput" class="search-box" placeholder="Buscar por concepto o proveedor...">
+          <input type="text" id="searchInput" class="search-box" placeholder="Buscar por concepto o proveedor..." value="${App.escapeAttr(this.search)}">
           <select id="tipoFilter" class="filter-select">
-            <option value="">Todos los tipos</option>
-            ${tipos.map(t => `<option value="${t}">${t}</option>`).join('')}
+            <option value="" ${this.tipoGasto === '' ? 'selected' : ''}>Todos los tipos</option>
+            ${tipos.map(t => `<option value="${t}" ${this.tipoGasto === t ? 'selected' : ''}>${t}</option>`).join('')}
           </select>
-          <input type="date" id="fechaDesdeFilter" class="filter-select" title="Desde">
-          <input type="date" id="fechaHastaFilter" class="filter-select" title="Hasta">
+          <input type="date" id="fechaDesdeFilter" class="filter-select" title="Desde" value="${this.fechaDesde}">
+          <input type="date" id="fechaHastaFilter" class="filter-select" title="Hasta" value="${this.fechaHasta}">
           <button class="btn btn-primary" id="btnNuevoGasto">+ Nuevo Gasto</button>
         </div>
       </div>
@@ -202,23 +214,18 @@ const Gastos = {
         </tbody>
       </table>
 
-      <div class="pagination">
-        <div class="pagination-info">
-          Mostrando ${(data.pagination.page - 1) * data.pagination.limit + 1} -
-          ${Math.min(data.pagination.page * data.pagination.limit, data.pagination.total)}
-          de ${data.pagination.total} registros
-        </div>
-        <div class="pagination-controls">
-          <button ${data.pagination.page === 1 ? 'disabled' : ''} onclick="Gastos.changePage(${data.pagination.page - 1})">Anterior</button>
-          <button disabled>${data.pagination.page} / ${data.pagination.totalPages}</button>
-          <button ${data.pagination.page >= data.pagination.totalPages ? 'disabled' : ''} onclick="Gastos.changePage(${data.pagination.page + 1})">Siguiente</button>
-        </div>
-      </div>
+      ${App.renderPagination(data.pagination, 'Gastos')}
     `;
   },
 
   changePage(page) {
     this.currentPage = page;
+    this.loadGastos();
+  },
+
+  changeLimit(limit) {
+    this.limit = limit;
+    this.currentPage = 1;
     this.loadGastos();
   },
 
@@ -775,7 +782,7 @@ const Gastos = {
       <div class="table-header">
         <h2>Catálogo de Proveedores</h2>
         <div class="table-controls">
-          <input type="text" id="proveedoresSearchInput" class="search-box" placeholder="Buscar por nombre o identificación...">
+          <input type="text" id="proveedoresSearchInput" class="search-box" placeholder="Buscar por nombre o identificación..." value="${App.escapeAttr(this.proveedoresSearch)}">
           <button class="btn btn-primary" id="btnNuevoProveedor">+ Nuevo Proveedor</button>
         </div>
       </div>

@@ -8,6 +8,15 @@ const Caja = {
   fechaHasta: '',
 
   async load() {
+    // Se reinicia cada vez que se entra al módulo: sin esto, "Solo Caja/Banco" y el tipo de
+    // movimiento quedaban visualmente en su opción por defecto tras salir y volver a entrar, pero
+    // el listado seguía filtrado por lo último elegido. fechaDesde/fechaHasta NO se reinician a
+    // propósito: su persistencia es intencional (ver el "if (!this.fechaDesde)" más abajo) y su
+    // valor sí queda reflejado en los inputs de fecha, así que no hay nada engañoso en pantalla.
+    this.currentPage = 1;
+    this.cuenta = '';
+    this.tipo = '';
+
     const content = document.getElementById('page-content');
 
     if (!this.fechaDesde) {
@@ -325,23 +334,18 @@ const Caja = {
         </tbody>
       </table>
 
-      <div class="pagination">
-        <div class="pagination-info">
-          Mostrando ${(data.pagination.page - 1) * data.pagination.limit + 1} -
-          ${Math.min(data.pagination.page * data.pagination.limit, data.pagination.total)}
-          de ${data.pagination.total} registros
-        </div>
-        <div class="pagination-controls">
-          <button ${data.pagination.page === 1 ? 'disabled' : ''} onclick="Caja.changePage(${data.pagination.page - 1})">Anterior</button>
-          <button disabled>${data.pagination.page} / ${data.pagination.totalPages}</button>
-          <button ${data.pagination.page >= data.pagination.totalPages ? 'disabled' : ''} onclick="Caja.changePage(${data.pagination.page + 1})">Siguiente</button>
-        </div>
-      </div>
+      ${App.renderPagination(data.pagination, 'Caja')}
     `;
   },
 
   changePage(page) {
     this.currentPage = page;
+    this.loadMovimientos();
+  },
+
+  changeLimit(limit) {
+    this.limit = limit;
+    this.currentPage = 1;
     this.loadMovimientos();
   },
 
