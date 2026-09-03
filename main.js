@@ -10,6 +10,7 @@ const { registrarCarteraHandlers } = require('./src/ipc/carteraHandlers');
 const { registrarRecibosHandlers } = require('./src/ipc/recibosHandlers');
 const { registrarGastosHandlers } = require('./src/ipc/gastosHandlers');
 const { registrarCajaHandlers } = require('./src/ipc/cajaHandlers');
+const { registrarAuthHandlers } = require('./src/ipc/authHandlers');
 
 // Esta es una app de escritorio monousuario sobre un único archivo SQLite
 // (data/acueducto.db). Sin este candado, abrir el ejecutable dos veces crea dos procesos
@@ -278,71 +279,7 @@ function setupIpcHandlers() {
   registrarGastosHandlers({ envolverHandle, gastoService, comprobanteCloudService, getMainWindow: () => mainWindow });
   registrarCajaHandlers({ envolverHandle, cajaService, cajaMenorService });
 
-  // Autenticación
-  envolverHandle('auth:login', async (event, usuario, password) => {
-    try {
-      return { success: true, data: authService.login(usuario, password) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('auth:cambiarPassword', async (event, usuarioId, passwordActual, passwordNueva) => {
-    try {
-      authService.cambiarPassword(usuarioId, passwordActual, passwordNueva);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('auth:logout', async () => {
-    return { success: true };
-  });
-
-  // Gestión de usuarios (solo Administrador, ver CANALES_SOLO_ADMIN)
-  envolverHandle('usuarios:getAll', async () => {
-    try {
-      return { success: true, data: authService.getAll() };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('usuarios:crear', async (event, datos) => {
-    try {
-      return { success: true, data: { id: authService.crearUsuario(datos) } };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('usuarios:toggleActivo', async (event, id, activo) => {
-    try {
-      authService.toggleActivoUsuario(id, activo, sesionActual?.id);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('usuarios:resetearPassword', async (event, id, passwordNueva) => {
-    try {
-      authService.resetearPassword(id, passwordNueva);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Auditoría (solo lectura, pero restringida a Administrador en CANALES_SOLO_ADMIN)
-  envolverHandle('auditoria:getAll', async (event, params) => {
-    try {
-      return { success: true, data: auditoriaService.getAll(params) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
+  registrarAuthHandlers({ envolverHandle, authService, auditoriaService });
 
   // Configuración
   envolverHandle('config:getAll', async () => {
