@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, Menu, shell } = require('electron');
+const { app, BrowserWindow, dialog, Menu, shell } = require('electron');
 const { crearEnvolverHandle } = require('./src/ipc/envolverHandle');
 const { getSesionActual, setSesionActual, limpiarSesionActual } = require('./src/ipc/sesion');
 const { registrarDashboardHandlers } = require('./src/ipc/dashboardHandlers');
@@ -266,7 +266,6 @@ app.on('activate', () => {
 }
 
 function setupIpcHandlers() {
-  const sesionActual = getSesionActual(); // TEMPORAL: se retira en la Task final cuando cada handler pase a leer getSesionActual() directamente
   const envolverHandle = crearEnvolverHandle({ auditoriaService });
 
   // Register dashboard handlers
