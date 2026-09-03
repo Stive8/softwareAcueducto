@@ -284,7 +284,7 @@ function setupIpcHandlers() {
   ...
 ```
 
-This keeps every existing handler body working unmodified (they read the local `const sesionActual` snapshot) **except** that this snapshot is now stale after a login/logout occurs while the app is running — which is fine as a transient state for this one task, because `setupIpcHandlers()` is a one-time synchronous call at startup: by the time any handler body actually executes, `sesionActual` may have changed if the user logged out and a different user logged in without restarting the app. **This is only safe as a same-task stepping stone; Task 18 removes this line and fixes every handler body to call `getSesionActual()` live, which is required for correctness before this plan is considered done.** Flag this clearly in the commit message so it isn't mistaken for the final state.
+This keeps every existing handler body working unmodified (they read the local `const sesionActual` snapshot) **except** that this snapshot is now stale after a login/logout occurs while the app is running — which is fine as a transient state for this one task, because `setupIpcHandlers()` is a one-time synchronous call at startup: by the time any handler body actually executes, `sesionActual` may have changed if the user logged out and a different user logged in without restarting the app. **This is only safe as a same-task stepping stone; Task 17 removes this line and fixes every handler body to call `getSesionActual()` live, which is required for correctness before this plan is considered done.** Flag this clearly in the commit message so it isn't mistaken for the final state.
 
 - [ ] **Step 4: Verify and commit**
 
