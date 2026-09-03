@@ -13,6 +13,7 @@ const { registrarCajaHandlers } = require('./src/ipc/cajaHandlers');
 const { registrarAuthHandlers } = require('./src/ipc/authHandlers');
 const { registrarConfigHandlers } = require('./src/ipc/configHandlers');
 const { registrarCloudBackupHandlers } = require('./src/ipc/cloudBackupHandlers');
+const { registrarNuevosPuntosHandlers } = require('./src/ipc/nuevosPuntosHandlers');
 
 // Esta es una app de escritorio monousuario sobre un único archivo SQLite
 // (data/acueducto.db). Sin este candado, abrir el ejecutable dos veces crea dos procesos
@@ -327,58 +328,7 @@ function setupIpcHandlers() {
     getMainWindow: () => mainWindow, restaurarBaseDeDatosDesde
   });
 
-  // Nuevos Puntos
-  envolverHandle('nuevospuntos:getAll', async (event, params) => {
-    try {
-      return { success: true, data: nuevoPuntoService.getAll(params) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('nuevospuntos:getById', async (event, id) => {
-    try {
-      const punto = nuevoPuntoService.getById(id);
-      if (!punto) return { success: false, error: 'Punto nuevo no encontrado' };
-      return { success: true, data: punto };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('nuevospuntos:getByCuentaId', async (event, cuentaId) => {
-    try {
-      return { success: true, data: nuevoPuntoService.getByCuentaId(cuentaId) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('nuevospuntos:create', async (event, datos) => {
-    try {
-      const id = nuevoPuntoService.create(datos);
-      return { success: true, data: { id } };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('nuevospuntos:registrarAbono', async (event, payload) => {
-    try {
-      return { success: true, data: nuevoPuntoService.registrarAbono(payload, sesionActual.id) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('nuevospuntos:cancelar', async (event, id, motivo) => {
-    try {
-      nuevoPuntoService.cancelar(id, motivo);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
+  registrarNuevosPuntosHandlers({ envolverHandle, nuevoPuntoService });
 
   // Reportes
   // Lectura genérica para mostrar el listado en pantalla antes de exportar (botón "Buscar"),
