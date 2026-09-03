@@ -9,6 +9,7 @@ const { registrarPagosHandlers } = require('./src/ipc/pagosHandlers');
 const { registrarCarteraHandlers } = require('./src/ipc/carteraHandlers');
 const { registrarRecibosHandlers } = require('./src/ipc/recibosHandlers');
 const { registrarGastosHandlers } = require('./src/ipc/gastosHandlers');
+const { registrarCajaHandlers } = require('./src/ipc/cajaHandlers');
 
 // Esta es una app de escritorio monousuario sobre un único archivo SQLite
 // (data/acueducto.db). Sin este candado, abrir el ejecutable dos veces crea dos procesos
@@ -275,93 +276,7 @@ function setupIpcHandlers() {
   registrarCarteraHandlers({ envolverHandle, carteraService });
   registrarRecibosHandlers({ envolverHandle, reciboService, getMainWindow: () => mainWindow });
   registrarGastosHandlers({ envolverHandle, gastoService, comprobanteCloudService, getMainWindow: () => mainWindow });
-
-  // Caja y Bancos
-  envolverHandle('caja:getSaldos', async () => {
-    try {
-      return { success: true, data: cajaService.getSaldos() };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('caja:getMovimientos', async (event, params) => {
-    try {
-      return { success: true, data: cajaService.getMovimientos(params) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('caja:registrarConsignacion', async (event, payload) => {
-    try {
-      cajaService.registrarConsignacion(payload, sesionActual.id);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('caja:registrarRetiro', async (event, payload) => {
-    try {
-      cajaService.registrarRetiro(payload, sesionActual.id);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('caja:regularizarSaldos', async (event, payload) => {
-    try {
-      const resultado = cajaService.regularizarSaldos({ ...payload, usuarioId: sesionActual.id });
-      return { success: true, data: resultado };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('caja:getResumenPeriodo', async (event, fechaDesde, fechaHasta) => {
-    try {
-      return { success: true, data: cajaService.getResumenPeriodo(fechaDesde, fechaHasta) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  // Caja Menor
-  envolverHandle('cajaMenor:getEstado', async () => {
-    try {
-      return { success: true, data: cajaMenorService.getEstado() };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('cajaMenor:getHistorialResponsables', async () => {
-    try {
-      return { success: true, data: cajaMenorService.getHistorialResponsables() };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('cajaMenor:asignarResponsable', async (event, terceroId, fechaInicio, observaciones) => {
-    try {
-      cajaMenorService.asignarResponsable(terceroId, fechaInicio, observaciones);
-      return { success: true };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('cajaMenor:reembolsar', async (event, payload) => {
-    try {
-      const id = cajaMenorService.reembolsar({ ...payload, usuarioId: sesionActual.id });
-      return { success: true, data: { id } };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
+  registrarCajaHandlers({ envolverHandle, cajaService, cajaMenorService });
 
   // Autenticación
   envolverHandle('auth:login', async (event, usuario, password) => {
