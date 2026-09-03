@@ -5,6 +5,7 @@ const { registrarDashboardHandlers } = require('./src/ipc/dashboardHandlers');
 const { registrarCuentasHandlers } = require('./src/ipc/cuentasHandlers');
 const { registrarContabilidadConfigHandlers } = require('./src/ipc/contabilidadConfigHandlers');
 const { registrarAsientosHandlers } = require('./src/ipc/asientosHandlers');
+const { registrarPagosHandlers } = require('./src/ipc/pagosHandlers');
 
 // Esta es una app de escritorio monousuario sobre un único archivo SQLite
 // (data/acueducto.db). Sin este candado, abrir el ejecutable dos veces crea dos procesos
@@ -267,55 +268,7 @@ function setupIpcHandlers() {
     impuestoService, motorContabilizacionService
   });
   registrarAsientosHandlers({ envolverHandle, asientoContableService, getMainWindow: () => mainWindow });
-
-  // Pagos
-  envolverHandle('pagos:getCuentasConEstado', async (event, params) => {
-    try {
-      return { success: true, data: pagoService.getCuentasConEstado(params) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('pagos:getEstadoCuenta', async (event, cuentaId) => {
-    try {
-      return { success: true, data: pagoService.getEstadoCuenta(cuentaId) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('pagos:simularPago', async (event, cuentaId, anioInicio, mesInicio, cantidadMeses, usarSaldoAFavor) => {
-    try {
-      return { success: true, data: pagoService.simularPago(cuentaId, anioInicio, mesInicio, cantidadMeses, usarSaldoAFavor) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('pagos:registrarPagoSostenimiento', async (event, payload) => {
-    try {
-      return { success: true, data: pagoService.registrarPagoSostenimiento(payload, sesionActual.id) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('pagos:registrarAbonoDeudaAnterior', async (event, payload) => {
-    try {
-      return { success: true, data: pagoService.registrarAbonoDeudaAnterior(payload, sesionActual.id) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('pagos:getHistorialPagos', async (event, cuentaId) => {
-    try {
-      return { success: true, data: pagoService.getHistorialPagos(cuentaId) };
-    } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
+  registrarPagosHandlers({ envolverHandle, pagoService, cuentaService, getMainWindow: () => mainWindow });
 
   // Cartera (nuevo modelo) -- solo lectura. Ver PUNTOS-CONFLICTIVOS.md: el sistema activo de
   // cobro sigue siendo pagos:*; estos canales solo muestran el modelo nuevo en paralelo para
@@ -506,63 +459,6 @@ function setupIpcHandlers() {
     try {
       return { success: true, data: reciboService.getAnuladosFisicos() };
     } catch (error) {
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('pagos:imprimirEstadoCuenta', async (event, cuentaId) => {
-    let ventanaImpresion;
-    try {
-      const html = pagoService.generarHTMLEstadoCuenta(cuentaId);
-      ventanaImpresion = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
-      await ventanaImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-
-      return await new Promise((resolve) => {
-        ventanaImpresion.webContents.print({ silent: false }, (success, errorType) => {
-          ventanaImpresion.close();
-          if (mainWindow) mainWindow.focus();
-          if (success) {
-            resolve({ success: true });
-          } else {
-            resolve({ success: false, error: errorType || 'No se pudo imprimir el estado de cuenta' });
-          }
-        });
-      });
-    } catch (error) {
-      if (ventanaImpresion) ventanaImpresion.close();
-      return { success: false, error: error.message };
-    }
-  });
-
-  envolverHandle('pagos:exportarEstadoCuentaPDF', async (event, cuentaId) => {
-    let ventanaImpresion;
-    try {
-      const cuenta = cuentaService.getById(cuentaId);
-      if (!cuenta) {
-        return { success: false, error: 'Cuenta no encontrada' };
-      }
-
-      const { canceled, filePath } = await dialog.showSaveDialog(mainWindow, {
-        title: 'Guardar Estado de Cuenta como PDF',
-        defaultPath: `Estado_Cuenta_${cuenta.codigo}.pdf`,
-        filters: [{ name: 'PDF', extensions: ['pdf'] }]
-      });
-
-      if (canceled || !filePath) {
-        return { success: false, canceled: true };
-      }
-
-      const html = pagoService.generarHTMLEstadoCuenta(cuentaId);
-      ventanaImpresion = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
-      await ventanaImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
-
-      const pdfBuffer = await ventanaImpresion.webContents.printToPDF({});
-      fs.writeFileSync(filePath, pdfBuffer);
-      ventanaImpresion.close();
-      if (mainWindow) mainWindow.focus();
-      return { success: true, filePath };
-    } catch (error) {
-      if (ventanaImpresion) ventanaImpresion.close();
       return { success: false, error: error.message };
     }
   });
