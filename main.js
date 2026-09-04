@@ -1,6 +1,5 @@
-const { app, BrowserWindow, dialog, Menu, shell } = require('electron');
+const { app, BrowserWindow, dialog, Menu } = require('electron');
 const { crearEnvolverHandle } = require('./src/ipc/envolverHandle');
-const { getSesionActual, setSesionActual, limpiarSesionActual } = require('./src/ipc/sesion');
 const { registrarDashboardHandlers } = require('./src/ipc/dashboardHandlers');
 const { registrarCuentasHandlers } = require('./src/ipc/cuentasHandlers');
 const { registrarContabilidadConfigHandlers } = require('./src/ipc/contabilidadConfigHandlers');
@@ -265,6 +264,40 @@ app.on('activate', () => {
 });
 }
 
+// Reemplaza el .db actual por origenPath de forma segura, para los tres caminos de
+// restauración (manual, "actualizar desde la nube", y la actualización silenciosa de
+// Consulta). Dos protecciones, en este orden:
+//  1. Respalda el .db actual en rutaBackupPrevio ANTES de tocar nada -- si el archivo
+//     elegido resulta ser el equivocado, o la restauración se corta a mitad de camino, los
+//     datos de producción actuales quedan recuperables.
+//  2. Copia el archivo nuevo a un temporal junto al destino y recién entonces lo renombra
+//     sobre el .db real, en vez de copiar directo encima: un fallo a mitad de la copia (disco
+//     lleno, antivirus, corte de luz) deja el .db original intacto, nunca uno truncado.
+// rutaBackupPrevio se recibe ya calculada cuando el caller necesita mostrarla en un diálogo
+// de confirmación antes de ejecutar esto; si no se pasa, se calcula aquí mismo.
+//
+// Vive en main.js (en vez de src/ipc/configHandlers.js, aunque backup:restaurar es quien más
+// la usa) porque también la comparte aplicarRespaldoDescargado(), definida en
+// src/ipc/cloudBackupHandlers.js, que la recibe inyectada como dependencia.
+async function restaurarBaseDeDatosDesde(origenPath, rutaBackupPrevio) {
+  const destinoBackup = rutaBackupPrevio || backupService.rutaBackupPreRestauracion();
+  await backupService.crearBackup(destinoBackup);
+
+  const dbPath = dbService.getDbPath();
+  dbService.close();
+
+  const rutaTemporal = `${dbPath}.tmp-restore`;
+  fs.copyFileSync(origenPath, rutaTemporal);
+  fs.renameSync(rutaTemporal, dbPath);
+
+  for (const ext of ['-wal', '-shm']) {
+    const residual = dbPath + ext;
+    if (fs.existsSync(residual)) fs.unlinkSync(residual);
+  }
+
+  return destinoBackup;
+}
+
 function setupIpcHandlers() {
   const envolverHandle = crearEnvolverHandle({ auditoriaService });
 
@@ -284,40 +317,6 @@ function setupIpcHandlers() {
   registrarCajaHandlers({ envolverHandle, cajaService, cajaMenorService });
 
   registrarAuthHandlers({ envolverHandle, authService, auditoriaService });
-
-  // Reemplaza el .db actual por origenPath de forma segura, para los tres caminos de
-  // restauración (manual, "actualizar desde la nube", y la actualización silenciosa de
-  // Consulta). Dos protecciones, en este orden:
-  //  1. Respalda el .db actual en rutaBackupPrevio ANTES de tocar nada -- si el archivo
-  //     elegido resulta ser el equivocado, o la restauración se corta a mitad de camino, los
-  //     datos de producción actuales quedan recuperables.
-  //  2. Copia el archivo nuevo a un temporal junto al destino y recién entonces lo renombra
-  //     sobre el .db real, en vez de copiar directo encima: un fallo a mitad de la copia (disco
-  //     lleno, antivirus, corte de luz) deja el .db original intacto, nunca uno truncado.
-  // rutaBackupPrevio se recibe ya calculada cuando el caller necesita mostrarla en un diálogo
-  // de confirmación antes de ejecutar esto; si no se pasa, se calcula aquí mismo.
-  //
-  // Vive en main.js (en vez de src/ipc/configHandlers.js, aunque backup:restaurar es quien más
-  // la usa) porque también la comparte aplicarRespaldoDescargado(), definida en
-  // src/ipc/cloudBackupHandlers.js, que la recibe inyectada como dependencia.
-  async function restaurarBaseDeDatosDesde(origenPath, rutaBackupPrevio) {
-    const destinoBackup = rutaBackupPrevio || backupService.rutaBackupPreRestauracion();
-    await backupService.crearBackup(destinoBackup);
-
-    const dbPath = dbService.getDbPath();
-    dbService.close();
-
-    const rutaTemporal = `${dbPath}.tmp-restore`;
-    fs.copyFileSync(origenPath, rutaTemporal);
-    fs.renameSync(rutaTemporal, dbPath);
-
-    for (const ext of ['-wal', '-shm']) {
-      const residual = dbPath + ext;
-      if (fs.existsSync(residual)) fs.unlinkSync(residual);
-    }
-
-    return destinoBackup;
-  }
 
   registrarConfigHandlers({
     envolverHandle, configuracionService, backupService, dbService,
