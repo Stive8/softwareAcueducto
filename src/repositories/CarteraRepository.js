@@ -216,6 +216,101 @@ class CarteraRepository {
       SELECT * FROM cuenta_creditos WHERE cuenta_id = ? ORDER BY fecha ASC, id ASC
     `).all(cuentaId);
   }
+
+  // --- Versiones "por lotes" de getSaldos/getCargosConCobertura/getSaldoCreditoDisponible ---
+  //
+  // Para listar cuentas con su estado de mora (cuentas:getStats, pagos:getCuentasConEstado) hacía
+  // falta el mismo dato que estos tres métodos ya calculan, pero UNA VEZ POR CUENTA -- con ~300
+  // cuentas activas eso eran ~900 consultas solo para esta parte. Las versiones _Bulk hacen
+  // exactamente la misma cuenta (misma agregación, mismo SQL) pero agrupada por cuenta_id en un
+  // puñado de consultas, para que CarteraService.getIndicadoresMoraTodas se las reparta después en
+  // memoria. Se parte en bloques de ${CarteraRepository.TAMANO_LOTE} ids porque SQLite tiene un
+  // límite de variables por consulta (SQLITE_LIMIT_VARIABLE_NUMBER, 999 por defecto).
+  static get TAMANO_LOTE() {
+    return 500;
+  }
+
+  static _enLotes(cuentaIds) {
+    const lotes = [];
+    for (let i = 0; i < cuentaIds.length; i += CarteraRepository.TAMANO_LOTE) {
+      lotes.push(cuentaIds.slice(i, i + CarteraRepository.TAMANO_LOTE));
+    }
+    return lotes;
+  }
+
+  getSaldosBulk(cuentaIds) {
+    const mapa = new Map();
+    if (cuentaIds.length === 0) return mapa;
+
+    const tipos = CarteraRepository.TIPOS_CARGO.map(t => `'${t}'`).join(', ');
+    for (const lote of CarteraRepository._enLotes(cuentaIds)) {
+      const placeholders = lote.map(() => '?').join(', ');
+      const filas = this.db.prepare(`
+        SELECT
+          m.cuenta_id AS cuenta_id,
+          COALESCE(SUM(CASE WHEN m.exigible = 1 THEN m.monto - COALESCE(imp.cubierto, 0) ELSE 0 END), 0) AS deuda_exigible,
+          COALESCE(SUM(CASE WHEN m.exigible = 0 THEN m.monto - COALESCE(imp.cubierto, 0) ELSE 0 END), 0) AS saldo_opaco
+        FROM cartera_movimientos m
+        LEFT JOIN (
+          SELECT cargo_id, SUM(monto) AS cubierto FROM cartera_imputaciones GROUP BY cargo_id
+        ) imp ON imp.cargo_id = m.id
+        WHERE m.cuenta_id IN (${placeholders}) AND m.tipo IN (${tipos})
+        GROUP BY m.cuenta_id
+      `).all(...lote);
+
+      for (const f of filas) {
+        mapa.set(f.cuenta_id, { deudaExigible: redondear(f.deuda_exigible), saldoOpaco: redondear(f.saldo_opaco) });
+      }
+    }
+    return mapa;
+  }
+
+  getCargosConCoberturaBulk(cuentaIds, exigible) {
+    const mapa = new Map();
+    if (cuentaIds.length === 0) return mapa;
+
+    const tipos = CarteraRepository.TIPOS_CARGO.map(t => `'${t}'`).join(', ');
+    for (const lote of CarteraRepository._enLotes(cuentaIds)) {
+      const placeholders = lote.map(() => '?').join(', ');
+      const filas = this.db.prepare(`
+        SELECT m.cuenta_id AS cuenta_id, m.anio, m.mes,
+          SUM(m.monto) AS monto,
+          COALESCE(SUM((SELECT SUM(i.monto) FROM cartera_imputaciones i WHERE i.cargo_id = m.id)), 0) AS cubierto
+        FROM cartera_movimientos m
+        WHERE m.cuenta_id IN (${placeholders}) AND m.exigible = ? AND m.tipo IN (${tipos})
+          AND m.anio IS NOT NULL AND m.mes IS NOT NULL
+        GROUP BY m.cuenta_id, m.anio, m.mes
+        ORDER BY m.cuenta_id ASC, m.anio ASC, m.mes ASC
+      `).all(...lote, exigible);
+
+      for (const f of filas) {
+        if (!mapa.has(f.cuenta_id)) mapa.set(f.cuenta_id, []);
+        mapa.get(f.cuenta_id).push({ anio: f.anio, mes: f.mes, monto: redondear(f.monto), cubierto: redondear(f.cubierto) });
+      }
+    }
+    return mapa;
+  }
+
+  getSaldoCreditoDisponibleBulk(cuentaIds) {
+    const mapa = new Map();
+    if (cuentaIds.length === 0) return mapa;
+
+    for (const lote of CarteraRepository._enLotes(cuentaIds)) {
+      const placeholders = lote.map(() => '?').join(', ');
+      const filas = this.db.prepare(`
+        SELECT cuenta_id,
+          COALESCE(SUM(CASE WHEN tipo = 'Abono' THEN monto ELSE -monto END), 0) AS saldo
+        FROM cuenta_creditos
+        WHERE cuenta_id IN (${placeholders})
+        GROUP BY cuenta_id
+      `).all(...lote);
+
+      for (const f of filas) {
+        mapa.set(f.cuenta_id, redondear(f.saldo));
+      }
+    }
+    return mapa;
+  }
 }
 
 module.exports = CarteraRepository;

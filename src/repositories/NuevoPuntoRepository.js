@@ -65,6 +65,31 @@ class NuevoPuntoRepository {
     `).all(cuentaId);
   }
 
+  // Misma consulta que findByCuentaId, pero para varias cuentas de una sola vez -- lo usa
+  // CarteraService.getIndicadoresMoraTodas para no disparar un findByCuentaId por cuenta al
+  // listar el estado de mora de todas las cuentas (ver CarteraRepository, sección "por lotes").
+  findByCuentaIdsBulk(cuentaIds) {
+    const mapa = new Map();
+    if (cuentaIds.length === 0) return mapa;
+
+    const TAMANO_LOTE = 500;
+    for (let i = 0; i < cuentaIds.length; i += TAMANO_LOTE) {
+      const lote = cuentaIds.slice(i, i + TAMANO_LOTE);
+      const placeholders = lote.map(() => '?').join(', ');
+      const filas = this.db.prepare(`
+        SELECT * FROM nuevos_puntos
+        WHERE cuenta_id IN (${placeholders})
+        ORDER BY cuenta_id ASC, fecha_registro DESC, id DESC
+      `).all(...lote);
+
+      for (const f of filas) {
+        if (!mapa.has(f.cuenta_id)) mapa.set(f.cuenta_id, []);
+        mapa.get(f.cuenta_id).push(f);
+      }
+    }
+    return mapa;
+  }
+
   getAbonos(nuevoPuntoId) {
     return this.db.prepare(`
       SELECT npa.*, r.numero_recibo
