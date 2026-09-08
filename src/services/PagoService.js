@@ -287,7 +287,12 @@ class PagoService {
   // consumiendo un crédito que quizás quería guardar. Mismo criterio que ya rige la pantalla de
   // cartera nueva (avisos aparte, nada se aplica sin decisión explícita, ver CarteraService.js) --
   // acá faltaba aplicarlo. Aplicar el crédito ahora es un acto explícito (usarSaldoAFavor: true).
-  registrarPagoSostenimiento({ cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones, usarSaldoAFavor = false, nuevoPuntoId = null, abonoConexion = 0 }, usuarioId = null) {
+  // abonoDeudaAnterior (opcional, mismo patrón que abonoConexion): permite abonar la deuda
+  // anterior al corte (2024) en el MISMO recibo que los meses corrientes -- caso real: una
+  // colilla física que paga de una vez deuda vieja y meses nuevos. Sin esto, había que partirla
+  // en dos recibos (este método + registrarAbonoDeudaAnterior por separado) para reflejar lo
+  // mismo que la colilla paga junta.
+  registrarPagoSostenimiento({ cuentaId, anioInicio, mesInicio, cantidadMeses, fechaPago, metodoPago, observaciones, usarSaldoAFavor = false, nuevoPuntoId = null, abonoConexion = 0, abonoDeudaAnterior = 0 }, usuarioId = null) {
     this.validarDatosComunes({ cuentaId, fechaPago, metodoPago });
     if (!anioInicio || !mesInicio) throw new Error('El período inicial es obligatorio');
     if (!cantidadMeses || cantidadMeses < 1) throw new Error('La cantidad de meses debe ser al menos 1');
@@ -306,12 +311,22 @@ class PagoService {
       }
     }
 
+    if (abonoDeudaAnterior > 0) {
+      const { deudaAntes2024 } = this.carteraService.getEstadoCartera(cuentaId);
+      if (deudaAntes2024 <= 0) throw new Error('Esta cuenta no tiene deuda anterior al corte (2024) pendiente');
+      if (abonoDeudaAnterior > deudaAntes2024) {
+        throw new Error(
+          `El abono a deuda anterior ($${abonoDeudaAnterior}) no puede exceder la deuda anterior al corte disponible ($${deudaAntes2024})`
+        );
+      }
+    }
+
     const propietario = this.obtenerPropietarioVigente(cuentaId);
     const periodos = this.construirPeriodos(cuentaId, anioInicio, mesInicio, cantidadMeses);
     const subtotal = periodos.reduce((sum, p) => sum + p.valor, 0);
     const saldoDisponible = usarSaldoAFavor ? this.repository.getSaldoCredito(cuentaId) : 0;
     const creditoAplicado = Math.min(saldoDisponible, subtotal);
-    const totalACobrar = subtotal - creditoAplicado + abonoConexion;
+    const totalACobrar = subtotal - creditoAplicado + abonoConexion + abonoDeudaAnterior;
 
     return this.repository.transaccion(() => {
       const numeroRecibo = this.repository.getConsecutivoRecibo();
@@ -399,7 +414,7 @@ class PagoService {
         );
       }
 
-      const montoEfectivoSostenimiento = redondear(totalACobrar - abonoConexion);
+      const montoEfectivoSostenimiento = redondear(totalACobrar - abonoConexion - abonoDeudaAnterior);
       if (montoEfectivoSostenimiento > 0) {
         const resultadoAbono = this.carteraService.registrarAbono({
           cuentaId, fecha: fechaPago, monto: montoEfectivoSostenimiento,
@@ -458,12 +473,37 @@ class PagoService {
         estadoConexion = this.nuevoPuntoRepository.actualizarSaldoYEstado(nuevoPuntoId);
       }
 
+      if (abonoDeudaAnterior > 0) {
+        const detalleDeudaAnteriorId = this.repository.crearReciboDetalle({
+          reciboId,
+          concepto: 'Abono a deuda anterior al corte (2024)',
+          valor: abonoDeudaAnterior,
+          tipoConceptoContable: 'AbonoDeudaAnterior'
+        });
+        const resultadoAbonoAnterior = this.carteraService.registrarAbono({
+          cuentaId, fecha: fechaPago, monto: abonoDeudaAnterior, modo: MODOS.ABONO_SALDO_OPACO,
+          reciboDetalleId: detalleDeudaAnteriorId, observaciones, usuarioId
+        });
+        // Mismo criterio que con la porción de sostenimiento y de saldo a favor (arriba): no
+        // dejar pasar en silencio un sobrante que delataría un desacuerdo con deudaAntes2024.
+        if (esMayor(resultadoAbonoAnterior.sobrante, 0)) {
+          throw new Error(
+            'El motor de cartera no pudo imputar completo el abono a deuda anterior al corte: ' +
+            `sobraron $${resultadoAbonoAnterior.sobrante} sin poder aplicarse`
+          );
+        }
+      }
+
       if (totalACobrar > 0) {
+        const extras = [];
+        if (abonoConexion > 0) extras.push('Abono Conexión');
+        if (abonoDeudaAnterior > 0) extras.push('Abono Deuda Anterior');
+
         this.repository.crearMovimiento({
           tipo: 'Ingreso',
           origen: metodoPago === 'Efectivo' ? 'Caja' : 'Banco',
           monto: totalACobrar,
-          concepto: `Recibo No. ${numeroRecibo} - Sostenimiento${abonoConexion > 0 ? ' + Abono Conexión' : ''}`,
+          concepto: `Recibo No. ${numeroRecibo} - Sostenimiento${extras.length ? ' + ' + extras.join(' + ') : ''}`,
           referenciaId: reciboId,
           referenciaTipo: 'Recibo',
           fechaMovimiento: fechaPago

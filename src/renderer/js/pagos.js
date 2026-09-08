@@ -478,6 +478,13 @@ const Pagos = {
           </div>
         ` : ''}
 
+        ${deudaAntes2024 === 0 ? `
+          <p style="margin: 0 0 16px 0;">
+            <a href="#" onclick="App.closeModal(); Pagos.showAgregarDeudaAperturaModal(${cuentaId}); return false;"
+              style="font-size: 0.8125rem; color: #64748b;">+ Agregar deuda anterior al corte (2024)</a>
+          </p>
+        ` : ''}
+
         ${this.MOSTRAR_COMPARACION_MODELO_VIEJO ? `
         <details style="margin-bottom: 16px;">
           <summary style="cursor: pointer; color: #64748b; font-size: 0.8125rem;">Ver los 4 buckets internos (comparación con el sistema actual)</summary>
@@ -775,6 +782,80 @@ const Pagos = {
     });
   },
 
+  // Modal de "Agregar deuda anterior al corte" (ver renderCarteraDetalle) -- para una cuenta
+  // preexistente que se da de alta en el sistema DESPUÉS de la migración inicial de cartera
+  // (la única vez que esto se cargó hasta ahora) y que en realidad debía dinero de antes de
+  // 2024. A diferencia de "Abonar" (arriba), acá no entra plata: es declarar el saldo, así que
+  // no pide método de pago ni genera recibo -- mismo criterio que "Agregar Cargo de Conexión".
+  // Solo Administrador (ver CANALES_SOLO_ADMIN): declara una cifra sin respaldo de cargos mes a
+  // mes, y solo puede hacerse una vez por cuenta (cartera:agregarDeudaApertura la rechaza si ya
+  // existe una).
+  async showAgregarDeudaAperturaModal(cuentaId) {
+    const content = `
+      <div class="modal-header"><h2>Agregar Deuda Anterior al Corte (2024)</h2></div>
+
+      <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
+        <p style="margin: 0; font-size: 0.875rem; color: #1e3a8a;">
+          Úsalo solo para una cuenta preexistente que ya debía dinero de antes de 2024 y nunca se le registró esa deuda
+          (por ejemplo, una cuenta que se está dando de alta ahora pero paga desde años atrás). Los meses desde 2024 en
+          adelante se cobran como un aporte normal -- esto es solo para el saldo consolidado anterior.
+        </p>
+      </div>
+
+      <div id="formError"></div>
+
+      <form id="deudaAperturaForm">
+        <div class="form-group">
+          <label for="monto_deuda_apertura">Monto total adeudado antes de 2024 <span style="color: #ef4444;">*</span></label>
+          <div class="input-currency">
+            <span class="currency-symbol">$</span>
+            <input type="text" inputmode="numeric" id="monto_deuda_apertura" name="monto_deuda_apertura" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="observaciones_deuda_apertura">Observaciones</label>
+          <textarea id="observaciones_deuda_apertura" name="observaciones_deuda_apertura" placeholder="Ej: cuenta preexistente, deuda 2022-2023"></textarea>
+        </div>
+
+        <div class="form-actions">
+          <button type="button" class="btn btn-secondary" onclick="App.closeModal()">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Registrar Deuda Anterior</button>
+        </div>
+      </form>
+    `;
+
+    App.openModal(content);
+    App.attachMoneyInput(document.getElementById('monto_deuda_apertura'));
+
+    const opId = crypto.randomUUID();
+    App.protegerEnvioDoble(document.getElementById('deudaAperturaForm'), async () => {
+      const payload = {
+        cuentaId,
+        monto: App.parseMoneyValue(document.getElementById('monto_deuda_apertura').value),
+        observaciones: document.getElementById('observaciones_deuda_apertura').value.trim() || null,
+        opId
+      };
+
+      const errorDiv = document.getElementById('formError');
+
+      try {
+        const response = await window.api.cartera.agregarDeudaApertura(payload);
+        if (response.success) {
+          App.closeModal();
+          this.loadCuentas();
+          App.toast('Deuda anterior al corte registrada con éxito');
+          this.showDetalleModal(cuentaId);
+        } else {
+          errorDiv.innerHTML = `<div class="error-message">${response.error}</div>`;
+        }
+      } catch (error) {
+        console.error('Error:', error);
+        errorDiv.innerHTML = `<div class="error-message">Error al registrar la deuda anterior</div>`;
+      }
+    });
+  },
+
   // El botón "Usar saldo a favor" (ver renderCarteraDetalle) abre showRegistrarPagoModal con la
   // casilla "usar saldo a favor" premarcada, en vez de un modal aparte de redención FIFO ciega:
   // ese modal ya declara un período explícito (anioInicio/mesInicio/cantidadMeses) y ya usa
@@ -916,6 +997,20 @@ const Pagos = {
           </div>
         ` : ''}
 
+        ${estado.deudaAntes2024 > 0 ? `
+          <div class="form-group">
+            <label for="abono_deuda_anterior">Abono a Deuda Anterior al Corte (opcional)</label>
+            <div class="input-currency">
+              <span class="currency-symbol">$</span>
+              <input type="text" inputmode="numeric" id="abono_deuda_anterior" name="abono_deuda_anterior">
+            </div>
+            <small style="color: #64748b; font-size: 0.875rem;">
+              Deuda anterior al corte pendiente: $${this.formatNumber(estado.deudaAntes2024)}.
+              Si la persona también paga esto hoy, se incluye en el mismo recibo.
+            </small>
+          </div>
+        ` : ''}
+
         <div class="form-group">
           <label for="fecha_pago_sost">Fecha de Aporte <span style="color: #ef4444;">*</span></label>
           <input type="date" id="fecha_pago_sost" name="fecha_pago_sost" value="${hoy}" required>
@@ -951,6 +1046,11 @@ const Pagos = {
   setupRegistrarPagoModal(cuentaId, conexionPendiente) {
     if (conexionPendiente) {
       App.attachMoneyInput(document.getElementById('abono_conexion'));
+    }
+
+    const abonoDeudaAnteriorInput = document.getElementById('abono_deuda_anterior');
+    if (abonoDeudaAnteriorInput) {
+      App.attachMoneyInput(abonoDeudaAnteriorInput);
     }
 
     document.getElementById('btnSimular').addEventListener('click', async () => {
@@ -1026,6 +1126,8 @@ const Pagos = {
 
     const abonoConexionInput = document.getElementById('abono_conexion');
     const abonoConexion = abonoConexionInput ? App.parseMoneyValue(abonoConexionInput.value) : 0;
+    const abonoDeudaAnteriorInput = document.getElementById('abono_deuda_anterior');
+    const abonoDeudaAnterior = abonoDeudaAnteriorInput ? App.parseMoneyValue(abonoDeudaAnteriorInput.value) : 0;
     const usarSaldoFavorInput = document.getElementById('usar_saldo_favor');
     const usarSaldoAFavor = usarSaldoFavorInput ? usarSaldoFavorInput.checked : false;
 
@@ -1035,6 +1137,7 @@ const Pagos = {
         usarSaldoAFavor,
         nuevoPuntoId: abonoConexion > 0 && conexionPendiente ? conexionPendiente.id : null,
         abonoConexion,
+        abonoDeudaAnterior,
         opId
       });
 

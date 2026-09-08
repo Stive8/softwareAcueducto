@@ -255,7 +255,7 @@ La columna **"Avisos de Cartera"** (al final de la tabla, junto a "Acciones") mu
 4. Indica la **Cantidad de Meses a Aportar** — puede ser 1 o varios meses seguidos, incluso de años distintos.
 5. Si la cuenta tiene saldo a favor guardado de un pago anterior, aparece la casilla **"Aplicar saldo a favor disponible"** — solo se descuenta del total si la marcas, no es automático.
 6. El total a cobrar se calcula solo, apenas abres el formulario y cada vez que cambias el mes, el año o la cantidad de meses — no hace falta apretar ningún botón. El botón **"Calcular Total"** sigue ahí por si quieres forzar el recálculo a mano (por ejemplo, justo antes de confirmar, para revisar una vez más).
-7. Si la cuenta tiene un cargo de conexión pendiente, puedes incluir un **abono a esa conexión** en el mismo pago (opcional).
+7. Si la cuenta tiene un cargo de conexión pendiente, puedes incluir un **abono a esa conexión** en el mismo pago (opcional). Si además tiene deuda anterior al corte (2024), puedes incluir un **abono a esa deuda anterior** en el mismo pago (opcional) — útil cuando la persona paga todo junto en una sola colilla: queda un solo recibo con ambos conceptos, en vez de tener que registrar dos pagos separados.
 8. Confirma la **Fecha de Aporte** (por defecto es hoy) y el **Método de Pago** (Efectivo o Transferencia).
 9. Haz clic en **"Registrar Aporte y Generar Recibo"**.
 
@@ -273,7 +273,8 @@ El selector de formato ofrece tres opciones: **"Usar predeterminado"** (el que e
 
 Dentro del detalle de una cuenta (botón "Ver"), en la sección **"Cartera y Movimientos"**, debajo del recuadro de "A pagar" puede aparecer alguno de estos dos avisos:
 
-- **Deuda anterior al corte (2024)** (en amarillo, como una alerta real): informa cuánto debe la cuenta de antes de 2024, pero es solo informativo — no tiene botón de acción todavía. Para cobrar esa deuda vieja, hazlo como un aporte normal (§"Cómo registrar un aporte") eligiendo como mes de inicio uno de esos meses atrasados.
+- **Deuda anterior al corte (2024)** (en amarillo, como una alerta real): informa cuánto debe la cuenta de antes de 2024, con un botón **"Abonar"** para registrar un pago solo contra ese saldo (genera su propio recibo). Si la persona va a pagar de una vez tanto esa deuda vieja como meses desde 2024 en adelante (una sola colilla), no uses "Abonar" aparte: hazlo todo junto desde "Registrar Aporte" (§"Cómo registrar un aporte", paso 7) para que quede en un solo recibo.
+- **"+ Agregar deuda anterior al corte (2024)"** (enlace discreto, solo visible cuando la cuenta todavía no tiene ninguna deuda de este tipo registrada): úsalo cuando das de alta una cuenta que en realidad ya existía y debía dinero de antes de 2024, pero nunca se le cargó ese saldo (por ejemplo, la registraste hoy pero el predio paga desde 2022). Pide el monto total adeudado antes de 2024 y, opcionalmente, una observación con el motivo. No genera recibo — es declarar el saldo, no cobrarlo — y solo puede hacerse una vez por cuenta; después de usarlo, el aviso amarillo con "Abonar" ocupa su lugar. Reservado al rol Administrador.
 - **Saldo a favor disponible** (en azul, para distinguirlo de una deuda: es plata a favor del cliente, no un problema): si la cuenta tiene plata guardada de un pago anterior que quedó sin usar (por ejemplo, pagó de más o pagó por adelantado más de lo que alcanzó a cubrir), aparece aquí con un botón **"Usar"**. Al hacer clic, se abre el formulario de "Registrar Aporte" con la casilla "Aplicar saldo a favor disponible" ya marcada y el total ya calculado — solo falta confirmar el método de pago y la fecha.
 
 [CAPTURA DE PANTALLA AQUÍ: detalle de una cuenta mostrando el aviso de saldo a favor con el botón "Usar"]

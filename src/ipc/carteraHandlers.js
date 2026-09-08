@@ -107,6 +107,19 @@ function registrarCarteraHandlers({ envolverHandle, carteraService }) {
     }
   });
 
+  // Declara el saldo de apertura (deuda de antes de 2024) de una cuenta que no lo tenía --
+  // caso real: una cuenta preexistente dada de alta después de la migración inicial, que fue
+  // la única vez que esto se cargó hasta ahora (ver CarteraService.declararDeudaApertura). Solo
+  // Administrador: declara una cifra sin respaldo de cargos mes a mes, mismo nivel que
+  // cartera:recategorizar (ver CANALES_SOLO_ADMIN).
+  envolverHandle('cartera:agregarDeudaApertura', async (event, payload) => {
+    try {
+      return { success: true, data: carteraService.declararDeudaApertura({ ...payload, usuarioId: getSesionActual().id }) };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  });
+
   // Vista previa del reajuste de tarifa de una categoría completa: NO escribe nada -- corre la
   // misma transacción real (crear la tarifa nueva + AjusteCategoria a cada cuenta) y la
   // revierte a propósito, así nunca se puede desincronizar de lo que aplicar() haría de

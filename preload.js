@@ -67,7 +67,8 @@ contextBridge.exposeInMainWorld('api', {
     simularRecategorizarLote: (payload) => ipcRenderer.invoke('cartera:simularRecategorizarLote', payload),
     recategorizarLote: (payload) => ipcRenderer.invoke('cartera:recategorizarLote', payload),
     simularReajustarTarifaCategoria: (payload) => ipcRenderer.invoke('cartera:simularReajustarTarifaCategoria', payload),
-    reajustarTarifaCategoria: (payload) => ipcRenderer.invoke('cartera:reajustarTarifaCategoria', payload)
+    reajustarTarifaCategoria: (payload) => ipcRenderer.invoke('cartera:reajustarTarifaCategoria', payload),
+    agregarDeudaApertura: (payload) => ipcRenderer.invoke('cartera:agregarDeudaApertura', payload)
   },
   recibos: {
     getAll: (params) => ipcRenderer.invoke('recibos:getAll', params),

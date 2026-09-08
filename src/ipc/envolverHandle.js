@@ -25,7 +25,10 @@ const CANALES_SOLO_ADMIN = new Set([
   // Los tres emiten AjusteCategoria retroactivo -- mismo nivel que asientos:crearManual y
   // caja:regularizarSaldos: puede mover deuda real de golpe (sobre una cuenta o sobre toda una
   // categoría) y necesita quedar detrás del mismo permiso.
-  'cartera:recategorizar', 'cartera:recategorizarLote', 'cartera:reajustarTarifaCategoria'
+  'cartera:recategorizar', 'cartera:recategorizarLote', 'cartera:reajustarTarifaCategoria',
+  // Declara un saldo de apertura (antes de 2024) sin respaldo de cargos mes a mes -- mismo
+  // riesgo que recategorizar/reajustarTarifaCategoria: mueve deuda real de golpe.
+  'cartera:agregarDeudaApertura'
 ]);
 
 // Excepciones puntuales a "Consulta no puede escribir": acciones que, aunque cambian estado
@@ -61,6 +64,7 @@ const CANALES_SIN_SESION = new Set([
 const CANALES_IDEMPOTENTES = new Set([
   'asientos:crearManual', 'gastos:create', 'caja:registrarConsignacion',
   'cajaMenor:reembolsar', 'pagos:registrarPagoSostenimiento', 'pagos:registrarAbonoDeudaAnterior', 'caja:regularizarSaldos',
+  'cartera:agregarDeudaApertura',
   'caja:registrarRetiro', 'cartera:redimirCredito', 'cartera:suspender', 'cartera:reactivar', 'cartera:recategorizar',
   // Ambos crean un documento financiero real (un cargo de conexión con su valor, o un abono
   // con recibo propio) y no tenían protección -- mismo riesgo de doble clic que el resto de

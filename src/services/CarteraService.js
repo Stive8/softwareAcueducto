@@ -19,6 +19,13 @@ const { getMotivoDiferencia } = require('./cartera/motivosDiferencia');
 // La causación NO genera asientos contables: el ingreso se sigue reconociendo al recaudar.
 // Eso es lo que permite corregir meses de períodos ya cerrados sin reexpresar nada.
 class CarteraService {
+  // Corte de la migración inicial de cartera: el día anterior al primer período que el motor
+  // causa mes a mes (ver PRIMER_PERIODO_CAUSABLE en PagoService.js). Toda deuda de antes de acá
+  // vive como un único saldo consolidado (AperturaOpaca), nunca como cargos individuales.
+  static get FECHA_CORTE_APERTURA() {
+    return '2023-12-31';
+  }
+
   constructor(dbService) {
     this.db = dbService.getDb();
     this.repository = new CarteraRepository(dbService);
@@ -815,6 +822,36 @@ class CarteraService {
       if (!(err instanceof RollbackSimulacion)) throw err;
     }
     return resultado;
+  }
+
+  // Declara el saldo consolidado de una cuenta que debía dinero de antes del corte (2024) pero
+  // nunca se le registró esa apertura -- caso real: una cuenta preexistente que se da de alta
+  // en el sistema después de la migración inicial (ver scripts/import-cartera/), que fue la
+  // única vez que esto se hizo hasta ahora. Mismo mecanismo que usó esa migración: un
+  // AperturaOpaca no exigible, fechado en el corte fijo (no lo elige quien registra, para no
+  // desalinear esta cuenta del resto de la contabilidad). Es declarar un saldo, no cobrar: no
+  // genera recibo ni pasa por período contable (ver PagoService.js, PRIMER_PERIODO_CAUSABLE --
+  // los períodos anteriores a 2024 no se causan mes a mes, por eso este es el único camino).
+  declararDeudaApertura({ cuentaId, monto, observaciones = null, usuarioId = null }) {
+    if (!cuentaId) throw new Error('La cuenta es obligatoria');
+    if (!(Number(monto) > 0)) throw new Error('El monto debe ser mayor a cero');
+
+    const { saldoOpaco } = this.repository.getSaldos(cuentaId);
+    if (saldoOpaco > 0) {
+      throw new Error(
+        'Esta cuenta ya tiene una deuda anterior al corte registrada; use "Abonar" en vez de agregar una nueva.'
+      );
+    }
+
+    return this.repository.crearMovimiento({
+      cuentaId,
+      fecha: CarteraService.FECHA_CORTE_APERTURA,
+      tipo: 'AperturaOpaca',
+      exigible: 0,
+      monto: redondear(monto),
+      observaciones,
+      usuarioId
+    });
   }
 
   // Suspende una cuenta a partir de una fecha que puede ser pasada, y anula los cargos ya
