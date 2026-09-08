@@ -743,6 +743,47 @@ function sembrarTodas(db) {
     `).run(ids.R031, mes, r1819.detalleId);
   }
 
+  // --- R076 (corrección 36): hueco real de agosto 2024, $8.000 pendientes de un cargo de
+  // $16.000 -- reproduce el estado que espera AJUSTE_HUECO_AGOSTO2024_R076 antes de aplicarse
+  // (ver comentario junto a esa constante en paso9b-correcciones.js).
+  ids.R076 = sembrarCuenta(db, 'R076');
+  sembrarPropietarioDeCuenta(ids.R076);
+  ids.cargoAgosto2024R076Id = repo.crearMovimiento({
+    cuentaId: ids.R076, fecha: '2024-08-01', tipo: 'CargoMensual', exigible: 1, monto: 16000, anio: 2024, mes: 8
+  });
+  const abonoParcialR076Id = repo.crearMovimiento({
+    cuentaId: ids.R076, fecha: '2024-09-21', tipo: 'Abono', exigible: 1, monto: -8000
+  });
+  repo.crearImputacion({ abonoId: abonoParcialR076Id, cargoId: ids.cargoAgosto2024R076Id, monto: 8000 });
+
+  // --- S032 (corrección 37): recibo 2498 "Mayo A Agosto 2026" ($40.000) imputado cuando agosto
+  // 2026 todavía no existía como CargoMensual -- mayo a julio quedaron cubiertos y el sobrante de
+  // $10.000 cayó por FIFO contra la apertura opaca de 2023. Reproduce el estado real (ver
+  // comentario junto a REIMPUTACION_S032 en paso9b-correcciones.js). Categoría 'Finca' desde
+  // 2024-01-01 para que getCategoriaTarifaParaMes resuelva agosto 2026 a $10.000, igual que los
+  // meses ya causados.
+  ids.S032 = sembrarCuenta(db, 'S032');
+  sembrarPropietarioDeCuenta(ids.S032);
+  db.prepare(`INSERT INTO cuenta_categorias (cuenta_id, categoria_id, fecha_inicio) VALUES (?, ?, '2024-01-01')`)
+    .run(ids.S032, categoriaFincaId);
+  ids.aperturaS032Id = repo.crearMovimiento({ cuentaId: ids.S032, fecha: '2023-12-31', tipo: 'AperturaOpaca', exigible: 0, monto: 50000 });
+  for (let mes = 5; mes <= 7; mes++) {
+    repo.crearMovimiento({ cuentaId: ids.S032, fecha: `2026-${String(mes).padStart(2, '0')}-01`, tipo: 'CargoMensual', exigible: 1, monto: 10000, anio: 2026, mes });
+  }
+  const r2498 = sembrarRecibo(db, propietarioId, {
+    numeroRecibo: 2498, cuentaId: ids.S032, fecha: '2026-05-16', valor: 40000,
+    concepto: 'CUOTA DE SOSTENIMIENTO MAYO A AGOSTO 2026',
+    periodoDesde: 'Mayo 2026', periodoHasta: 'Agosto 2026'
+  });
+  const abono2498Id = repo.crearMovimiento({
+    cuentaId: ids.S032, fecha: '2026-05-16', tipo: 'Abono', exigible: 1, monto: -40000, reciboDetalleId: r2498.detalleId
+  });
+  const cargosMayoJulioS032 = db.prepare(`SELECT id FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' ORDER BY mes`).all(ids.S032);
+  for (const c of cargosMayoJulioS032) repo.crearImputacion({ abonoId: abono2498Id, cargoId: c.id, monto: 10000 });
+  repo.crearImputacion({ abonoId: abono2498Id, cargoId: ids.aperturaS032Id, monto: 10000 });
+  ids.abono2498Id = abono2498Id;
+  ids.detalle2498Id = r2498.detalleId;
+
   return ids;
 }
 
@@ -2447,6 +2488,100 @@ test('paso9b: pago adelantado -- si el crédito no alcanza para cubrir el perío
     const service = new CarteraService(ctx.dbService);
     const estado = service.getEstadoCartera(cuentaId);
     assert.equal(estado.deudaAntes2024, 0, 'la apertura, ya paga desde antes, sigue paga');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R076 -- cierra el hueco de agosto 2024 con un AjusteAsamblea de -$8.000', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.ajusteHuecoAgosto2024R076.yaCorregido, false);
+    const cargos = getCargos(db, ids.R076);
+    const agosto = cargos.find(c => c.anio === 2024 && c.mes === 8);
+    const cubierto = db.prepare(
+      `SELECT COALESCE(SUM(monto),0) AS total FROM cartera_imputaciones WHERE cargo_id=?`
+    ).get(ids.cargoAgosto2024R076Id).total;
+    const ajuste = db.prepare(
+      `SELECT monto, tipo, anio, mes FROM cartera_movimientos WHERE cuenta_id=? AND tipo='AjusteAsamblea'`
+    ).get(ids.R076);
+    assert.ok(ajuste, 'debe crear el AjusteAsamblea');
+    assert.equal(ajuste.monto, -8000);
+    assert.equal(ajuste.anio, 2024);
+    assert.equal(ajuste.mes, 8);
+    assert.equal(agosto.monto + ajuste.monto - cubierto, 0, 'agosto queda en $0 pendiente');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: R076 -- idempotente, correr dos veces no duplica el AjusteAsamblea', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.ajusteHuecoAgosto2024R076.yaCorregido, true);
+    const cantidadAjustes = db.prepare(
+      `SELECT COUNT(*) AS n FROM cartera_movimientos WHERE cuenta_id=? AND tipo='AjusteAsamblea'`
+    ).get(ids.R076).n;
+    assert.equal(cantidadAjustes, 1, 'no debe duplicar el ajuste');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S032 -- causa agosto 2026 y reimputa el recibo 2498 completo contra mayo-agosto, sin sobrante', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    const r = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r.reimputacionS032.yaCorregido, false);
+    assert.equal(r.reimputacionS032.cargoAgostoCreado, true);
+    assert.equal(r.reimputacionS032.sobrante, 0, 'los 40.000 alcanzan exacto para mayo-agosto');
+    assert.equal(r.reimputacionS032.creditoId, null);
+
+    const cargos = getCargos(db, ids.S032);
+    assert.equal(cargos.length, 4, 'mayo, junio, julio y agosto 2026');
+    assert.deepEqual(cargos.map(c => c.mes), [5, 6, 7, 8]);
+    assert.ok(cargos.every(c => c.monto === 10000));
+
+    // La apertura opaca ya no debe tener nada del abono 2498 imputado (se movió a agosto).
+    const cubiertoApertura = db.prepare(
+      `SELECT COALESCE(SUM(monto),0) AS total FROM cartera_imputaciones WHERE cargo_id=?`
+    ).get(ids.aperturaS032Id).total;
+    assert.equal(cubiertoApertura, 0, 'la apertura opaca queda sin tocar por este recibo');
+
+    const abono = db.prepare(`SELECT monto FROM cartera_movimientos WHERE id=?`).get(ids.abono2498Id);
+    assert.equal(abono.monto, -40000, 'el abono conserva su monto original');
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('paso9b: S032 -- idempotente, correr dos veces no vuelve a causar agosto ni a reimputar', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const ids = sembrarTodas(db);
+
+    ejecutarPaso9b({ dbService: ctx.dbService });
+    const r2 = ejecutarPaso9b({ dbService: ctx.dbService });
+
+    assert.equal(r2.reimputacionS032.yaCorregido, true);
+    const cargos = getCargos(db, ids.S032);
+    assert.equal(cargos.length, 4, 'no debe duplicar el cargo de agosto');
   } finally {
     cerrarDbTemporal(ctx);
   }

@@ -931,6 +931,53 @@ const OBSERVACION_RESOLUCION_R031_R0301 =
   'por el usuario 2026-08-22. Cubre el hueco de enero a junio 2024 en R0301, sin imputar hasta ' +
   'esta corrección.';
 
+// 36. R076: cierre del hueco de agosto 2024 (pendiente $8.000 de $16.000). Reconstruido con el
+//    usuario 2026-09-05 a partir del talonario físico: el pago del 06/04/2024 ($64.000, "Junio a
+//    Diciembre 2023", pre-2024 -- va al saldo opaco) trae la nota "se abona $4.000 a enero" -- un
+//    crédito que nunca se migró como saldo a favor real (cuenta_creditos de esta cuenta está
+//    vacía). El pago del 21/09/2024 ($120.000, "Enero a Agosto 2024", nota "tenía saldo a favor
+//    de $4.000") solo alcanzó para 7 meses completos + medio de agosto (7×$16.000 + $8.000 =
+//    $120.000), dejando agosto 2024 con $8.000 sin cubrir. Sumando el crédito de abril ($4.000)
+//    contra los $128.000 necesarios para los 8 meses, el faltante real de agosto era de $4.000,
+//    no de $8.000 -- la otra mitad es exactamente ese crédito nunca migrado. Decisión del usuario
+//    2026-09-05: aplicar el crédito de $4.000 y condonar (junta) los $4.000 restantes, cerrando
+//    el hueco por completo. Se implementa como un AjusteAsamblea de -$8.000 atado a 2024-08
+//    (mismo mecanismo que un AjusteCategoria: nuevo movimiento con anio/mes, nunca muta el
+//    CargoMensual original). Aplicada contra la base real 2026-09-05 antes de escribirse aquí;
+//    esta entrada la deja reproducible para cualquier reconstrucción futura desde
+//    carga_inicial_cartera.json.
+const AJUSTE_HUECO_AGOSTO2024_R076 = {
+  codigoCuenta: 'R076', anio: 2024, mes: 8, monto: -8000, fecha: '2024-08-31'
+};
+const OBSERVACION_AJUSTE_HUECO_AGOSTO2024_R076 =
+  'Cierre de hueco en agosto 2024: $4.000 de crédito del pago 06/04/2024 ("se abona $4.000 a ' +
+  'enero") que no se migró como saldo a favor, más $4.000 restantes condonados por decisión de ' +
+  'la junta. Los $120.000 pagados el 21/09/2024 cubrían solo 7 meses y medio de los 8 ' +
+  'facturados (enero-agosto 2024). Confirmado por el usuario 2026-09-05.';
+
+// 37. S032, recibo 2498 (16-may-2026, "Mayo A Agosto 2026", $40.000): agosto 2026 no existía
+//    como CargoMensual cuando paso10-imputacion.js corrió (regla de la carga inicial: los
+//    últimos meses de 2026 no se causaron por adelantado, ver corrección 24) -- el período
+//    declarado solo emparejó mayo, junio y julio, y el sobrante de $10.000 cayó al FIFO general,
+//    que lo aplicó contra la apertura opaca (2023) en vez de quedarse para agosto. Mismo patrón
+//    exacto que REDENCION_R007_2026/REIMPUTACION_S0312 -- la diferencia es que acá agosto 2026
+//    ya pasó (investigado con el usuario 2026-09-05), así que en vez de dejar un crédito
+//    reservado se causa agosto 2026 directamente y se reimputa el recibo completo contra
+//    mayo-agosto 2026, sin sobrante.
+//    Aplicada contra la base real 2026-09-05: paso11-conciliacion.js muestra un residuo de
+//    +$10.000 en S032 -- mismo mecanismo ya documentado en S023/S0334/S039/S0271/S022 (su target
+//    usa el snapshot congelado de la carga inicial, que todavía cuenta esos $10.000 como parte
+//    del saldo opaco), no un error de esta corrección (verificado: cubiertoHasta avanza a agosto
+//    2026 sin huecos, apertura opaca vuelve a $0 cubierto).
+const REIMPUTACION_S032 = {
+  codigoCuenta: 'S032', numeroRecibo: 2498, periodoDesde: '2026-05', periodoHasta: '2026-08'
+};
+const OBSERVACION_REIMPUTACION_S032 =
+  'Reimputado tras causar agosto 2026 (no existía cuando se cargó este recibo): el período ' +
+  'declarado ("Mayo A Agosto 2026") solo emparejó mayo-julio, y el sobrante de $10.000 había ' +
+  'caído por FIFO contra la apertura opaca de 2023 en vez de agosto 2026. Investigado y ' +
+  'confirmado por el usuario 2026-09-05.';
+
 const OBSERVACION_CREDITO_R0942 =
   'Saldo a favor no registrado: el recibo 2246 documenta una transferencia de $180.000 el ' +
   '19-jun-2025 ("CUOTA DE SOSTENIMIENTO ABRIL 2025 A FEBRERO 2026 (TRANSFERENCIA 19/06/2025 - ' +
@@ -1429,6 +1476,8 @@ function ejecutarPaso9b({ dbService }) {
   const recibosAnuladosFaltantes = [];
   let resolucionR031R0301 = null;
   const observacionesAcortadas = [];
+  let ajusteHuecoAgosto2024R076 = null;
+  let reimputacionS032 = null;
 
   const transaccion = db.transaction(() => {
     // 31. Ver comentario junto a derivarPeriodoCorrecto más arriba. Corre PRIMERO en la
@@ -2862,6 +2911,127 @@ function ejecutarPaso9b({ dbService }) {
         }
       }
 
+      // 36. Ver comentario junto a AJUSTE_HUECO_AGOSTO2024_R076 más arriba.
+      //
+      // Idempotente: usa getCargosConCobertura (la misma fuente que calcularCubiertoHasta en
+      // producción) para leer el neto de agosto 2024 -- si ya no queda pendiente, esta corrección
+      // ya corrió (o el hueco se cerró por otra vía). Si el pendiente no es exactamente $8.000, es
+      // un estado inesperado y se detiene en vez de adivinar cuánto ajustar.
+      {
+        const cuentaR076 = idPorCodigo.get(normalizarCodigo(AJUSTE_HUECO_AGOSTO2024_R076.codigoCuenta));
+        if (cuentaR076 === undefined) {
+          throw new Error('R076: no existe en la base -- ¿corrieron los pasos 1-2?');
+        }
+
+        const cargoAgostoR076 = repo.getCargosConCobertura(cuentaR076, 1)
+          .find(c => c.anio === AJUSTE_HUECO_AGOSTO2024_R076.anio && c.mes === AJUSTE_HUECO_AGOSTO2024_R076.mes);
+        if (!cargoAgostoR076) {
+          throw new Error(
+            `R076: no tiene cargos exigibles de ${AJUSTE_HUECO_AGOSTO2024_R076.anio}-` +
+            `${AJUSTE_HUECO_AGOSTO2024_R076.mes} -- ¿corrieron los pasos 9/10?`
+          );
+        }
+        const pendienteAgostoR076 = redondear(cargoAgostoR076.monto - cargoAgostoR076.cubierto);
+
+        if (!esMayor(pendienteAgostoR076, 0)) {
+          ajusteHuecoAgosto2024R076 = { yaCorregido: true };
+        } else {
+          if (Math.abs(pendienteAgostoR076 - 8000) >= 1) {
+            throw new Error(
+              `R076: se esperaba un pendiente de $8.000 en agosto 2024 antes de esta corrección, ` +
+              `hay $${pendienteAgostoR076} -- revisar antes de aplicar a ciegas`
+            );
+          }
+
+          const movimientoId = repo.crearMovimiento({
+            cuentaId: cuentaR076,
+            fecha: AJUSTE_HUECO_AGOSTO2024_R076.fecha,
+            tipo: 'AjusteAsamblea',
+            exigible: 1,
+            monto: AJUSTE_HUECO_AGOSTO2024_R076.monto,
+            anio: AJUSTE_HUECO_AGOSTO2024_R076.anio,
+            mes: AJUSTE_HUECO_AGOSTO2024_R076.mes,
+            observaciones: OBSERVACION_AJUSTE_HUECO_AGOSTO2024_R076
+          });
+          ajusteHuecoAgosto2024R076 = { yaCorregido: false, movimientoId };
+        }
+      }
+
+      // 37. Ver comentario junto a REIMPUTACION_S032 más arriba.
+      //
+      // Idempotente: si agosto 2026 ya existe como CargoMensual y ya está cubierto, esta
+      // corrección ya corrió. Si existe pero no está cubierto, es un estado inesperado (se
+      // detiene en vez de adivinar). Si no existe, se causa y se reimputa el recibo completo.
+      {
+        const cuentaS032 = idPorCodigo.get(normalizarCodigo(REIMPUTACION_S032.codigoCuenta));
+        if (cuentaS032 === undefined) throw new Error('S032: no existe en la base -- ¿corrieron los pasos 1-2?');
+
+        const [anioAgosto, mesAgosto] = REIMPUTACION_S032.periodoHasta.split('-').map(Number);
+        const cargoAgostoS032 = db.prepare(
+          `SELECT id, monto FROM cartera_movimientos WHERE cuenta_id=? AND tipo='CargoMensual' AND anio=? AND mes=?`
+        ).get(cuentaS032, anioAgosto, mesAgosto);
+
+        if (cargoAgostoS032) {
+          const cubiertoAgostoS032 = db.prepare(
+            `SELECT COALESCE(SUM(monto),0) AS total FROM cartera_imputaciones WHERE cargo_id=?`
+          ).get(cargoAgostoS032.id).total;
+          if (esMayor(redondear(cargoAgostoS032.monto - cubiertoAgostoS032), 0)) {
+            throw new Error(
+              `S032: ya existe CargoMensual de ${REIMPUTACION_S032.periodoHasta} pero no está cubierto -- ` +
+              'estado inesperado, revisar antes de aplicar a ciegas'
+            );
+          }
+          reimputacionS032 = { yaCorregido: true };
+        } else {
+          const tarifaAgostoS032 = pagoRepo.getCategoriaTarifaParaMes(cuentaS032, anioAgosto, mesAgosto);
+          if (!tarifaAgostoS032) {
+            throw new Error(`S032: no hay categoría o tarifa configurada para ${REIMPUTACION_S032.periodoHasta}`);
+          }
+          repo.crearMovimiento({
+            cuentaId: cuentaS032, fecha: primerDiaDelMes(anioAgosto, mesAgosto),
+            tipo: 'CargoMensual', exigible: 1, monto: tarifaAgostoS032.tarifa_sostenimiento,
+            anio: anioAgosto, mes: mesAgosto,
+            observaciones: 'Causación de agosto 2026, generada por la corrección 37 (ver comentario).'
+          });
+
+          const detalleS032 = db.prepare(`
+            SELECT rd.id AS detalleId FROM recibo_detalles rd JOIN recibos r ON r.id = rd.recibo_id
+            WHERE r.numero_recibo = ?
+          `).get(REIMPUTACION_S032.numeroRecibo);
+          if (!detalleS032) throw new Error(`Recibo ${REIMPUTACION_S032.numeroRecibo}: no existe -- ¿corrieron los pasos anteriores?`);
+
+          const abonoS032 = db.prepare(
+            `SELECT id, cuenta_id, monto FROM cartera_movimientos WHERE recibo_detalle_id=? AND tipo='Abono'`
+          ).get(detalleS032.detalleId);
+          if (!abonoS032) throw new Error(`Recibo ${REIMPUTACION_S032.numeroRecibo}: no tiene movimiento de Abono -- ¿corrió el paso 8?`);
+          if (abonoS032.cuenta_id !== cuentaS032) {
+            throw new Error(`Recibo ${REIMPUTACION_S032.numeroRecibo}: se esperaba en cuenta_id=${cuentaS032} (S032), está en cuenta_id=${abonoS032.cuenta_id}`);
+          }
+
+          const creditoPrevioS032 = db.prepare('SELECT COALESCE(SUM(monto),0) AS s FROM cuenta_creditos WHERE recibo_detalle_id=?')
+            .get(detalleS032.detalleId).s;
+          const montoOriginalS032 = redondear(Math.abs(abonoS032.monto) + creditoPrevioS032);
+          db.prepare('DELETE FROM cartera_imputaciones WHERE abono_id=?').run(abonoS032.id);
+          db.prepare('DELETE FROM cuenta_creditos WHERE recibo_detalle_id=?').run(detalleS032.detalleId);
+          db.prepare('UPDATE cartera_movimientos SET monto=? WHERE id=?').run(-montoOriginalS032, abonoS032.id);
+
+          const resultadoS032 = reimputarAbono(db, repo, {
+            abonoId: abonoS032.id, cuentaId: cuentaS032, monto: montoOriginalS032,
+            periodoDesde: REIMPUTACION_S032.periodoDesde, periodoHasta: REIMPUTACION_S032.periodoHasta,
+            permitirFifoConPeriodo: false
+          });
+          if (esMayor(resultadoS032.sobrante || 0, 0)) {
+            throw new Error(`S032: quedó sobrante de $${resultadoS032.sobrante} tras reimputar -- revisar`);
+          }
+          if (resultadoS032.creditoId) {
+            db.prepare('UPDATE cuenta_creditos SET observaciones=? WHERE id=?')
+              .run(OBSERVACION_REIMPUTACION_S032, resultadoS032.creditoId);
+          }
+
+          reimputacionS032 = { yaCorregido: false, cargoAgostoCreado: true, ...resultadoS032 };
+        }
+      }
+
       // Después de insertar los recibos históricos (hasta el 2564), el consecutivo debe quedar
       // apuntando al primer número realmente libre -- si no, el próximo pago registrado desde la
       // app chocaría con un UNIQUE constraint al intentar reusar un número que esta corrección ya
@@ -2890,7 +3060,7 @@ function ejecutarPaso9b({ dbService }) {
     redencionR049, reasignacion458, suspensionIncobrables, reciboFaltanteS0244,
     aperturaIncobrables, cuentasNuevas2026, periodosTextoCorregidos,
     recibosFaltantes2026, recibo1167Blanco, recibosAnuladosFaltantes, resolucionR031R0301,
-    observacionesAcortadas
+    observacionesAcortadas, ajusteHuecoAgosto2024R076, reimputacionS032
   };
 }
 
@@ -2916,5 +3086,7 @@ module.exports = {
   VALOR_PUNTO_NUEVO_2026, FECHA_CUENTAS_NUEVAS_2026,
   inferirPeriodoDeTexto, derivarPeriodoCorrecto, formatearPeriodoTexto, SOBRESCRITURA_PERIODO_MANUAL,
   RECIBOS_FALTANTES_2026, OBSERVACION_RECIBO_FALTANTE_2026, RECIBO_1167_BLANCO_MOTIVO,
-  RECIBOS_ANULADOS_FALTANTES, RESOLUCION_R031_R0301, OBSERVACION_RESOLUCION_R031_R0301
+  RECIBOS_ANULADOS_FALTANTES, RESOLUCION_R031_R0301, OBSERVACION_RESOLUCION_R031_R0301,
+  AJUSTE_HUECO_AGOSTO2024_R076, OBSERVACION_AJUSTE_HUECO_AGOSTO2024_R076,
+  REIMPUTACION_S032, OBSERVACION_REIMPUTACION_S032
 };
