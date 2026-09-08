@@ -102,7 +102,7 @@ function renderCarta(datos) {
 
   ${datos.observaciones ? `<p style="font-size:13px;"><strong>Observaciones:</strong> ${escapeHtml(datos.observaciones)}</p>` : ''}
 
-  <div class="footer">Documento generado por el sistema administrativo del acueducto. Gracias por su pago.</div>
+  <div class="footer">Documento generado por el sistema administrativo del acueducto. Gracias por contribuir al sostenimiento y funcionamiento de nuestra asociación.</div>
 </body>
 </html>
   `;
@@ -133,27 +133,54 @@ function renderTermico80mm(datos) {
 <title>Recibo No. ${escapeHtml(datos.numero_recibo)}</title>
 <style>
   * { box-sizing: border-box; }
-  @page { size: 80mm auto; margin: 0; }
-  body { font-family: Arial, Helvetica, sans-serif; font-size: 11px; color: #111827; width: 80mm; margin: 0; padding: 3mm; }
+  /* 71mm, no el límite físico exacto de 72mm: un cabezal térmico no tiene margen propio (a
+     diferencia de una impresora de tinta/láser), así que pedirle a Chromium exactamente el ancho
+     máximo del cabezal deja cero margen de error entre el layout del navegador y lo que el driver
+     interpreta -- se vio en pruebas de campo que el contenido queda al borde mismo del corte.
+     Restar 1mm de colchón horizontal cuesta un margen imperceptible a cambio de no operar al
+     límite en cada impresión (mismo criterio que ya usa MARGEN_ALTURA_TERMICO_MICRONES para el
+     alto en recibosHandlers.js). Sin padding en el body: a este ancho ya estamos cerca del límite
+     físico del cabezal, no en un margen de diseño sobre un ancho de papel más generoso -- restar
+     padding aquí reduciría aún más el área útil. Los bloques internos no necesitan ancho explícito:
+     heredan el 100% del body.
+     Todo el texto en negro puro (#000), sin la jerarquía de grises que sí tiene sentido en pantalla
+     o PDF: un cabezal térmico es 1 bit (blanco o negro), así que un gris se trama a puntos dispersos
+     y sale "lavado"/apenas legible en papel -- se vio en pruebas de campo en los datos
+     institucionales y el pie de página, que antes usaban gris. El ruido/pixelado en textos grandes
+     (título, número de recibo) es otro fenómeno -- proviene del antialiasing con el que Chromium
+     dibuja las fuentes, que el driver tiene que tramar a 1 bit -- y esto no lo corrige el color. */
+  @page { size: 71mm auto; margin: 0; }
+  /* Respaldo de los tamaños previos, por si hay que volver atrás: body/detalle-concepto/
+     detalle-valor/recibo-fecha/anulado/total-etiqueta 11px, nombre-asociacion 13px,
+     dato-institucional/detalle-periodo/observaciones 10px, recibo-numero 15px, total-valor 18px,
+     pie 9px. Se subieron ~2px parejo a pedido de campo: en mano, con el papel real, se veían
+     chicos. padding-bottom en 30mm (deliberadamente exagerado, no es el valor final): en pruebas
+     de campo, 8mm de aire sumados a los 10mm que ya agrega MARGEN_ALTURA_TERMICO_MICRONES
+     (recibosHandlers.js) no generaron NINGÚN margen visible antes del corte -- indicio de que el
+     driver recorta el blanco sobrante en vez de alimentar papel de más. Este valor exagerado es
+     para confirmar esa hipótesis: si tampoco se nota, el ajuste no puede resolverse por este
+     lado y hay que buscarlo en las propiedades del driver (o aceptar el corte ajustado, que es
+     el comportamiento normal de la mayoría de impresoras térmicas POS). */
+  body { font-family: Arial, Helvetica, sans-serif; font-size: 13px; color: #000; width: 71mm; margin: 0; padding: 0 0 30mm 0; }
   .centro { text-align: center; }
-  .separador { border: none; border-top: 1px dashed #111827; margin: 6px 0; }
-  .logo-termico { display: block; max-width: 50mm; max-height: 20mm; object-fit: contain; margin: 0 auto 4px auto; }
-  .nombre-asociacion { font-size: 13px; font-weight: bold; margin: 0 0 2px 0; }
-  .dato-institucional { font-size: 10px; margin: 1px 0; color: #374151; }
-  .recibo-numero { font-size: 15px; font-weight: bold; margin: 6px 0 0 0; }
-  .recibo-fecha { font-size: 11px; margin: 2px 0 0 0; }
-  .anulado { color: #dc2626; font-weight: bold; font-size: 11px; }
+  .separador { border: none; border-top: 1px dashed #000; margin: 6px 0; }
+  .logo-termico { display: block; max-width: 60mm; max-height: 26mm; object-fit: contain; margin: 0 auto 4px auto; filter: grayscale(1) contrast(2); }
+  .nombre-asociacion { font-size: 15px; font-weight: bold; margin: 0 0 2px 0; }
+  .dato-institucional { font-size: 12px; margin: 1px 0; }
+  .recibo-numero { font-size: 17px; font-weight: bold; margin: 6px 0 0 0; }
+  .recibo-fecha { font-size: 13px; margin: 2px 0 0 0; }
+  .anulado { color: #dc2626; font-weight: bold; font-size: 13px; }
   .campo { margin: 3px 0; word-wrap: break-word; overflow-wrap: break-word; }
   .campo-etiqueta { font-weight: bold; }
   .detalle { margin: 6px 0; word-wrap: break-word; overflow-wrap: break-word; }
-  .detalle-concepto { font-size: 11px; }
-  .detalle-periodo { font-size: 10px; color: #374151; }
-  .detalle-valor { font-size: 11px; text-align: right; font-weight: bold; }
-  .total-bloque { margin: 8px 0; padding: 6px; border: 1px solid #111827; text-align: center; }
-  .total-etiqueta { font-size: 11px; font-weight: bold; }
-  .total-valor { font-size: 18px; font-weight: bold; }
-  .observaciones { font-size: 10px; word-wrap: break-word; overflow-wrap: break-word; margin: 4px 0; }
-  .pie { font-size: 9px; color: #6b7280; text-align: center; margin-top: 8px; }
+  .detalle-concepto { font-size: 13px; }
+  .detalle-periodo { font-size: 12px; }
+  .detalle-valor { font-size: 13px; text-align: right; font-weight: bold; }
+  .total-bloque { margin: 8px 0; padding: 6px; border: 1px solid #000; text-align: center; }
+  .total-etiqueta { font-size: 13px; font-weight: bold; }
+  .total-valor { font-size: 20px; font-weight: bold; }
+  .observaciones { font-size: 12px; word-wrap: break-word; overflow-wrap: break-word; margin: 4px 0; }
+  .pie { font-size: 11px; text-align: center; margin-top: 8px; }
 </style>
 </head>
 <body>
@@ -194,7 +221,7 @@ function renderTermico80mm(datos) {
 
   <hr class="separador">
 
-  <p class="pie">Documento generado por el sistema administrativo del acueducto.<br>Gracias por su pago.</p>
+  <p class="pie">Documento generado por el sistema administrativo del acueducto.<br>Gracias por contribuir al sostenimiento y funcionamiento de nuestra asociación.</p>
 </body>
 </html>
   `;

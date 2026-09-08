@@ -44,7 +44,9 @@ test('generarHTML(id, "termico_80mm") usa la plantilla térmica', () => {
 
     const html = service.generarHTML(reciboId, 'termico_80mm');
     assert.match(html, /RECIBO No\. 6001/);
-    assert.match(html, /80mm/);
+    // El formato se sigue llamando "termico_80mm" (papel de 80mm), pero el @page real usa 71mm
+    // -- ver plantillas.js/plantillas.test.js para el porqué del colchón de seguridad.
+    assert.match(html, /71mm/);
   } finally {
     cerrarDbTemporal(ctx);
   }
@@ -62,7 +64,7 @@ test('generarHTML(id) sin formato usa el predeterminado de configuración', () =
     const service = new ReciboService(ctx.dbService);
 
     const html = service.generarHTML(reciboId);
-    assert.match(html, /80mm/);
+    assert.match(html, /71mm/);
   } finally {
     cerrarDbTemporal(ctx);
   }

@@ -79,7 +79,11 @@ contextBridge.exposeInMainWorld('api', {
     getConsecutivo: () => ipcRenderer.invoke('recibos:getConsecutivo'),
     getAnuladosFisicos: () => ipcRenderer.invoke('recibos:getAnuladosFisicos'),
     imprimir: (id, formato) => ipcRenderer.invoke('recibos:imprimir', id, formato),
-    exportarPDF: (id, formato) => ipcRenderer.invoke('recibos:exportarPDF', id, formato)
+    exportarPDF: (id, formato) => ipcRenderer.invoke('recibos:exportarPDF', id, formato),
+    // Diagnóstico puntual para calibrar el ancho imprimible de una térmica -- ver
+    // src/services/recibos/calibracionTermica.js. Se invoca desde la consola de DevTools
+    // (window.api.recibos.imprimirCalibracionTermica()), no tiene botón en la UI a propósito.
+    imprimirCalibracionTermica: () => ipcRenderer.invoke('recibos:imprimirCalibracionTermica')
   },
   gastos: {
     getAll: (params) => ipcRenderer.invoke('gastos:getAll', params),

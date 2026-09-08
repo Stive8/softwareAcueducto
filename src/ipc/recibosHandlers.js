@@ -1,6 +1,7 @@
 const { getSesionActual } = require('./sesion');
 const { dialog, BrowserWindow } = require('electron');
 const fs = require('fs');
+const { generarHTMLCalibracion } = require('../services/recibos/calibracionTermica');
 
 function registrarRecibosHandlers({ envolverHandle, reciboService, getMainWindow }) {
   envolverHandle('recibos:getAll', async (event, params) => {
@@ -70,7 +71,15 @@ function registrarRecibosHandlers({ envolverHandle, reciboService, getMainWindow
   // conceptos tenga, se mide el contenido ya cargado en la ventana oculta y se calcula el alto en
   // micrones a partir de eso, en vez de asumir un tamaño fijo que podría cortar el recibo o
   // desperdiciar papel.
-  const ANCHO_TERMICO_MICRONES = 80000; // 80mm
+  // 71mm, no 80mm: el papel es de 80mm pero el área imprimible real de la GA-E200I (y de las
+  // térmicas de recibo en general) es más angosta que el papel -- confirmado por la propia
+  // página de autotest de la impresora ("Print width 72mm, 576 dots") y por la ficha técnica del
+  // fabricante (Max. Print Width 72mm a 203dpi/8dots-mm). Se pide 71mm y no los 72mm exactos del
+  // límite físico a propósito: en pruebas de campo, pedir el máximo exacto dejaba el contenido al
+  // borde mismo del corte, sin ningún colchón entre el layout de Chromium y lo que el driver
+  // termina interpretando -- mismo motivo por el que MARGEN_ALTURA_TERMICO_MICRONES existe para
+  // el alto.
+  const ANCHO_TERMICO_MICRONES = 71000;
   const MARGEN_ALTURA_TERMICO_MICRONES = 10000; // 10mm de margen de seguridad
   const MICRONES_POR_PX = 25400 / 96; // 1 CSS px = 1/96 pulgada = 25400/96 micrones
   const MICRONES_POR_PULGADA = 25400;
@@ -117,6 +126,40 @@ function registrarRecibosHandlers({ envolverHandle, reciboService, getMainWindow
             resolve({ success: true });
           } else {
             resolve({ success: false, error: errorType || 'No se pudo imprimir el recibo' });
+          }
+        });
+      });
+    } catch (error) {
+      if (ventanaImpresion) ventanaImpresion.close();
+      return { success: false, error: error.message };
+    }
+  });
+
+  // Diagnóstico puntual para validar el ancho real de una térmica antes de confiar en la vía
+  // driver/GDI para recibos reales -- ver src/services/recibos/calibracionTermica.js. Reutiliza el
+  // mismo pageSize/márgenes que recibos:imprimir a propósito: si se probara con la impresión propia
+  // del navegador en vez de este pipeline, no estaría midiendo lo mismo que va a usar el sistema.
+  envolverHandle('recibos:imprimirCalibracionTermica', async () => {
+    let ventanaImpresion;
+    try {
+      const html = generarHTMLCalibracion();
+      ventanaImpresion = new BrowserWindow({ show: false, webPreferences: { sandbox: true } });
+      await ventanaImpresion.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+
+      const opcionesImpresion = {
+        silent: false,
+        pageSize: await calcularPageSizeTermico(ventanaImpresion),
+        margins: { marginType: 'none' }
+      };
+
+      return await new Promise((resolve) => {
+        ventanaImpresion.webContents.print(opcionesImpresion, (success, errorType) => {
+          ventanaImpresion.close();
+          if (getMainWindow()) getMainWindow().focus();
+          if (success) {
+            resolve({ success: true });
+          } else {
+            resolve({ success: false, error: errorType || 'No se pudo imprimir la calibración' });
           }
         });
       });

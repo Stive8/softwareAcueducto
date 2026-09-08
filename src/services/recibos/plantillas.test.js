@@ -68,9 +68,13 @@ test('termico_80mm: incluye número de recibo, total y concepto largo completo',
   assert.match(html, /CUOTA DE SOSTENIMIENTO DE ENERO A DICIEMBRE 2024/);
 });
 
-test('termico_80mm: usa @page de 80mm de ancho', () => {
+// El nombre del formato sigue siendo "termico_80mm" (papel de 80mm), pero el @page usa 71mm: el
+// área imprimible real del cabezal son 72mm (ver ANCHO_TERMICO_MICRONES en recibosHandlers.js,
+// autotest de la impresora + ficha técnica GA-E200I), y se resta 1mm de colchón de seguridad para
+// no operar al borde exacto del corte -- confirmado en pruebas de campo.
+test('termico_80mm: usa @page de 71mm de ancho (área imprimible real con colchón de seguridad)', () => {
   const html = PLANTILLAS.termico_80mm(datosFixture());
-  assert.match(html, /@page\s*\{[^}]*80mm/);
+  assert.match(html, /@page\s*\{[^}]*71mm/);
 });
 
 test('termico_80mm: escapa HTML en campos de texto libre', () => {
