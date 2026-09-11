@@ -22,8 +22,8 @@ class CajaService {
     return this.repository.findAllMovimientos(params);
   }
 
-  getResumenPeriodo(fechaDesde, fechaHasta) {
-    return this.repository.getResumenPeriodo(fechaDesde, fechaHasta);
+  getResumenPeriodo(fechaDesde, fechaHasta, cuenta) {
+    return this.repository.getResumenPeriodo(fechaDesde, fechaHasta, cuenta);
   }
 
   // Consignación: el dinero recaudado en efectivo se deposita en el banco.

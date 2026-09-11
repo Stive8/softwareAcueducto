@@ -45,9 +45,9 @@ function registrarCajaHandlers({ envolverHandle, cajaService, cajaMenorService }
     }
   });
 
-  envolverHandle('caja:getResumenPeriodo', async (event, fechaDesde, fechaHasta) => {
+  envolverHandle('caja:getResumenPeriodo', async (event, fechaDesde, fechaHasta, cuenta) => {
     try {
-      return { success: true, data: cajaService.getResumenPeriodo(fechaDesde, fechaHasta) };
+      return { success: true, data: cajaService.getResumenPeriodo(fechaDesde, fechaHasta, cuenta) };
     } catch (error) {
       return { success: false, error: error.message };
     }

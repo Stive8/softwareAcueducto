@@ -41,7 +41,7 @@ const Caja = {
       <div class="table-container" style="margin-bottom: 24px;">
         <div class="table-header">
           <h2>Resumen del Período</h2>
-          <p style="color: #64748b; font-size: 13px;">Usa los filtros de fecha de "Historial de Movimientos" para cambiar el período.</p>
+          <p style="color: #64748b; font-size: 13px;">Usa los filtros de "Historial de Movimientos" (fecha y Caja/Banco) para cambiar el período o ver solo efectivo o solo banco.</p>
         </div>
         <div class="stats-grid" id="resumenPeriodoGrid" style="padding: 24px;">${App.renderSkeletonStatsGrid(3)}</div>
       </div>
@@ -86,6 +86,7 @@ const Caja = {
     document.getElementById('cuentaFilter').addEventListener('change', (e) => {
       this.cuenta = e.target.value;
       this.currentPage = 1;
+      this.loadResumenPeriodo();
       this.loadMovimientos();
     });
 
@@ -258,7 +259,7 @@ const Caja = {
 
   async loadResumenPeriodo() {
     try {
-      const response = await window.api.caja.getResumenPeriodo(this.fechaDesde, this.fechaHasta);
+      const response = await window.api.caja.getResumenPeriodo(this.fechaDesde, this.fechaHasta, this.cuenta);
       const grid = document.getElementById('resumenPeriodoGrid');
 
       if (!response.success) {
@@ -268,11 +269,12 @@ const Caja = {
 
       const { ingresos, gastos, flujoNeto } = response.data;
       const colorFlujo = flujoNeto >= 0 ? '#10b981' : '#ef4444';
+      const sufijo = this.cuenta ? ` (solo ${this.cuenta})` : ' (Caja + Banco)';
 
       grid.innerHTML = App.renderStatsGrid([
-        { titulo: 'Ingresos del Período', valor: `$${this.formatNumber(ingresos)}`, icono: 'barChart', valorColor: '#10b981' },
-        { titulo: 'Gastos del Período', valor: `$${this.formatNumber(gastos)}`, icono: 'trendingDown', valorColor: '#ef4444' },
-        { titulo: 'Flujo Neto', valor: `$${this.formatNumber(flujoNeto)}`, icono: 'wallet', valorColor: colorFlujo }
+        { titulo: `Ingresos del Período${sufijo}`, valor: `$${this.formatNumber(ingresos)}`, icono: 'barChart', valorColor: '#10b981' },
+        { titulo: `Gastos del Período${sufijo}`, valor: `$${this.formatNumber(gastos)}`, icono: 'trendingDown', valorColor: '#ef4444' },
+        { titulo: `Flujo Neto${sufijo}`, valor: `$${this.formatNumber(flujoNeto)}`, icono: 'wallet', valorColor: colorFlujo }
       ]);
     } catch (error) {
       console.error('Error:', error);

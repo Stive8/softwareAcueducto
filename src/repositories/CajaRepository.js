@@ -86,11 +86,13 @@ class CajaRepository {
 
   // Resumen de Ingresos/Gastos/Flujo neto en un rango de fechas. Los 'Traslado' (ej.
   // consignación de caja a banco) se excluyen a propósito: son movimientos internos entre
-  // cuentas propias, no ingresos ni gastos reales.
-  getResumenPeriodo(fechaDesde = '', fechaHasta = '') {
+  // cuentas propias, no ingresos ni gastos reales. `cuenta` ('Caja' o 'Banco') filtra a una sola
+  // de las dos, ya que todo Ingreso/Egreso guarda su cuenta en `origen` (nunca `destino`).
+  getResumenPeriodo(fechaDesde = '', fechaHasta = '', cuenta = '') {
     let query = `SELECT tipo, COALESCE(SUM(monto), 0) as total FROM movimientos WHERE tipo IN ('Ingreso', 'Egreso')`;
     const params = [];
 
+    if (cuenta) { query += ' AND origen = ?'; params.push(cuenta); }
     if (fechaDesde) { query += ' AND fecha_movimiento >= ?'; params.push(fechaDesde); }
     if (fechaHasta) { query += ' AND fecha_movimiento <= ?'; params.push(fechaHasta); }
     query += ' GROUP BY tipo';
