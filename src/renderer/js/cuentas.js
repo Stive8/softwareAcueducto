@@ -936,7 +936,7 @@ const Cuentas = {
   },
 
   formatDate(dateString) {
-    const date = new Date(dateString);
+    const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(dateString) ? dateString + 'T00:00:00' : dateString);
     return date.toLocaleDateString('es-CO', {
       year: 'numeric',
       month: 'long',

@@ -119,7 +119,9 @@ class ExcelExportService {
       const rowData = {};
       reporte.columnas.forEach(col => {
         let valor = fila[col.key];
-        if (col.tipo === 'fecha' && valor) valor = new Date(valor);
+        if (col.tipo === 'fecha' && valor) {
+          valor = new Date(/^\d{4}-\d{2}-\d{2}$/.test(valor) ? valor + 'T00:00:00' : valor);
+        }
         rowData[col.key] = valor ?? '';
       });
       const row = sheet.addRow(rowData);

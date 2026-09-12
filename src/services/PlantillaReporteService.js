@@ -17,7 +17,8 @@ function formatNumber(num) {
 
 function formatFecha(fechaString) {
   if (!fechaString) return '-';
-  return new Date(fechaString).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' });
+  const fecha = /^\d{4}-\d{2}-\d{2}$/.test(fechaString) ? fechaString + 'T00:00:00' : fechaString;
+  return new Date(fecha).toLocaleDateString('es-CO', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
 function formatValorResumen(item) {
