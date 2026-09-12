@@ -43,7 +43,7 @@
 
 **Interfaces:**
 - Produces: `AsientoContableService.getSaldoDoblePartida(claveCuentaAutomatica: 'CAJA'|'BANCO') -> number` — saldo acumulado en la doble partida (Libro Mayor, incluidas subcuentas) de esa cuenta automática. Devuelve `0` si la cuenta automática no está configurada.
-- `CajaService._crearAsientoAjuste` gana un 6º parámetro posicional `sincronizarLedgerSimple` (boolean, sin default — todo llamador debe pasarlo explícito).
+- `CajaService._crearAsientoAjuste` gana un 7º parámetro posicional `sincronizarLedgerSimple` (boolean, sin default — todo llamador debe pasarlo explícito).
 
 - [ ] **Step 1: Escribir el test que reproduce el hallazgo A1 (debe fallar con el código actual)**
 

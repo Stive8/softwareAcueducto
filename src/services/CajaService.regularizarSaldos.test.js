@@ -283,6 +283,62 @@ test('regularizarSaldos() no crea un asiento adicional si el libro simple y la d
   }
 });
 
+test('regularizarSaldos() cierra una divergencia puramente de doble partida aunque el saldo real ingresado coincida con el libro simple (revisión final de rama, A1-A4)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const service = new CajaService(ctx.dbService);
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+
+    // Divergencia puramente de doble partida: un asiento manual que debita la cuenta automática
+    // de Caja (110505) y acredita Patrimonio, con sincronizarLedgerSimple: false -- la misma
+    // técnica que la prueba "también cierra una divergencia previa..." de arriba, pero en sentido
+    // inverso (ahí la divergencia nacía en el libro simple; acá nace en la doble partida). El
+    // libro simple (`movimientos`) nunca se toca, así que getSaldoCaja() se queda en 0.
+    const cuentaCaja = db.prepare(`SELECT id FROM plan_cuentas WHERE codigo = '110505'`).get();
+    const patrimonio = db.prepare(`SELECT id FROM plan_cuentas WHERE codigo = '3105'`).get();
+    assert.ok(cuentaCaja && patrimonio);
+
+    asientoContableService.crearManual({
+      fecha: '2025-06-01',
+      concepto: 'Saldo en doble partida sin reflejo en libro simple (divergencia simulada)',
+      lineas: [
+        { cuentaContableId: cuentaCaja.id, debito: 75000, credito: 0 },
+        { cuentaContableId: patrimonio.id, debito: 0, credito: 75000 }
+      ],
+      sincronizarLedgerSimple: false
+    });
+
+    assert.equal(service.repository.getSaldoCaja(), 0);
+    const antes = asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja');
+    assert.equal(antes.saldoLedgerSimple, 0);
+    assert.equal(antes.saldoDoblePartida, 75000);
+    assert.equal(antes.conciliado, false);
+
+    // Escenario real de la UI: el formulario de "Ajustar Saldos" precarga saldoRealCaja con
+    // getSaldoCaja() (el saldo del libro simple), así que diferenciaCaja sale en 0 -- el tesorero
+    // no cambió nada en el campo porque el arqueo físico SÍ coincide con el Dashboard. El guard
+    // anterior a este fix disparaba acá, aunque hay una divergencia real de doble partida
+    // esperando ser cerrada.
+    const resultado = service.regularizarSaldos({
+      fecha: '2025-12-31',
+      saldoRealCaja: service.repository.getSaldoCaja(), // == 0, precarga típica de la UI
+      saldoRealBanco: service.repository.getSaldoBanco(),
+      motivo: 'Cierre de divergencia de doble partida detectada por el banner de conciliación'
+    });
+
+    assert.equal(resultado.ajusteCaja, null, 'No hay diferencia de libro simple que ajustar');
+    assert.ok(resultado.cierreDivergenciaCaja, 'Debe haber creado un asiento de cierre de divergencia');
+
+    const despues = asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja');
+    assert.equal(despues.saldoLedgerSimple, 0);
+    assert.equal(despues.saldoDoblePartida, 0, 'La doble partida debe quedar en 0, igual que el libro simple');
+    assert.equal(despues.conciliado, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
 test('regularizarSaldos() reconcilia la familia completa de Caja (General + Menor), no solo la hoja de la cuenta automática (revisión de A1)', () => {
   const ctx = crearDbTemporal();
   try {

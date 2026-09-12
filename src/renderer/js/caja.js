@@ -502,8 +502,9 @@ const Caja = {
       <div style="padding: 12px; background: #eff6ff; border-left: 4px solid #3b82f6; border-radius: 4px; margin-bottom: 20px;">
         <p style="margin: 0; font-size: 0.875rem; color: #1e40af;">
           Usa esto cuando el saldo real (arqueo físico de caja / extracto bancario) no coincide con el
-          saldo que calcula el sistema. La diferencia se registra como un asiento contable fechado y con
-          motivo contra la cuenta de Patrimonio — no borra ni reemplaza los movimientos históricos.
+          saldo que calcula el sistema, o cuando el sistema avisa una divergencia contable pendiente.
+          La diferencia se registra como uno o más asientos contables fechados y con motivo contra la
+          cuenta de Patrimonio — no borra ni reemplaza los movimientos históricos.
         </p>
       </div>
 

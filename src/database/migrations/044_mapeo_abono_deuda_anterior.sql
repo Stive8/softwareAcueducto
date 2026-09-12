@@ -8,5 +8,12 @@
 -- operacional) en vez de la cuenta real de Sostenimiento -- hallazgo Alto A3 de la auditoría de
 -- Contabilidad (2026-09-11). Se mapea a la misma cuenta que Sostenimiento (413505): es el mismo
 -- tipo de ingreso (cuota de sostenimiento), solo que de un período anterior al corte.
-INSERT INTO mapeo_conceptos_contables (modulo, concepto, cuenta_contable_id) VALUES
+
+-- INSERT OR IGNORE, no INSERT plano: mapeo_conceptos_contables tiene UNIQUE(modulo, concepto)
+-- (ver 006_plan_de_cuentas.sql) y esta brecha es exactamente el tipo de cosa que alguien pudo
+-- haber parchado a mano en la base real antes de este fix -- si la fila ya existe, un INSERT
+-- plano revienta con UNIQUE constraint failed, y como runMigrations hace rollback sin marcarla
+-- aplicada, se repite (y falla) en TODOS los arranques siguientes, dejando la app sin arrancar
+-- (mismo patrón que la migración 017). Idempotente: si la fila ya existe, no hace nada.
+INSERT OR IGNORE INTO mapeo_conceptos_contables (modulo, concepto, cuenta_contable_id) VALUES
   ('RecibosDetalle', 'AbonoDeudaAnterior', (SELECT id FROM plan_cuentas WHERE codigo = '413505'));

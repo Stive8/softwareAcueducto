@@ -116,12 +116,29 @@ class CajaService {
     const diferenciaCaja = saldoRealCaja - saldoLedgerSimpleCajaAntes;
     const diferenciaBanco = saldoRealBanco - saldoLedgerSimpleBancoAntes;
 
-    if (diferenciaCaja === 0 && diferenciaBanco === 0) {
-      throw new Error('No hay ninguna diferencia que ajustar: los saldos ya coinciden con los valores ingresados');
-    }
-
+    // La divergencia previa se calcula ANTES del guard de abajo (y el guard la incluye en su
+    // condición) a propósito: en el flujo real de la UI (Caja -> Ajustar Saldos), el formulario
+    // precarga saldoRealCaja/saldoRealBanco con el saldo del libro simple ya calculado
+    // (getSaldoCaja()/getSaldoBanco()), así que diferenciaCaja/diferenciaBanco salen en 0 en el
+    // caso típico en que la divergencia es puramente de doble partida (no del libro simple) -- que
+    // es exactamente el caso que este método existe para resolver. Si el guard solo mirara
+    // diferenciaCaja/diferenciaBanco, rechazaría el ajuste con "no hay ninguna diferencia" y el
+    // banner de conciliación del Dashboard nunca se cerraría, sin ninguna otra herramienta
+    // disponible para hacerlo -- hallazgo de la revisión final de rama (A1-A4, 2026-09-12).
     const divergenciaPreviaCaja = saldoLedgerSimpleCajaAntes - this.asientoContableService.getSaldoDoblePartida('CAJA');
     const divergenciaPreviaBanco = saldoLedgerSimpleBancoAntes - this.asientoContableService.getSaldoDoblePartida('BANCO');
+
+    // Tolerancia de $1 para divergenciaPrevia*, igual que AsientoContableService.
+    // _compararSaldoLedgers (el propio motor de conciliación): si alguna vez llega un valor con
+    // centavos a movimientos_contables (la regla de "pesos enteros" es una convención, no una
+    // restricción de esquema), esto evita acuñar un asiento de "cierre de divergencia" basura por
+    // una diferencia de centavos en cada arqueo.
+    if (
+      diferenciaCaja === 0 && diferenciaBanco === 0 &&
+      Math.abs(divergenciaPreviaCaja) < 1 && Math.abs(divergenciaPreviaBanco) < 1
+    ) {
+      throw new Error('No hay ninguna diferencia que ajustar: los saldos ya coinciden con los valores ingresados');
+    }
 
     return this.repository.transaccion(() => {
       const ajusteCaja = diferenciaCaja !== 0
@@ -131,24 +148,26 @@ class CajaService {
         ? this._crearAsientoAjuste('BANCO', 'Banco', diferenciaBanco, fecha, motivo, usuarioId, true)
         : null;
 
-      if (divergenciaPreviaCaja !== 0) {
-        this._crearAsientoAjuste(
-          'CAJA', 'Caja', divergenciaPreviaCaja, fecha,
-          `Cierre de divergencia previa entre libro simple y doble partida (ajuste relacionado: ${motivo})`,
-          usuarioId, false
-        );
-      }
-      if (divergenciaPreviaBanco !== 0) {
-        this._crearAsientoAjuste(
-          'BANCO', 'Banco', divergenciaPreviaBanco, fecha,
-          `Cierre de divergencia previa entre libro simple y doble partida (ajuste relacionado: ${motivo})`,
-          usuarioId, false
-        );
-      }
+      const cierreDivergenciaCaja = Math.abs(divergenciaPreviaCaja) >= 1
+        ? this._crearAsientoAjuste(
+            'CAJA', 'Caja', divergenciaPreviaCaja, fecha,
+            `Cierre de divergencia previa entre libro simple y doble partida (ajuste relacionado: ${motivo})`,
+            usuarioId, false
+          )
+        : null;
+      const cierreDivergenciaBanco = Math.abs(divergenciaPreviaBanco) >= 1
+        ? this._crearAsientoAjuste(
+            'BANCO', 'Banco', divergenciaPreviaBanco, fecha,
+            `Cierre de divergencia previa entre libro simple y doble partida (ajuste relacionado: ${motivo})`,
+            usuarioId, false
+          )
+        : null;
 
       return {
         ajusteCaja,
         ajusteBanco,
+        cierreDivergenciaCaja,
+        cierreDivergenciaBanco,
         saldoFinalCaja: this.repository.getSaldoCaja(),
         saldoFinalBanco: this.repository.getSaldoBanco()
       };
@@ -159,6 +178,14 @@ class CajaService {
   // típico de egresos históricos no registrados), se acredita Caja/Banco y se debita Patrimonio.
   // Si es positiva, al revés. sincronizarLedgerSimple=false se usa para el segundo asiento de
   // cierre de divergencia de regularizarSaldos() (arriba): ese solo debe tocar la doble partida.
+  //
+  // Asimetría hoja-vs-familia: getSaldoDoblePartida (usado por regularizarSaldos para calcular la
+  // divergencia) suma TODA la familia nivel-3 (110505 Caja General + 110510 Caja Menor), pero acá
+  // se postea contra la HOJA de la cuenta automática (110505) únicamente. Si alguna vez una
+  // divergencia viviera solo en Caja Menor, la familia reconciliaría pero Caja General podría
+  // quedar negativa. Hoy no es alcanzable (ningún camino de producción genera una divergencia
+  // exclusiva de Caja Menor: sincronizarLineaConCajaBanco espeja Caja Menor al libro simple por
+  // prefijo) -- si eso cambia, revisar este método.
   _crearAsientoAjuste(claveCuentaAutomatica, nombreCuenta, diferencia, fecha, motivo, usuarioId, sincronizarLedgerSimple) {
     const cuentaId = this.cuentaAutomaticaRepository.getCuentaIdByClave(claveCuentaAutomatica);
     if (!cuentaId) throw new Error(`No hay una cuenta automática configurada para ${nombreCuenta}`);
