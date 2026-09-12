@@ -87,7 +87,6 @@ function renderCarta(datos) {
     <div>Cuenta: <span>${escapeHtml(datos.cuenta_codigo)}</span></div>
     <div>Dirección: <span>${escapeHtml(datos.cuenta_direccion)}</span></div>
     <div>Propietario: <span>${escapeHtml(datos.propietario_nombre)}</span></div>
-    <div>Identificación: <span>${escapeHtml(datos.propietario_identificacion || '-')}</span></div>
   </div>
 
   <table>
@@ -205,7 +204,6 @@ function renderTermico80mm(datos) {
   <div class="campo"><span class="campo-etiqueta">Cuenta:</span> ${escapeHtml(datos.cuenta_codigo)}</div>
   <div class="campo"><span class="campo-etiqueta">Dirección:</span> ${escapeHtml(datos.cuenta_direccion)}</div>
   <div class="campo"><span class="campo-etiqueta">Propietario:</span> ${escapeHtml(datos.propietario_nombre)}</div>
-  <div class="campo"><span class="campo-etiqueta">Identificación:</span> ${escapeHtml(datos.propietario_identificacion || '-')}</div>
 
   <hr class="separador">
 
