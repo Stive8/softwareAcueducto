@@ -294,10 +294,18 @@ class AsientoContableService {
   // Prueba. CajaService.regularizarSaldos() lo necesita por separado del libro simple para poder
   // cerrar una divergencia previa entre los dos libros, no solo llevar el libro simple al valor
   // real -- hallazgo Alto A1 de la auditoría de Contabilidad (2026-09-11).
+  //
+  // Usa el mismo ancestro de nivel 3 que verificarConciliacionCajaBanco() (no el id exacto de la
+  // cuenta automática): Caja y Banco tienen subcuentas hermanas (110505 Caja General / 110510
+  // Caja Menor desde la migración 029) que no son descendientes unas de otras, así que resolver
+  // solo el id de la automática y sumar SU subárbol pierde el saldo de la cuenta hermana.
   getSaldoDoblePartida(claveCuentaAutomatica) {
-    const cuentaId = this.cuentaAutomaticaRepository.getCuentaIdByClave(claveCuentaAutomatica);
-    if (!cuentaId) return 0;
-    return this.repository.getSaldoConSubcuentas(cuentaId);
+    const { caja, banco } = this._getCodigosCajaBanco();
+    const codigo = claveCuentaAutomatica === 'CAJA' ? caja : banco;
+    if (!codigo) return 0;
+    const cuenta = this.planCuentaRepository.findByCodigo(codigo);
+    if (!cuenta) return 0;
+    return this.repository.getSaldoConSubcuentas(cuenta.id);
   }
 
   // Compara, para Caja y para Banco, el saldo del libro simple (tabla `movimientos`, la fuente

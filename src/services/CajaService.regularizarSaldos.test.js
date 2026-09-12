@@ -282,3 +282,53 @@ test('regularizarSaldos() no crea un asiento adicional si el libro simple y la d
     cerrarDbTemporal(ctx);
   }
 });
+
+test('regularizarSaldos() reconcilia la familia completa de Caja (General + Menor), no solo la hoja de la cuenta automática (revisión de A1)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const service = new CajaService(ctx.dbService);
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+
+    // Divergencia previa, pero esta vez en la cuenta HERMANA de la automática: un asiento
+    // contra Caja Menor (110510), que desde la migración 029 no es descendiente de Caja General
+    // (110505, la cuenta automática configurada) sino hermana bajo el mismo ancestro '1105'.
+    // sincronizarLedgerSimple: false simula que ese asiento nunca se reflejó en el libro simple
+    // `movimientos` (el mismo patrón de desincronización que este hallazgo corrige, pero esta vez
+    // escondido en la subcuenta hermana en vez de en la cuenta automática misma).
+    const cajaMenor = db.prepare(`SELECT id FROM plan_cuentas WHERE codigo = '110510'`).get();
+    const patrimonio = db.prepare(`SELECT id FROM plan_cuentas WHERE codigo = '3105'`).get();
+    assert.ok(cajaMenor && patrimonio, 'El plan de cuentas sembrado debe traer 110510 y 3105');
+
+    asientoContableService.crearManual({
+      fecha: '2025-06-01',
+      concepto: 'Saldo en Caja Menor sin reflejo en libro simple (divergencia simulada)',
+      lineas: [
+        { cuentaContableId: cajaMenor.id, debito: 40000, credito: 0 },
+        { cuentaContableId: patrimonio.id, debito: 0, credito: 40000 }
+      ],
+      sincronizarLedgerSimple: false
+    });
+
+    // El libro simple sigue en 0 (nunca se tocó `movimientos`); la doble partida de la familia
+    // Caja (110505 + 110510) ya tiene 40.000, todos en Caja Menor.
+    assert.equal(service.repository.getSaldoCaja(), 0);
+    const antesDelAjuste = asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja');
+    assert.equal(antesDelAjuste.saldoDoblePartida, 40000, 'La doble partida de la familia Caja debe incluir el saldo de Caja Menor, no solo el de Caja General');
+
+    const resultado = service.regularizarSaldos({
+      fecha: '2025-12-31',
+      saldoRealCaja: 40000,
+      saldoRealBanco: service.repository.getSaldoBanco(),
+      motivo: 'Arqueo físico de caja'
+    });
+
+    assert.equal(resultado.saldoFinalCaja, 40000);
+    const caja = asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja');
+    assert.equal(caja.saldoLedgerSimple, 40000);
+    assert.equal(caja.saldoDoblePartida, 40000, 'La familia completa (General + Menor) debe terminar en el valor real, no en 80.000 ni en otro valor que ignore a Caja Menor');
+    assert.equal(caja.conciliado, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
