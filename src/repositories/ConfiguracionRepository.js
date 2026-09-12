@@ -16,6 +16,10 @@ class ConfiguracionRepository {
     `).run(String(valor), clave);
   }
 
+  transaccion(fn) {
+    return this.db.transaction(fn)();
+  }
+
   getMaxNumeroRecibo() {
     // Incluye tanto recibos reales como anulados del talonario físico: comparten la misma
     // numeración consecutiva, así que ninguno de los dos puede quedar por delante del contador.

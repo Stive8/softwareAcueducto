@@ -367,13 +367,23 @@ class AsientoContableService {
 
     if (!monto || monto <= 0) return null;
 
+    const nombreCuenta = claveCuentaAutomatica === 'CAJA' ? 'Caja' : 'Bancos';
+
+    // Antes devolvían null en silencio: Configuración guardaba el monto sin avisar que el
+    // asiento de apertura no se pudo crear, dejando el libro simple y la doble partida
+    // desincronizados sin ningún error visible -- hallazgo Alto A2 de la auditoría de
+    // Contabilidad (2026-09-11). Ahora con actualizar() atómico (ver ConfiguracionService.js),
+    // este error revierte también las claves de configuración que se iban a guardar junto con el
+    // saldo inicial.
     const cuentaId = this.cuentaAutomaticaRepository.getCuentaIdByClave(claveCuentaAutomatica);
-    if (!cuentaId) return null; // cuenta automática no configurada; nada que sincronizar todavía
+    if (!cuentaId) {
+      throw new Error(`No se encontró la cuenta automática de ${nombreCuenta}; configúrela en Contabilidad > Cuentas Automáticas antes de fijar el saldo inicial.`);
+    }
 
     const patrimonio = this.planCuentaRepository.findByCodigo('3105');
-    if (!patrimonio) return null; // no debería pasar: '3105' se siembra en la migración 006
-
-    const nombreCuenta = claveCuentaAutomatica === 'CAJA' ? 'Caja' : 'Bancos';
+    if (!patrimonio) {
+      throw new Error('No se encontró la cuenta de Patrimonio (3105) en el plan de cuentas; no se puede registrar el asiento de apertura.');
+    }
 
     return this.crear({
       fecha: new Date().toLocaleDateString('en-CA'),
