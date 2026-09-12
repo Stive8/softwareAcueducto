@@ -12,6 +12,16 @@ function crearTerceroDePrueba(dbService) {
   });
 }
 
+// Las 3 fechaGasto de este archivo deben ser la fecha real de hoy (no una fija en el pasado):
+// GASTO_EFECTIVO v2 -- la única versión de la plantilla cuya línea 2 lee caja_efectivo_id, que es
+// justo lo que el hallazgo A4 necesita ejercitar -- solo está vigente desde la fecha en que
+// crearDbTemporal() corrió las migraciones (fecha_desde = date('now') en la migración 029), y
+// PlantillaContabilizacionRepository.findVigente() elige la versión según la fecha del GASTO, no
+// la fecha de hoy. Una fechaGasto fija en el pasado (p. ej. '2026-01-15') cae siempre en el rango
+// de v1 -- que resuelve su línea 2 vía cuenta_automatica_clave='CAJA' y nunca toca
+// caja_efectivo_id -- y por lo tanto nunca reproduciría el crash de plantilla que describe A4.
+const hoy = new Date().toISOString().split('T')[0];
+
 function sembrarSaldoCaja(dbService, monto, codigoCuenta = '110505') {
   const db = dbService.getDb();
   const cuentaCaja = db.prepare('SELECT id FROM plan_cuentas WHERE codigo = ?').get(codigoCuenta);
@@ -31,7 +41,7 @@ test('corregirMetodoPago() de Transferencia a Efectivo genera el asiento correct
     const terceroId = crearTerceroDePrueba(ctx.dbService);
 
     const gastoId = service.create({
-      fechaGasto: '2026-01-15', concepto: 'Gasto por transferencia', tipoGasto: 'Gastos Diversos',
+      fechaGasto: hoy, concepto: 'Gasto por transferencia', tipoGasto: 'Gastos Diversos',
       valor: 30000, metodoPago: 'Transferencia', terceroId
     }, null);
 
@@ -56,7 +66,7 @@ test('corregirMetodoPago() de Transferencia a Efectivo rechaza si no hay saldo s
     const terceroId = crearTerceroDePrueba(ctx.dbService);
 
     const gastoId = service.create({
-      fechaGasto: '2026-01-15', concepto: 'Gasto por transferencia', tipoGasto: 'Gastos Diversos',
+      fechaGasto: hoy, concepto: 'Gasto por transferencia', tipoGasto: 'Gastos Diversos',
       valor: 30000, metodoPago: 'Transferencia', terceroId
     }, null);
 
@@ -81,7 +91,7 @@ test('corregirMetodoPago() de Efectivo a Transferencia limpia caja_efectivo_id',
     const terceroId = crearTerceroDePrueba(ctx.dbService);
 
     const gastoId = service.create({
-      fechaGasto: '2026-01-15', concepto: 'Gasto en efectivo', tipoGasto: 'Gastos Diversos',
+      fechaGasto: hoy, concepto: 'Gasto en efectivo', tipoGasto: 'Gastos Diversos',
       valor: 30000, metodoPago: 'Efectivo', terceroId
     }, null);
 
