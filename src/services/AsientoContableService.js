@@ -288,6 +288,18 @@ class AsientoContableService {
     });
   }
 
+  // Saldo acumulado en la doble partida (Libro Mayor, incluidas subcuentas) de la cuenta
+  // automática de Caja o Banco -- a diferencia de CajaRepository.getSaldoCaja()/getSaldoBanco()
+  // (el libro simple que alimenta el Dashboard), este es el saldo que muestra el Balance de
+  // Prueba. CajaService.regularizarSaldos() lo necesita por separado del libro simple para poder
+  // cerrar una divergencia previa entre los dos libros, no solo llevar el libro simple al valor
+  // real -- hallazgo Alto A1 de la auditoría de Contabilidad (2026-09-11).
+  getSaldoDoblePartida(claveCuentaAutomatica) {
+    const cuentaId = this.cuentaAutomaticaRepository.getCuentaIdByClave(claveCuentaAutomatica);
+    if (!cuentaId) return 0;
+    return this.repository.getSaldoConSubcuentas(cuentaId);
+  }
+
   // Compara, para Caja y para Banco, el saldo del libro simple (tabla `movimientos`, la fuente
   // del Dashboard y de la pantalla de Caja) contra el saldo de la cuenta de doble partida
   // correspondiente (incluidas todas sus subcuentas). Si difieren, algo quedó desincronizado

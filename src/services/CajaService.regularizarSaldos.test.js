@@ -217,3 +217,68 @@ test('regularizarSaldos() es reutilizable: un segundo ajuste posterior no se acu
     cerrarDbTemporal(ctx);
   }
 });
+
+test('regularizarSaldos() también cierra una divergencia previa entre libro simple y doble partida (hallazgo Alto A1, auditoría 2026-09-11)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const service = new CajaService(ctx.dbService);
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+
+    // Divergencia previa: una fila de libro simple ($300.000 de Ingreso en Caja) sin ningún
+    // asiento contable detrás -- el mismo patrón que el commit 797c4e7 tuvo que reparar a mano
+    // para 50 recibos reales. La doble partida queda en 0 mientras el libro simple ya tiene 300.000.
+    service.repository.crearMovimiento({
+      tipo: 'Ingreso', origen: 'Caja', monto: 300000,
+      concepto: 'Ingreso sin asiento (divergencia simulada)', fechaMovimiento: '2025-06-01'
+    });
+    assert.equal(service.repository.getSaldoCaja(), 300000);
+    assert.equal(
+      asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja').saldoDoblePartida,
+      0
+    );
+
+    const resultado = service.regularizarSaldos({
+      fecha: '2025-12-31',
+      saldoRealCaja: 250000,
+      saldoRealBanco: service.repository.getSaldoBanco(),
+      motivo: 'Arqueo físico de caja'
+    });
+
+    assert.equal(resultado.saldoFinalCaja, 250000);
+    const caja = asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja');
+    assert.equal(caja.saldoLedgerSimple, 250000);
+    assert.equal(caja.saldoDoblePartida, 250000, 'La doble partida debe terminar en el valor real, no en -50.000');
+    assert.equal(caja.conciliado, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('regularizarSaldos() no crea un asiento adicional si el libro simple y la doble partida ya estaban sincronizados', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+    const configuracionService = new ConfiguracionService(ctx.dbService, asientoContableService);
+    // Sembrar por el camino que sí mantiene ambos libros sincronizados desde el arranque (ver
+    // ConfiguracionService.aperturaSaldoInicial.test.js), a diferencia de seedSaldoCaja() de
+    // arriba (que solo toca el libro simple, a propósito, para los tests que no necesitan la
+    // doble partida).
+    configuracionService.actualizar({ saldo_caja_inicial: 129000000 }, 1);
+    const service = new CajaService(ctx.dbService);
+
+    const antes = asientoContableService.getAll({ limit: 1000 }).data.length;
+    service.regularizarSaldos({
+      fecha: '2025-12-31',
+      saldoRealCaja: 3000000,
+      saldoRealBanco: service.repository.getSaldoBanco(),
+      motivo: 'Arqueo físico de caja'
+    });
+    const despues = asientoContableService.getAll({ limit: 1000 }).data.length;
+
+    // La apertura (ya contada en "antes") + exactamente 1 asiento de ajuste de Caja; ningún
+    // segundo asiento de cierre de divergencia, porque no había ninguna divergencia que cerrar.
+    assert.equal(despues - antes, 1);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

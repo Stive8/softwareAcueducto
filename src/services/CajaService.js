@@ -93,6 +93,14 @@ class CajaService {
   // por defecto), que sincroniza a la vez la doble partida y el libro simple `movimientos` que
   // alimenta el Dashboard. Reutilizable: cada llamada lleva del saldo calculado actual al nuevo
   // saldo real indicado, sin acumular con ajustes anteriores.
+  //
+  // Además, si el libro simple y la doble partida ya venían desincronizados ANTES de este ajuste
+  // (p. ej. una fila de `movimientos` sin asiento detrás -- ver commit 797c4e7), el ajuste de
+  // arriba por sí solo deja el libro simple en el valor real pero la doble partida arrastra esa
+  // misma desincronización (puede quedar negativa). Se cierra aparte con un segundo asiento SOLO
+  // de doble partida (sincronizarLedgerSimple=false), para no volver a tocar el libro simple que
+  // el primer asiento ya dejó correcto -- hallazgo Alto A1 de la auditoría de Contabilidad
+  // (2026-09-11).
   regularizarSaldos({ fecha, saldoRealCaja, saldoRealBanco, motivo, usuarioId = null }) {
     if (!fecha) throw new Error('La fecha del ajuste es obligatoria');
     if (typeof saldoRealCaja !== 'number' || Number.isNaN(saldoRealCaja) || saldoRealCaja < 0) {
@@ -103,20 +111,40 @@ class CajaService {
     }
     if (!motivo || !motivo.trim()) throw new Error('Debe indicar el motivo del ajuste');
 
-    const diferenciaCaja = saldoRealCaja - this.repository.getSaldoCaja();
-    const diferenciaBanco = saldoRealBanco - this.repository.getSaldoBanco();
+    const saldoLedgerSimpleCajaAntes = this.repository.getSaldoCaja();
+    const saldoLedgerSimpleBancoAntes = this.repository.getSaldoBanco();
+    const diferenciaCaja = saldoRealCaja - saldoLedgerSimpleCajaAntes;
+    const diferenciaBanco = saldoRealBanco - saldoLedgerSimpleBancoAntes;
 
     if (diferenciaCaja === 0 && diferenciaBanco === 0) {
       throw new Error('No hay ninguna diferencia que ajustar: los saldos ya coinciden con los valores ingresados');
     }
 
+    const divergenciaPreviaCaja = saldoLedgerSimpleCajaAntes - this.asientoContableService.getSaldoDoblePartida('CAJA');
+    const divergenciaPreviaBanco = saldoLedgerSimpleBancoAntes - this.asientoContableService.getSaldoDoblePartida('BANCO');
+
     return this.repository.transaccion(() => {
       const ajusteCaja = diferenciaCaja !== 0
-        ? this._crearAsientoAjuste('CAJA', 'Caja', diferenciaCaja, fecha, motivo, usuarioId)
+        ? this._crearAsientoAjuste('CAJA', 'Caja', diferenciaCaja, fecha, motivo, usuarioId, true)
         : null;
       const ajusteBanco = diferenciaBanco !== 0
-        ? this._crearAsientoAjuste('BANCO', 'Banco', diferenciaBanco, fecha, motivo, usuarioId)
+        ? this._crearAsientoAjuste('BANCO', 'Banco', diferenciaBanco, fecha, motivo, usuarioId, true)
         : null;
+
+      if (divergenciaPreviaCaja !== 0) {
+        this._crearAsientoAjuste(
+          'CAJA', 'Caja', divergenciaPreviaCaja, fecha,
+          `Cierre de divergencia previa entre libro simple y doble partida (ajuste relacionado: ${motivo})`,
+          usuarioId, false
+        );
+      }
+      if (divergenciaPreviaBanco !== 0) {
+        this._crearAsientoAjuste(
+          'BANCO', 'Banco', divergenciaPreviaBanco, fecha,
+          `Cierre de divergencia previa entre libro simple y doble partida (ajuste relacionado: ${motivo})`,
+          usuarioId, false
+        );
+      }
 
       return {
         ajusteCaja,
@@ -129,8 +157,9 @@ class CajaService {
 
   // Un asiento por cuenta: si la diferencia es negativa (saldo real menor al calculado, el caso
   // típico de egresos históricos no registrados), se acredita Caja/Banco y se debita Patrimonio.
-  // Si es positiva, al revés.
-  _crearAsientoAjuste(claveCuentaAutomatica, nombreCuenta, diferencia, fecha, motivo, usuarioId) {
+  // Si es positiva, al revés. sincronizarLedgerSimple=false se usa para el segundo asiento de
+  // cierre de divergencia de regularizarSaldos() (arriba): ese solo debe tocar la doble partida.
+  _crearAsientoAjuste(claveCuentaAutomatica, nombreCuenta, diferencia, fecha, motivo, usuarioId, sincronizarLedgerSimple) {
     const cuentaId = this.cuentaAutomaticaRepository.getCuentaIdByClave(claveCuentaAutomatica);
     if (!cuentaId) throw new Error(`No hay una cuenta automática configurada para ${nombreCuenta}`);
 
@@ -153,7 +182,8 @@ class CajaService {
       concepto: `Regularización de saldo de ${nombreCuenta} al ${fecha}: ${motivo}`,
       tipoComprobante: 'Regularización de Saldos',
       usuarioId,
-      lineas
+      lineas,
+      sincronizarLedgerSimple
     });
   }
 }
