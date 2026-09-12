@@ -217,3 +217,174 @@ test('regularizarSaldos() es reutilizable: un segundo ajuste posterior no se acu
     cerrarDbTemporal(ctx);
   }
 });
+
+test('regularizarSaldos() también cierra una divergencia previa entre libro simple y doble partida (hallazgo Alto A1, auditoría 2026-09-11)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const service = new CajaService(ctx.dbService);
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+
+    // Divergencia previa: una fila de libro simple ($300.000 de Ingreso en Caja) sin ningún
+    // asiento contable detrás -- el mismo patrón que el commit 797c4e7 tuvo que reparar a mano
+    // para 50 recibos reales. La doble partida queda en 0 mientras el libro simple ya tiene 300.000.
+    service.repository.crearMovimiento({
+      tipo: 'Ingreso', origen: 'Caja', monto: 300000,
+      concepto: 'Ingreso sin asiento (divergencia simulada)', fechaMovimiento: '2025-06-01'
+    });
+    assert.equal(service.repository.getSaldoCaja(), 300000);
+    assert.equal(
+      asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja').saldoDoblePartida,
+      0
+    );
+
+    const resultado = service.regularizarSaldos({
+      fecha: '2025-12-31',
+      saldoRealCaja: 250000,
+      saldoRealBanco: service.repository.getSaldoBanco(),
+      motivo: 'Arqueo físico de caja'
+    });
+
+    assert.equal(resultado.saldoFinalCaja, 250000);
+    const caja = asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja');
+    assert.equal(caja.saldoLedgerSimple, 250000);
+    assert.equal(caja.saldoDoblePartida, 250000, 'La doble partida debe terminar en el valor real, no en -50.000');
+    assert.equal(caja.conciliado, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('regularizarSaldos() no crea un asiento adicional si el libro simple y la doble partida ya estaban sincronizados', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+    const configuracionService = new ConfiguracionService(ctx.dbService, asientoContableService);
+    // Sembrar por el camino que sí mantiene ambos libros sincronizados desde el arranque (ver
+    // ConfiguracionService.aperturaSaldoInicial.test.js), a diferencia de seedSaldoCaja() de
+    // arriba (que solo toca el libro simple, a propósito, para los tests que no necesitan la
+    // doble partida).
+    configuracionService.actualizar({ saldo_caja_inicial: 129000000 }, 1);
+    const service = new CajaService(ctx.dbService);
+
+    const antes = asientoContableService.getAll({ limit: 1000 }).data.length;
+    service.regularizarSaldos({
+      fecha: '2025-12-31',
+      saldoRealCaja: 3000000,
+      saldoRealBanco: service.repository.getSaldoBanco(),
+      motivo: 'Arqueo físico de caja'
+    });
+    const despues = asientoContableService.getAll({ limit: 1000 }).data.length;
+
+    // La apertura (ya contada en "antes") + exactamente 1 asiento de ajuste de Caja; ningún
+    // segundo asiento de cierre de divergencia, porque no había ninguna divergencia que cerrar.
+    assert.equal(despues - antes, 1);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('regularizarSaldos() cierra una divergencia puramente de doble partida aunque el saldo real ingresado coincida con el libro simple (revisión final de rama, A1-A4)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const service = new CajaService(ctx.dbService);
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+
+    // Divergencia puramente de doble partida: un asiento manual que debita la cuenta automática
+    // de Caja (110505) y acredita Patrimonio, con sincronizarLedgerSimple: false -- la misma
+    // técnica que la prueba "también cierra una divergencia previa..." de arriba, pero en sentido
+    // inverso (ahí la divergencia nacía en el libro simple; acá nace en la doble partida). El
+    // libro simple (`movimientos`) nunca se toca, así que getSaldoCaja() se queda en 0.
+    const cuentaCaja = db.prepare(`SELECT id FROM plan_cuentas WHERE codigo = '110505'`).get();
+    const patrimonio = db.prepare(`SELECT id FROM plan_cuentas WHERE codigo = '3105'`).get();
+    assert.ok(cuentaCaja && patrimonio);
+
+    asientoContableService.crearManual({
+      fecha: '2025-06-01',
+      concepto: 'Saldo en doble partida sin reflejo en libro simple (divergencia simulada)',
+      lineas: [
+        { cuentaContableId: cuentaCaja.id, debito: 75000, credito: 0 },
+        { cuentaContableId: patrimonio.id, debito: 0, credito: 75000 }
+      ],
+      sincronizarLedgerSimple: false
+    });
+
+    assert.equal(service.repository.getSaldoCaja(), 0);
+    const antes = asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja');
+    assert.equal(antes.saldoLedgerSimple, 0);
+    assert.equal(antes.saldoDoblePartida, 75000);
+    assert.equal(antes.conciliado, false);
+
+    // Escenario real de la UI: el formulario de "Ajustar Saldos" precarga saldoRealCaja con
+    // getSaldoCaja() (el saldo del libro simple), así que diferenciaCaja sale en 0 -- el tesorero
+    // no cambió nada en el campo porque el arqueo físico SÍ coincide con el Dashboard. El guard
+    // anterior a este fix disparaba acá, aunque hay una divergencia real de doble partida
+    // esperando ser cerrada.
+    const resultado = service.regularizarSaldos({
+      fecha: '2025-12-31',
+      saldoRealCaja: service.repository.getSaldoCaja(), // == 0, precarga típica de la UI
+      saldoRealBanco: service.repository.getSaldoBanco(),
+      motivo: 'Cierre de divergencia de doble partida detectada por el banner de conciliación'
+    });
+
+    assert.equal(resultado.ajusteCaja, null, 'No hay diferencia de libro simple que ajustar');
+    assert.ok(resultado.cierreDivergenciaCaja, 'Debe haber creado un asiento de cierre de divergencia');
+
+    const despues = asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja');
+    assert.equal(despues.saldoLedgerSimple, 0);
+    assert.equal(despues.saldoDoblePartida, 0, 'La doble partida debe quedar en 0, igual que el libro simple');
+    assert.equal(despues.conciliado, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('regularizarSaldos() reconcilia la familia completa de Caja (General + Menor), no solo la hoja de la cuenta automática (revisión de A1)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const db = ctx.dbService.getDb();
+    const service = new CajaService(ctx.dbService);
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+
+    // Divergencia previa, pero esta vez en la cuenta HERMANA de la automática: un asiento
+    // contra Caja Menor (110510), que desde la migración 029 no es descendiente de Caja General
+    // (110505, la cuenta automática configurada) sino hermana bajo el mismo ancestro '1105'.
+    // sincronizarLedgerSimple: false simula que ese asiento nunca se reflejó en el libro simple
+    // `movimientos` (el mismo patrón de desincronización que este hallazgo corrige, pero esta vez
+    // escondido en la subcuenta hermana en vez de en la cuenta automática misma).
+    const cajaMenor = db.prepare(`SELECT id FROM plan_cuentas WHERE codigo = '110510'`).get();
+    const patrimonio = db.prepare(`SELECT id FROM plan_cuentas WHERE codigo = '3105'`).get();
+    assert.ok(cajaMenor && patrimonio, 'El plan de cuentas sembrado debe traer 110510 y 3105');
+
+    asientoContableService.crearManual({
+      fecha: '2025-06-01',
+      concepto: 'Saldo en Caja Menor sin reflejo en libro simple (divergencia simulada)',
+      lineas: [
+        { cuentaContableId: cajaMenor.id, debito: 40000, credito: 0 },
+        { cuentaContableId: patrimonio.id, debito: 0, credito: 40000 }
+      ],
+      sincronizarLedgerSimple: false
+    });
+
+    // El libro simple sigue en 0 (nunca se tocó `movimientos`); la doble partida de la familia
+    // Caja (110505 + 110510) ya tiene 40.000, todos en Caja Menor.
+    assert.equal(service.repository.getSaldoCaja(), 0);
+    const antesDelAjuste = asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja');
+    assert.equal(antesDelAjuste.saldoDoblePartida, 40000, 'La doble partida de la familia Caja debe incluir el saldo de Caja Menor, no solo el de Caja General');
+
+    const resultado = service.regularizarSaldos({
+      fecha: '2025-12-31',
+      saldoRealCaja: 40000,
+      saldoRealBanco: service.repository.getSaldoBanco(),
+      motivo: 'Arqueo físico de caja'
+    });
+
+    assert.equal(resultado.saldoFinalCaja, 40000);
+    const caja = asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja');
+    assert.equal(caja.saldoLedgerSimple, 40000);
+    assert.equal(caja.saldoDoblePartida, 40000, 'La familia completa (General + Menor) debe terminar en el valor real, no en 80.000 ni en otro valor que ignore a Caja Menor');
+    assert.equal(caja.conciliado, true);
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});

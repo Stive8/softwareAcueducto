@@ -192,12 +192,12 @@ class GastoRepository {
     return this.db.prepare('SELECT * FROM gastos_soportes WHERE id = ?').get(soporteId);
   }
 
-  actualizarMetodoPago(id, metodoPago, motivo) {
+  actualizarMetodoPago(id, metodoPago, motivo, cajaEfectivoId = null) {
     this.db.prepare(`
       UPDATE gastos
-      SET metodo_pago = ?, fecha_correccion_pago = CURRENT_TIMESTAMP, motivo_correccion_pago = ?
+      SET metodo_pago = ?, caja_efectivo_id = ?, fecha_correccion_pago = CURRENT_TIMESTAMP, motivo_correccion_pago = ?
       WHERE id = ?
-    `).run(metodoPago, motivo, id);
+    `).run(metodoPago, cajaEfectivoId, motivo, id);
   }
 
   actualizarDatos(id, { concepto, observaciones }) {

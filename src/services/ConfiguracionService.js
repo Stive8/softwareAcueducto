@@ -70,17 +70,24 @@ class ConfiguracionService {
       cambiosSaldoInicial.push({ clave: 'BANCO', monto: Number(datos.saldo_banco_inicial) });
     }
 
-    for (const clave of CLAVES_EDITABLES) {
-      if (datos[clave] !== undefined) {
-        this.repository.actualizar(clave, datos[clave]);
+    // Atómico: si sincronizarAperturaSaldoInicial() falla más abajo (p. ej. el período contable
+    // de hoy está Cerrado), ninguna clave de configuración debe quedar escrita -- antes de este
+    // fix, la configuración se guardaba igual aunque el asiento de apertura no se pudiera crear,
+    // dejando el libro simple y la doble partida desincronizados sin ningún aviso real del
+    // problema (hallazgo Alto A2 de la auditoría de Contabilidad, 2026-09-11).
+    this.repository.transaccion(() => {
+      for (const clave of CLAVES_EDITABLES) {
+        if (datos[clave] !== undefined) {
+          this.repository.actualizar(clave, datos[clave]);
+        }
       }
-    }
 
-    if (this.asientoContableService) {
-      for (const cambio of cambiosSaldoInicial) {
-        this.asientoContableService.sincronizarAperturaSaldoInicial(cambio.clave, cambio.monto, usuarioId);
+      if (this.asientoContableService) {
+        for (const cambio of cambiosSaldoInicial) {
+          this.asientoContableService.sincronizarAperturaSaldoInicial(cambio.clave, cambio.monto, usuarioId);
+        }
       }
-    }
+    });
   }
 
   // Aparte de actualizar(): logo_path no está en CLAVES_EDITABLES a propósito (ver comentario

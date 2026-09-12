@@ -3,6 +3,8 @@ const assert = require('node:assert/strict');
 const { crearDbTemporal, cerrarDbTemporal } = require('../testUtils/dbTemporal');
 const ConfiguracionService = require('./ConfiguracionService');
 const AsientoContableService = require('./AsientoContableService');
+const PeriodoContableRepository = require('../repositories/PeriodoContableRepository');
+const PeriodoContableService = require('./PeriodoContableService');
 
 test('actualizar() siembra un asiento de apertura cuando se configura un saldo inicial de Caja distinto de cero', () => {
   const ctx = crearDbTemporal();
@@ -65,6 +67,52 @@ test('actualizar() sin asientoContableService inyectado se comporta exactamente 
   try {
     const service = new ConfiguracionService(ctx.dbService); // sin segundo argumento
     assert.doesNotThrow(() => service.actualizar({ saldo_caja_inicial: 999000 }, 1));
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('actualizar() no deja ningún cambio escrito si la sincronización del asiento de apertura falla (atómico)', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+    const service = new ConfiguracionService(ctx.dbService, asientoContableService);
+    const periodoContableService = new PeriodoContableService(new PeriodoContableRepository(ctx.dbService), ctx.dbService);
+
+    const hoyISO = new Date().toISOString().split('T')[0];
+    const periodo = periodoContableService.validarFechaPermitida(hoyISO);
+    periodoContableService.cerrar(periodo.id, 1, 'Cierre de prueba');
+
+    const antes = service.getAll();
+
+    assert.throws(
+      () => service.actualizar({ nombre_asociacion: 'Nuevo Nombre', saldo_caja_inicial: 500000 }, 1),
+      /Cerrado/
+    );
+
+    const despues = service.getAll();
+    assert.deepEqual(despues, antes, 'Ningún valor de configuración debe quedar escrito si el asiento de apertura no se pudo crear');
+    assert.equal(
+      asientoContableService.verificarConciliacionCajaBanco().find(f => f.cuenta === 'Caja').saldoDoblePartida,
+      0
+    );
+  } finally {
+    cerrarDbTemporal(ctx);
+  }
+});
+
+test('sincronizarAperturaSaldoInicial() lanza un error claro si falta la cuenta automática, en vez de fallar en silencio', () => {
+  const ctx = crearDbTemporal();
+  try {
+    const asientoContableService = new AsientoContableService(ctx.dbService);
+    // Ninguna instalación real queda así (las migraciones siempre siembran CAJA/BANCO), pero
+    // reproduce una instalación a medio configurar sin tener que borrar migraciones.
+    ctx.dbService.getDb().prepare(`DELETE FROM cuentas_automaticas WHERE clave = 'CAJA'`).run();
+
+    assert.throws(
+      () => asientoContableService.sincronizarAperturaSaldoInicial('CAJA', 500000, 1),
+      /cuenta automática/i
+    );
   } finally {
     cerrarDbTemporal(ctx);
   }

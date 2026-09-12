@@ -288,6 +288,26 @@ class AsientoContableService {
     });
   }
 
+  // Saldo acumulado en la doble partida (Libro Mayor, incluidas subcuentas) de la cuenta
+  // automática de Caja o Banco -- a diferencia de CajaRepository.getSaldoCaja()/getSaldoBanco()
+  // (el libro simple que alimenta el Dashboard), este es el saldo que muestra el Balance de
+  // Prueba. CajaService.regularizarSaldos() lo necesita por separado del libro simple para poder
+  // cerrar una divergencia previa entre los dos libros, no solo llevar el libro simple al valor
+  // real -- hallazgo Alto A1 de la auditoría de Contabilidad (2026-09-11).
+  //
+  // Usa el mismo ancestro de nivel 3 que verificarConciliacionCajaBanco() (no el id exacto de la
+  // cuenta automática): Caja y Banco tienen subcuentas hermanas (110505 Caja General / 110510
+  // Caja Menor desde la migración 029) que no son descendientes unas de otras, así que resolver
+  // solo el id de la automática y sumar SU subárbol pierde el saldo de la cuenta hermana.
+  getSaldoDoblePartida(claveCuentaAutomatica) {
+    const { caja, banco } = this._getCodigosCajaBanco();
+    const codigo = claveCuentaAutomatica === 'CAJA' ? caja : banco;
+    if (!codigo) return 0;
+    const cuenta = this.planCuentaRepository.findByCodigo(codigo);
+    if (!cuenta) return 0;
+    return this.repository.getSaldoConSubcuentas(cuenta.id);
+  }
+
   // Compara, para Caja y para Banco, el saldo del libro simple (tabla `movimientos`, la fuente
   // del Dashboard y de la pantalla de Caja) contra el saldo de la cuenta de doble partida
   // correspondiente (incluidas todas sus subcuentas). Si difieren, algo quedó desincronizado
@@ -347,13 +367,23 @@ class AsientoContableService {
 
     if (!monto || monto <= 0) return null;
 
+    const nombreCuenta = claveCuentaAutomatica === 'CAJA' ? 'Caja' : 'Bancos';
+
+    // Antes devolvían null en silencio: Configuración guardaba el monto sin avisar que el
+    // asiento de apertura no se pudo crear, dejando el libro simple y la doble partida
+    // desincronizados sin ningún error visible -- hallazgo Alto A2 de la auditoría de
+    // Contabilidad (2026-09-11). Ahora con actualizar() atómico (ver ConfiguracionService.js),
+    // este error revierte también las claves de configuración que se iban a guardar junto con el
+    // saldo inicial.
     const cuentaId = this.cuentaAutomaticaRepository.getCuentaIdByClave(claveCuentaAutomatica);
-    if (!cuentaId) return null; // cuenta automática no configurada; nada que sincronizar todavía
+    if (!cuentaId) {
+      throw new Error(`No se encontró la cuenta automática de ${nombreCuenta}; configúrela en Contabilidad > Cuentas Automáticas antes de fijar el saldo inicial.`);
+    }
 
     const patrimonio = this.planCuentaRepository.findByCodigo('3105');
-    if (!patrimonio) return null; // no debería pasar: '3105' se siembra en la migración 006
-
-    const nombreCuenta = claveCuentaAutomatica === 'CAJA' ? 'Caja' : 'Bancos';
+    if (!patrimonio) {
+      throw new Error('No se encontró la cuenta de Patrimonio (3105) en el plan de cuentas; no se puede registrar el asiento de apertura.');
+    }
 
     return this.crear({
       fecha: new Date().toLocaleDateString('en-CA'),
