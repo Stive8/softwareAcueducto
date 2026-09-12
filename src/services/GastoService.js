@@ -52,33 +52,9 @@ class GastoService {
     gastoData.tipoOperacion = gastoData.tipoOperacion || 'Compra directa';
     if (!TIPOS_OPERACION_VALIDOS.includes(gastoData.tipoOperacion)) throw new Error('Tipo de operación inválido');
 
-    // Resuelve de cuál subcuenta de efectivo sale el gasto. 'Menor' solo se respeta si Caja
-    // Menor está activa; en cualquier otro caso (incluyendo pago por Transferencia) se usa
-    // Caja General, igual que el comportamiento previo a esta funcionalidad.
-    let cajaEfectivoId = null;
-    if (gastoData.metodoPago === 'Efectivo') {
-      const config = this.configuracionRepository.getAll();
-      const usarCajaMenor = config.caja_menor_activa === 'true' && gastoData.cajaEfectivo === 'Menor';
-      const codigoCaja = usarCajaMenor ? '110510' : '110505';
-      const cuentaCaja = this.planCuentaRepository.findByCodigo(codigoCaja);
-      if (!cuentaCaja) throw new Error(`No se encontró la cuenta contable ${codigoCaja}; verifique el plan de cuentas`);
-      cajaEfectivoId = cuentaCaja.id;
-
-      // Un gasto en efectivo no puede dejar la caja física en negativo: eso sería un faltante
-      // de efectivo que el sistema debe advertir en el momento de la captura, no descubrirse
-      // después en un arqueo. Compara contra el saldo contable de esa subcuenta específica
-      // (Caja General o Caja Menor según corresponda), con el mismo método que ya usa
-      // CajaMenorService.getEstado() para calcular el monto de reembolso — hallazgo Alto A-7
-      // de la auditoría de Contabilidad (2026-07-03).
-      const saldoDisponible = this.asientoContableService.getLibroMayor(cajaEfectivoId).saldoFinal;
-      if (gastoData.valor > saldoDisponible) {
-        throw new Error(
-          `Saldo insuficiente en ${usarCajaMenor ? 'Caja Menor' : 'Caja General'}: disponible $${saldoDisponible.toLocaleString('es-CO')}, ` +
-          `se requieren $${Number(gastoData.valor).toLocaleString('es-CO')}.`
-        );
-      }
-    }
-    gastoData.cajaEfectivoId = cajaEfectivoId;
+    gastoData.cajaEfectivoId = gastoData.metodoPago === 'Efectivo'
+      ? this._resolverCajaEfectivoId(gastoData.valor, gastoData.cajaEfectivo)
+      : null;
 
     // Valida que el período contable de la fecha del gasto esté Abierto.
     // Si no existe aún, se crea automáticamente como Abierto (primer movimiento del mes).
@@ -102,6 +78,31 @@ class GastoService {
 
       return gastoId;
     });
+  }
+
+  // Resuelve de cuál subcuenta de efectivo sale/entra un gasto ('Menor' solo se respeta si Caja
+  // Menor está activa; en cualquier otro caso se usa Caja General), y valida que no deje la caja
+  // física en negativo. Compartido por create() y corregirMetodoPago() (antes duplicado solo en
+  // create(), lo que dejó a corregirMetodoPago() sin esta validación -- hallazgo Alto A4 de la
+  // auditoría de Contabilidad, 2026-09-11).
+  _resolverCajaEfectivoId(valor, cajaEfectivo) {
+    const config = this.configuracionRepository.getAll();
+    const usarCajaMenor = config.caja_menor_activa === 'true' && cajaEfectivo === 'Menor';
+    const codigoCaja = usarCajaMenor ? '110510' : '110505';
+    const cuentaCaja = this.planCuentaRepository.findByCodigo(codigoCaja);
+    if (!cuentaCaja) throw new Error(`No se encontró la cuenta contable ${codigoCaja}; verifique el plan de cuentas`);
+
+    // Un gasto en efectivo no puede dejar la caja física en negativo: eso sería un faltante de
+    // efectivo que el sistema debe advertir en el momento de la captura, no descubrirse después
+    // en un arqueo -- hallazgo Alto A-7 de la auditoría de Contabilidad (2026-07-03).
+    const saldoDisponible = this.asientoContableService.getLibroMayor(cuentaCaja.id).saldoFinal;
+    if (valor > saldoDisponible) {
+      throw new Error(
+        `Saldo insuficiente en ${usarCajaMenor ? 'Caja Menor' : 'Caja General'}: disponible $${saldoDisponible.toLocaleString('es-CO')}, ` +
+        `se requieren $${Number(valor).toLocaleString('es-CO')}.`
+      );
+    }
+    return cuentaCaja.id;
   }
 
   // Nunca se elimina un gasto: se anula y se registra un movimiento (y un asiento de reversión)
@@ -132,8 +133,16 @@ class GastoService {
 
   // Corrige a qué cuenta (Caja/Banco) quedó asociado el dinero de un gasto, sin anularlo: el
   // número, fecha, valor y tercero quedan intactos. Revierte el asiento activo y genera uno
-  // nuevo (generarDesdeGasto relee metodo_pago ya actualizado), y crea su propia contrapartida
-  // en el ledger simple `movimientos` porque revertirPorReferencia no lo hace por sí sola.
+  // nuevo (generarDesdeGasto relee metodo_pago/caja_efectivo_id ya actualizados), y crea su
+  // propia contrapartida en el ledger simple `movimientos` porque revertirPorReferencia no lo
+  // hace por sí sola.
+  //
+  // Al corregir hacia Efectivo, caja_efectivo_id debe resolverse igual que en create() -- sin
+  // esto, GASTO_EFECTIVO (que lo usa como cuenta_contexto_campo) no podía generar el asiento y la
+  // corrección fallaba siempre con un error incomprensible -- hallazgo Alto A4 de la auditoría de
+  // Contabilidad (2026-09-11). Siempre resuelve contra Caja General (no ofrece elegir Caja
+  // Menor): mismo comportamiento por defecto que ya tenía create() antes de que existiera Caja
+  // Menor.
   corregirMetodoPago(id, nuevoMetodoPago, motivo, usuarioId = null) {
     const gasto = this.repository.findById(id);
     if (!gasto) throw new Error('Gasto no encontrado');
@@ -141,6 +150,10 @@ class GastoService {
     if (!METODOS_PAGO_VALIDOS.includes(nuevoMetodoPago)) throw new Error('Método de pago inválido');
     if (nuevoMetodoPago === gasto.metodo_pago) throw new Error('El método de pago indicado es igual al actual');
     if (!motivo || !motivo.trim()) throw new Error('Debe indicar el motivo de la corrección');
+
+    const cajaEfectivoId = nuevoMetodoPago === 'Efectivo'
+      ? this._resolverCajaEfectivoId(gasto.valor)
+      : null;
 
     return this.repository.transaccion(() => {
       this.repository.crearMovimiento({
@@ -165,7 +178,7 @@ class GastoService {
         observaciones: motivo
       });
 
-      this.repository.actualizarMetodoPago(id, nuevoMetodoPago, motivo);
+      this.repository.actualizarMetodoPago(id, nuevoMetodoPago, motivo, cajaEfectivoId);
 
       this.asientoContableService.revertirPorReferencia('Gasto', id, `Corrección método de pago: ${motivo}`, usuarioId);
       this.asientoContableService.generarDesdeGasto(id, usuarioId);
