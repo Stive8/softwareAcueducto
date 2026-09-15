@@ -496,6 +496,26 @@ const App = {
     });
   },
 
+  // Fuerza mayúsculas en todo el texto libre del sistema (nombres, direcciones, observaciones,
+  // motivos, etc.) para que un mismo dato no quede guardado de formas distintas solo por cómo lo
+  // escribió cada persona. Se activa una sola vez para toda la app (ver DOMContentLoaded) en vez
+  // de cablearlo campo por campo. Los campos que NO deben forzarse (login, búsquedas, JSON
+  // técnico) llevan el atributo data-no-mayusculas.
+  aplicarMayusculasGlobal() {
+    document.addEventListener('input', (e) => {
+      const el = e.target;
+      const esTexto = el.tagName === 'TEXTAREA' || (el.tagName === 'INPUT' && el.type === 'text');
+      if (!esTexto) return;
+      // Las cajas de búsqueda/filtro (listados, combobox) no son datos que se guardan.
+      if (el.hasAttribute('data-no-mayusculas') || el.classList.contains('search-box') || el.classList.contains('combobox-input')) return;
+
+      const inicio = el.selectionStart;
+      const fin = el.selectionEnd;
+      el.value = el.value.toUpperCase();
+      if (inicio !== null) el.setSelectionRange(inicio, fin);
+    });
+  },
+
   // Pantalla previa al login, solo cuando la base de datos local está completamente vacía (un
   // PC nuevo): permite traer los datos desde Google Drive antes de que exista ningún usuario
   // local con el que iniciar sesión (ver cloudBackup en main.js, canales sin sesión).
@@ -548,6 +568,8 @@ const App = {
 // datos desde la nube antes que nada; si no, siempre se exige login, sin sesión persistida entre
 // ejecuciones.
 document.addEventListener('DOMContentLoaded', async () => {
+  App.aplicarMayusculasGlobal();
+
   try {
     const response = await window.api.devtools.tieneDatosOperativos();
     if (response.success && !response.data) {

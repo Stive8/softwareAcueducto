@@ -8,7 +8,7 @@ function obtenerCategoriaId(dbService) {
 }
 
 function datosBase(categoriaId, codigo) {
-  return { codigo, direccion: 'Vereda Test', categoria_id: categoriaId };
+  return { codigo, direccion: 'Vereda El Salitre', categoria_id: categoriaId };
 }
 
 test('create() permite una cuenta sin ninguna coordenada', () => {
@@ -109,7 +109,7 @@ test('update() valida las coordenadas igual que create()', () => {
     const id = service.create(datosBase(categoriaId, 'C-106'));
 
     assert.throws(
-      () => service.update(id, { codigo: 'C-106', direccion: 'Vereda Test', lat_vivienda: 4.6 }),
+      () => service.update(id, { codigo: 'C-106', direccion: 'Vereda El Salitre', lat_vivienda: 4.6 }),
       /tanto la latitud como la longitud/i
     );
   } finally {

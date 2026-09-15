@@ -1,4 +1,9 @@
 // Módulo de Cuentas
+
+// Zonas de servicio del acueducto: son las únicas 3 veredas cubiertas, así que la Dirección se
+// elige de esta lista fija en vez de texto libre (evita variantes ambiguas del mismo valor).
+const VEREDAS = ['Vereda El Salitre', 'Vereda El Cural', 'Vereda El Rodeo'];
+
 const Cuentas = {
   currentPage: 1,
   limit: 10,
@@ -546,7 +551,11 @@ const Cuentas = {
 
         <div class="form-group">
           <label for="direccion">Dirección <span style="color: #ef4444;">*</span></label>
-          <input type="text" id="direccion" name="direccion" value="${cuenta ? cuenta.direccion : ''}" required>
+          <select id="direccion" name="direccion" required>
+            ${!cuenta ? '<option value="">Seleccione una vereda...</option>' : ''}
+            ${VEREDAS.map(v => `<option value="${v}" ${cuenta && cuenta.direccion === v ? 'selected' : ''}>${v}</option>`).join('')}
+            ${cuenta && !VEREDAS.includes(cuenta.direccion) ? `<option value="${cuenta.direccion}" selected>${cuenta.direccion} (valor antiguo, seleccione la vereda correcta)</option>` : ''}
+          </select>
         </div>
 
         <div class="form-group">

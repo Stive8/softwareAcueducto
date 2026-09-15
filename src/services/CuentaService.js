@@ -1,6 +1,9 @@
 const CuentaRepository = require('../repositories/CuentaRepository');
 const DashboardRepository = require('../repositories/DashboardRepository');
 
+// Únicas 3 veredas cubiertas por el acueducto (ver formulario de Cuentas, campo Dirección).
+const VEREDAS_VALIDAS = ['Vereda El Salitre', 'Vereda El Cural', 'Vereda El Rodeo'];
+
 // Rango aproximado de Colombia: existe solo para atrapar el error de digitación más común
 // (invertir latitud y longitud al copiar desde un mapa), no para validar un polígono exacto.
 const COLOMBIA_LAT_MIN = -4.3;
@@ -81,6 +84,10 @@ class CuentaService {
       throw new Error('La dirección es obligatoria');
     }
 
+    if (!VEREDAS_VALIDAS.includes(cuentaData.direccion)) {
+      throw new Error('La dirección debe ser una de las veredas: ' + VEREDAS_VALIDAS.join(', '));
+    }
+
     if (!cuentaData.categoria_id) {
       throw new Error('La categoría es obligatoria');
     }
@@ -107,6 +114,14 @@ class CuentaService {
     const cuenta = this.repository.findById(id);
     if (!cuenta) {
       throw new Error('Cuenta no encontrada');
+    }
+
+    // Se exige una de las 3 veredas salvo que el valor no cambie: algunas cuentas antiguas
+    // (importadas de talonarios físicos) quedaron con un valor de dirección que no es ninguna
+    // vereda válida, y no debe bloquearse la edición del resto de sus datos hasta que alguien
+    // confirme en campo a cuál vereda pertenecen.
+    if (cuentaData.direccion !== cuenta.direccion && !VEREDAS_VALIDAS.includes(cuentaData.direccion)) {
+      throw new Error('La dirección debe ser una de las veredas: ' + VEREDAS_VALIDAS.join(', '));
     }
 
     if (cuenta.codigo !== cuentaData.codigo) {

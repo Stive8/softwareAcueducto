@@ -658,7 +658,7 @@ const Configuracion = {
       <form id="nuevoUsuarioForm">
         <div class="form-group">
           <label for="nuevo_usuario">Usuario <span style="color: #ef4444;">*</span></label>
-          <input type="text" id="nuevo_usuario" name="nuevo_usuario" required>
+          <input type="text" id="nuevo_usuario" name="nuevo_usuario" required data-no-mayusculas>
         </div>
         <div class="form-group">
           <label for="nuevo_nombre_completo">Nombre Completo <span style="color: #ef4444;">*</span></label>

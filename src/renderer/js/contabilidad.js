@@ -1350,7 +1350,7 @@ const Contabilidad = {
           </select>
         ` : ''}
         ${reporte.filtroTercero ? `
-          <input type="text" id="tercero_${idSufijo}" list="tercerosSugeridos" placeholder="Identificación o nombre del tercero (opcional)" style="width: 100%; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 6px; font-size: 12px;">
+          <input type="text" id="tercero_${idSufijo}" list="tercerosSugeridos" placeholder="Identificación o nombre del tercero (opcional)" style="width: 100%; padding: 6px 10px; border: 1px solid var(--gray-300); border-radius: 6px; font-size: 12px;" data-no-mayusculas>
           <datalist id="tercerosSugeridos"></datalist>
         ` : ''}
         ${tieneFiltrosAvanzados ? `
@@ -1624,7 +1624,7 @@ const Contabilidad = {
             Guardar crea la <strong>versión ${p.version + 1}</strong>; esta (v${p.version}) queda cerrada
             y sigue disponible para reconstruir asientos históricos anteriores a hoy.
           </p>
-          <textarea id="plantillaLineasJson" class="form-control" rows="14" style="font-family:monospace;font-size:0.8rem;width:100%;">${JSON.stringify(p.lineas, null, 2)}</textarea>
+          <textarea id="plantillaLineasJson" class="form-control" rows="14" style="font-family:monospace;font-size:0.8rem;width:100%;" data-no-mayusculas>${JSON.stringify(p.lineas, null, 2)}</textarea>
           <div id="plantillaEditError" style="margin-top:8px;"></div>
           <div style="text-align:right;margin-top:8px;">
             <button class="btn btn-primary" onclick="Contabilidad.guardarLineasPlantilla(${p.id})">Guardar como nueva versión</button>
@@ -1705,7 +1705,7 @@ const Contabilidad = {
       </p>
       <div class="form-group">
         <label for="simCtxJson">Contexto (JSON)</label>
-        <textarea id="simCtxJson" class="form-control" rows="8" style="font-family:monospace;font-size:0.8rem;">${ejemploCtx}</textarea>
+        <textarea id="simCtxJson" class="form-control" rows="8" style="font-family:monospace;font-size:0.8rem;" data-no-mayusculas>${ejemploCtx}</textarea>
       </div>
       <div style="text-align:right;margin-bottom:16px;">
         <button class="btn btn-primary" onclick="Contabilidad.ejecutarSimulacion(${plantillaId})">Ejecutar simulación</button>
@@ -1860,7 +1860,7 @@ const Contabilidad = {
           </div>
           <div class="form-group">
             <label>Campo base <small style="color:#64748b;">(campo del contexto)</small></label>
-            <input type="text" id="impBaseCampo" class="form-control" value="${imp?.base_campo || 'valor'}">
+            <input type="text" id="impBaseCampo" class="form-control" value="${imp?.base_campo || 'valor'}" data-no-mayusculas>
           </div>
         </div>
         <div style="display:grid;grid-template-columns:2fr 1fr;gap:12px;">
