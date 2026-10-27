@@ -84,7 +84,7 @@ npm install
 npm start
 ```
 
-En desarrollo la base de datos vive en `data/acueducto.db` dentro del proyecto. Si el archivo no existe, se crea sola en el primer arranque (vacía, solo con las categorías base y el usuario `admin`/`admin123`) — pero **en este repositorio ya existe y contiene datos reales**, ver advertencia abajo. `resetear_db.bat` o borrar el archivo manualmente solo tiene sentido en una base vacía de prueba.
+En desarrollo la base de datos vive en `data/acueducto.db` dentro del proyecto. Si el archivo no existe, se crea sola en el primer arranque — pero **en este repositorio ya existe y contiene datos reales**, ver advertencia abajo. `resetear_db.bat` o borrar el archivo manualmente solo tiene sentido en una base vacía de prueba.
 
 No existe ningún botón en la interfaz para cargar o borrar datos de ejemplo/prueba: toda la información se registra igual sea de prueba o real, y nada se elimina de forma permanente (ver "Nada se elimina" arriba).
 
